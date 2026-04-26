@@ -22,7 +22,15 @@ class StaticVisualizer:
         self.DirEdges = DirEdges
         self.title = title
 
-    def draw(self, mode: MapMode = "light_nolabels") -> Image.Image:
+    def draw(
+        self,
+        mode: MapMode = "light_nolabels",
+        labels_on: bool = False,
+        node_color: str = "#6fbaf0",
+        node_radius: float = 40,
+        edge_color: str = "#d1d1d1",
+        edge_thickness: float = 2,
+    ) -> Image.Image:
         if not self.Nodes:
             raise ValueError("Nodes needed to give visualizer context for basemap.")
 
@@ -30,20 +38,36 @@ class StaticVisualizer:
         lons = [node.lon for node in self.Nodes]
 
         fig, ax = _build_figure(lats, lons)
-        
-        _draw_nodes(ax, self.Nodes)
-        _draw_edges(ax, self.DirEdges)
-        
+
         _add_basemap_or_blank(ax, mode)
+        _draw_nodes(ax, self.Nodes, node_color, node_radius, labels_on)
+        _draw_edges(ax, self.DirEdges, edge_color, edge_thickness, labels_on)
 
         return _render_to_image(fig)
 
-    def display(self, mode: MapMode = "light_nolabels") -> None:
-        image = self.draw(mode)
+    def display(
+        self,
+        mode: MapMode = "light_nolabels",
+        labels_on: bool = False,
+        node_color: str = "#6fbaf0",
+        node_radius: float = 40,
+        edge_color: str = "#d1d1d1",
+        edge_thickness: float = 2,
+    ) -> None:
+        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness)
         _open_window(image, self.title or "Static Visualizer")
-        
-    def export(self, filename: str, mode: MapMode = "light_nolabels") -> None:
-        image = self.draw(mode)
+
+    def export(
+        self,
+        filename: str,
+        mode: MapMode = "light_nolabels",
+        labels_on: bool = False,
+        node_color: str = "#6fbaf0",
+        node_radius: float = 40,
+        edge_color: str = "#d1d1d1",
+        edge_thickness: float = 2,
+    ) -> None:
+        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness)
         image.save(filename)
 
 
@@ -103,23 +127,24 @@ def _build_figure(lats: list[float], lons: list[float]) -> tuple[plt.Figure, plt
     return fig, ax
 
 
-def _draw_nodes(ax: plt.Axes, nodes: list[Node]) -> None:
+def _draw_nodes(ax: plt.Axes, nodes: list[Node], node_color: str, node_radius: float, labels_on: bool) -> None:
     for node in nodes:
-        ax.scatter(node.lon, node.lat, s=40, c="#1f77b4", zorder=3)
-        ax.annotate(node.id, (node.lon, node.lat), textcoords="offset points", xytext=(5, 5), fontsize=8)
+        ax.scatter(node.lon, node.lat, s=node_radius, c=node_color, zorder=3)
+        if labels_on:
+            ax.annotate(node.id, (node.lon, node.lat), textcoords="offset points", xytext=(5, 5), fontsize=8)
 
 
-def _draw_edges(ax: plt.Axes, edges: list[DirEdge]) -> None:
+def _draw_edges(ax: plt.Axes, edges: list[DirEdge], edge_color: str, edge_thickness: float, labels_on: bool) -> None:
     for edge in edges:
-        color = "#d62728" if not edge.is_drivable else "#2ca02c"
         ax.plot(
             [edge.start.lon, edge.end.lon],
             [edge.start.lat, edge.end.lat],
-            color=color, linewidth=2, zorder=2,
+            color=edge_color, linewidth=edge_thickness, zorder=2,
         )
-        mid_lon = (edge.start.lon + edge.end.lon) / 2
-        mid_lat = (edge.start.lat + edge.end.lat) / 2
-        ax.annotate(edge.id, (mid_lon, mid_lat), textcoords="offset points", xytext=(0, 6), fontsize=7)
+        if labels_on:
+            mid_lon = (edge.start.lon + edge.end.lon) / 2
+            mid_lat = (edge.start.lat + edge.end.lat) / 2
+            ax.annotate(edge.id, (mid_lon, mid_lat), textcoords="offset points", xytext=(0, 6), fontsize=7)
 
 
 def _add_basemap_or_blank(ax: plt.Axes, mode: MapMode) -> None:
@@ -203,7 +228,7 @@ if __name__ == "__main__":
     edge = DirEdge(a, b, True)
     visualizer = StaticVisualizer([a, b], [edge], title="Test Map")
 
-    visualizer.display("light_nolabels")
+    visualizer.display(labels_on=False)
     
     nodes = [
         Node(120.980, 14.598),
