@@ -1,0 +1,110 @@
+# -------------------------------------------------
+# OS junk
+# -------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# -------------------------------------------------
+# env
+# -------------------------------------------------
+
+Thesis_venv/
+
+# -------------------------------------------------
+# Editors / IDEs
+# -------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# -------------------------------------------------
+# Python bytecode / caches
+# -------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+coverage/
+.coverage
+htmlcov/
+
+# -------------------------------------------------
+# Virtual environments
+# -------------------------------------------------
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# -------------------------------------------------
+# Jupyter
+# -------------------------------------------------
+.ipynb_checkpoints/
+
+# -------------------------------------------------
+# Packaging / build
+# -------------------------------------------------
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# -------------------------------------------------
+# Logs
+# -------------------------------------------------
+*.log
+logs/
+
+# -------------------------------------------------
+# Secrets / local configs
+# -------------------------------------------------
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.crt
+
+# -------------------------------------------------
+# OSMnx / Overpass cache (your setup)
+# -------------------------------------------------
+cache/
+data/raw/osm_cache/
+data/raw/osm/
+*.osm.pbf
+
+<<<<<<< HEAD
+=======
+# -------------------------------------------------
+# Generated thesis outputs (regeneratable)
+# -------------------------------------------------
+data/processed/
+data/route_systems
+results/runs/
+results/figures/
+
+>>>>>>> 089228c (feat: passenger spawning/despawning via weighted spatial distribution)
+# If you have large exports
+*.graphml
+*.gpkg
+*.parquet
+
+# -------------------------------------------------
+# Keep empty folders / docs placeholders (optional)
+# -------------------------------------------------
+!data/processed/.gitkeep
+!results/runs/.gitkeep
+!results/figures/.gitkeep
+!results/figures/README.md
+
+segments_for_references/
+results/B4A_jeepney_rl/ppo_training/route_snapshots
