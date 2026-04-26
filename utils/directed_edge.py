@@ -64,6 +64,7 @@ def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge]) -> None:
             # which only connects if they are connected
     return None
 
+"""
 ### SANITY CHECK ###
 
 if __name__ == "__main__":
@@ -96,3 +97,4 @@ if __name__ == "__main__":
     for edge in DirEdgeArr:
         print(f"  {edge.id}: {edge.next_edges}")
         
+"""
