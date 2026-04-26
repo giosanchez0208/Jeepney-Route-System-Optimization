@@ -10,4 +10,4 @@ class Node:
 		self.layer: Optional[int] = None
 		self.id: str = f"N{_NODE_ID_COUNTER:05d}"
 		_NODE_ID_COUNTER += 1
-		self.isDrivable: bool = True
+		self.is_drivable: bool = True
