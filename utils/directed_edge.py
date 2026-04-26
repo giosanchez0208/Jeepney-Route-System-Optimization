@@ -21,18 +21,20 @@ class DirEdge:
         self.next_edges = next_edges if next_edges is not None else []
 
     def getLength(self) -> float:
-        lat1, lon1 = radians(self.start.lat), radians(self.start.lon)
-        lat2, lon2 = radians(self.end.lat), radians(self.end.lon)
-
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-        c = 2 * asin(sqrt(a))
-        return 6371000.0 * c
+        return _getDistance(self.start, self.end)
 
     def isConnectedTo(self, other: DirEdge) -> bool:
         return self.end is other.start
 
+def _getDistance(node1: Node, node2: Node) -> float:
+    lat1, lon1 = radians(node1.lat), radians(node1.lon)
+    lat2, lon2 = radians(node2.lat), radians(node2.lon)
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    return 6371000.0 * c
 
 def _connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1) -> bool:
     if dir_edge_s.isConnectedTo(dir_edge_e):
