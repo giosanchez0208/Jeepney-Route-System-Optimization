@@ -1,0 +1,154 @@
+from collections import defaultdict
+from heapq import heappop, heappush
+from itertools import count
+
+import networkx as nx
+import osmnx as ox
+
+from directed_edge import DirEdge, _getDistance, _stitch
+from node import Node
+
+
+class CityGraph:
+    def __init__(self, query: str) -> None:
+        self.query = query
+        self.nodes: list[Node] = []
+        self.graph: list[DirEdge] = []
+
+        self._road_graph: nx.MultiDiGraph = self._load_road_graph(query)
+        self._node_lookup: dict[int, Node] = {}
+        self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
+
+        self._build_nodes()
+        self._build_graph()
+        self.stitch_graph()
+
+    def stitch_graph(self) -> None:
+        for edge in self.graph:
+            edge.next_edges = []
+
+        _stitch(self.graph, self.graph)
+        self._build_outgoing_edges()
+
+    def info(self) -> str:
+        return f"Nodes: {len(self.nodes)}\nEdges: {len(self.graph)}"
+
+    def findShortestPath(self, start: Node, end: Node) -> list[DirEdge]:
+        if start not in self.nodes:
+            raise ValueError("start must belong to this CityGraph.")
+        if end not in self.nodes:
+            raise ValueError("end must belong to this CityGraph.")
+        if start is end:
+            return []
+
+        frontier: list[tuple[float, float, int, Node]] = []
+        sequence = count()
+        heappush(frontier, (_getDistance(start, end), 0.0, next(sequence), start))
+
+        came_from: dict[Node, tuple[Node, DirEdge]] = {}
+        cost_so_far: dict[Node, float] = {start: 0.0}
+
+        while frontier:
+            _, current_cost, _, current = heappop(frontier)
+
+            if current is end:
+                return self._reconstruct_path(came_from, start, end)
+
+            if current_cost > cost_so_far.get(current, float("inf")):
+                continue
+
+            for edge in self._outgoing_edges.get(current, []):
+                if not edge.is_drivable:
+                    continue
+
+                next_node = edge.end
+                new_cost = current_cost + _getDistance(edge.start, edge.end)
+                if new_cost >= cost_so_far.get(next_node, float("inf")):
+                    continue
+
+                cost_so_far[next_node] = new_cost
+                came_from[next_node] = (current, edge)
+                priority = new_cost + _getDistance(next_node, end)
+                heappush(frontier, (priority, new_cost, next(sequence), next_node))
+
+        raise ValueError("No path found between the provided nodes.")
+
+    def _build_nodes(self) -> None:
+        for osm_id, data in self._road_graph.nodes(data=True):
+            lon = data.get("x")
+            lat = data.get("y")
+            if lon is None or lat is None:
+                continue
+
+            node = Node(lon, lat)
+            self._node_lookup[osm_id] = node
+            self.nodes.append(node)
+
+    def _build_graph(self) -> None:
+        seen_pairs: set[tuple[int, int]] = set()
+
+        for start_osm_id, end_osm_id, _ in self._road_graph.edges(keys=True):
+            if start_osm_id not in self._node_lookup or end_osm_id not in self._node_lookup:
+                continue
+
+            pair = tuple(sorted((start_osm_id, end_osm_id)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+
+            start = self._node_lookup[start_osm_id]
+            end = self._node_lookup[end_osm_id]
+            self.graph.append(DirEdge(start, end, True))
+            self.graph.append(DirEdge(end, start, True))
+
+    def _load_road_graph(self, query: str) -> nx.MultiDiGraph:
+        try:
+            return ox.graph_from_place(query, network_type="drive", simplify=True)
+        except ValueError as exc:
+            if "Found no graph nodes within the requested polygon." not in str(exc):
+                raise
+
+            place = ox.geocode_to_gdf(query)
+            geometry = place.iloc[0].geometry
+            centroid = geometry.centroid
+            bounds = geometry.bounds
+
+            lat_span = max(bounds[3] - bounds[1], 0.0)
+            lon_span = max(bounds[2] - bounds[0], 0.0)
+            dist = max(5000, int(max(lat_span, lon_span) * 111000 * 1.25))
+
+            return ox.graph_from_point((centroid.y, centroid.x), dist=dist, network_type="drive", simplify=True)
+
+    def _build_outgoing_edges(self) -> None:
+        self._outgoing_edges = defaultdict(list)
+        for edge in self.graph:
+            self._outgoing_edges[edge.start].append(edge)
+
+    def _reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge]:
+        path: list[DirEdge] = []
+        current = end
+
+        while current is not start:
+            previous, edge = came_from[current]
+            path.append(edge)
+            current = previous
+
+        path.reverse()
+        return path
+
+
+if __name__ == "__main__":
+    cg = CityGraph("Iligan City, Lanao del Norte")
+
+    print(cg.info())
+
+    from visualizer import StaticVisualizer
+
+    visualizer = StaticVisualizer(cg.nodes, cg.graph, title="CityGraph Sanity Check")
+    visualizer.display(
+        "light_nolabels",
+        labels_on=False,
+        node_radius=1,
+        edge_color="#d62728",
+        edge_thickness=1,
+    )
