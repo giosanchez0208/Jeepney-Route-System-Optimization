@@ -150,7 +150,7 @@ class CityGraph:
         path.reverse()
         return path
 
-
+"""
 if __name__ == "__main__":
     cg = CityGraph("Iligan City, Lanao del Norte, Philippines")
 
@@ -172,5 +172,5 @@ if __name__ == "__main__":
     )
     
     vis.display()
-    vis.export("results/test/city_graph_test.png")
-    
+    vis.export("results/test/city_graph_test.png", scale_up=3)
+"""
