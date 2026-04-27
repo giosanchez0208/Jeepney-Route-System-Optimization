@@ -1,6 +1,7 @@
 import io
 import tkinter as tk
 from functools import lru_cache
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -35,14 +36,13 @@ _PROVIDERS = {
 
 
 class StaticVisualizer:
-    def __init__(self, Nodes: list[Node], DirEdges: list[DirEdge], title: Optional[str] = None) -> None:
-        self.Nodes = Nodes
-        self.DirEdges = DirEdges
-        self.title = title
-        self.query: Optional[str] = None
-
-    def draw(
+    def __init__(
         self,
+        Nodes: list[Node],
+        DirEdges: list[DirEdge],
+        title: Optional[str] = None,
+        *,
+        query: Optional[str] = None,
         mode: MapMode = "light_nolabels",
         labels_on: bool = False,
         node_color: str = "#6fbaf0",
@@ -50,9 +50,39 @@ class StaticVisualizer:
         edge_color: str = "#d1d1d1",
         edge_thickness: float = 2,
         landmarks: Optional[str] = None,
+    ) -> None:
+        self.Nodes = Nodes
+        self.DirEdges = DirEdges
+        self.title = title
+        self.query = query
+        self.mode = mode
+        self.labels_on = labels_on
+        self.node_color = node_color
+        self.node_radius = node_radius
+        self.edge_color = edge_color
+        self.edge_thickness = edge_thickness
+        self.landmarks = landmarks
+
+    def draw(
+        self,
+        mode: Optional[MapMode] = None,
+        labels_on: Optional[bool] = None,
+        node_color: Optional[str] = None,
+        node_radius: Optional[float] = None,
+        edge_color: Optional[str] = None,
+        edge_thickness: Optional[float] = None,
+        landmarks: Optional[str] = None,
     ) -> Image.Image:
         if not self.Nodes:
             raise ValueError("Nodes needed to give visualizer context for basemap.")
+
+        mode = self.mode if mode is None else mode
+        labels_on = self.labels_on if labels_on is None else labels_on
+        node_color = self.node_color if node_color is None else node_color
+        node_radius = self.node_radius if node_radius is None else node_radius
+        edge_color = self.edge_color if edge_color is None else edge_color
+        edge_thickness = self.edge_thickness if edge_thickness is None else edge_thickness
+        landmarks = self.landmarks if landmarks is None else landmarks
 
         lats = [node.lat for node in self.Nodes]
         lons = [node.lon for node in self.Nodes]
@@ -73,12 +103,12 @@ class StaticVisualizer:
 
     def display(
         self,
-        mode: MapMode = "light_nolabels",
-        labels_on: bool = False,
-        node_color: str = "#6fbaf0",
-        node_radius: float = 40,
-        edge_color: str = "#d1d1d1",
-        edge_thickness: float = 2,
+        mode: Optional[MapMode] = None,
+        labels_on: Optional[bool] = None,
+        node_color: Optional[str] = None,
+        node_radius: Optional[float] = None,
+        edge_color: Optional[str] = None,
+        edge_thickness: Optional[float] = None,
         landmarks: Optional[str] = None,
     ) -> None:
         image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
@@ -87,14 +117,15 @@ class StaticVisualizer:
     def export(
         self,
         filename: str,
-        mode: MapMode = "light_nolabels",
-        labels_on: bool = False,
-        node_color: str = "#6fbaf0",
-        node_radius: float = 40,
-        edge_color: str = "#d1d1d1",
-        edge_thickness: float = 2,
+        mode: Optional[MapMode] = None,
+        labels_on: Optional[bool] = None,
+        node_color: Optional[str] = None,
+        node_radius: Optional[float] = None,
+        edge_color: Optional[str] = None,
+        edge_thickness: Optional[float] = None,
         landmarks: Optional[str] = None,
     ) -> None:
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
         image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
         image.save(filename)
 
@@ -122,6 +153,7 @@ class DynamicVisualizer:
 
     def export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2) -> None:
         duration = max(1, round(1000 / fps))
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
         image = self.draw(mode, fps)
         image.save(filename, format="GIF", save_all=True, append_images=self.frames[1:], duration=duration, loop=0)
 

@@ -158,13 +158,19 @@ if __name__ == "__main__":
 
     from visualizer import StaticVisualizer
 
-    visualizer = StaticVisualizer(cg.nodes, cg.graph, title="CityGraph Sanity Check")
-    visualizer.query = cg.query
-    visualizer.display(
-        "light_nolabels",
+    vis = StaticVisualizer(
+        cg.nodes,
+        cg.graph,
+        title="CityGraph Test",
+        query=cg.query,
+        mode="light_nolabels",
         labels_on=False,
         node_radius=1,
         edge_color="#d62728",
         edge_thickness=1,
         landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
     )
+    
+    vis.display()
+    vis.export("results/test/city_graph_test.png")
+    
