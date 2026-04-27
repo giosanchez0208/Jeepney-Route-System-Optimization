@@ -24,7 +24,11 @@ class DirEdge:
         return _getDistance(self.start, self.end)
 
     def isConnectedTo(self, other: DirEdge) -> bool:
-        return self.end is other.start
+        return _nodes_match(self.end, other.start)
+
+
+def _nodes_match(node1: Node, node2: Node) -> bool:
+    return node1.lon == node2.lon and node1.lat == node2.lat and node1.layer == node2.layer
 
 def _getDistance(node1: Node, node2: Node) -> float:
     lat1, lon1 = radians(node1.lat), radians(node1.lon)
@@ -51,20 +55,6 @@ def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int 
             if _connect(dir_edge_s, dir_edge_e, weight):
                 stitched += 1
     return stitched
-
-### UTILITY FUNCTIONS ###
-
-def _connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge) -> None:
-    if dir_edge_s.isConnectedTo(dir_edge_e):
-        dir_edge_s.next_edges.append(dir_edge_e.id)
-    return None
-
-def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge]) -> None:
-    for dir_edge_s in dir_edges_s:
-        for dir_edge_e in dir_edges_e:
-            _connect(dir_edge_s, dir_edge_e)
-            # which only connects if they are connected
-    return None
 
 """
 ### SANITY CHECK ###
