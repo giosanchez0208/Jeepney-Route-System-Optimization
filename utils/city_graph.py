@@ -4,15 +4,19 @@ from itertools import count
 
 import networkx as nx
 import osmnx as ox
-try:
-    from osmnx._errors import InsufficientResponseError
-except ImportError:  # pragma: no cover
-    class InsufficientResponseError(Exception):
-        pass
-
+from osmnx._errors import InsufficientResponseError
 from directed_edge import DirEdge, _getDistance, _stitch
 from node import Node
 
+_DRIVABLE_HIGHWAY_TYPES = {
+    "motorway", "motorway_link",
+    "trunk", "trunk_link",
+    "primary", "primary_link",
+    "secondary", "secondary_link",
+    "tertiary", "tertiary_link",
+    "unclassified", "residential",
+    "living_street", "service", "road",
+}
 
 class CityGraph:
     def __init__(self, query: str) -> None:
@@ -95,8 +99,8 @@ class CityGraph:
     def _build_graph(self) -> None:
         seen_pairs: set[tuple[int, int]] = set()
         node_lookup = self._node_lookup
-
-        for start_osm_id, end_osm_id, _ in self._road_graph.edges(keys=True):
+        
+        for start_osm_id, end_osm_id, _, data in self._road_graph.edges(keys=True, data=True):
             start = node_lookup.get(start_osm_id)
             end = node_lookup.get(end_osm_id)
             if start is None or end is None:
@@ -110,8 +114,16 @@ class CityGraph:
                 continue
             seen_pairs.add(pair)
 
-            self.graph.append(DirEdge(start, end, True))
-            self.graph.append(DirEdge(end, start, True))
+            # OSM highway tag can be a string or a list of strings
+            highway = data.get("highway", "")
+            if isinstance(highway, list):
+                highway_types = set(highway)
+            else:
+                highway_types = {highway}
+            is_drivable = bool(highway_types & _DRIVABLE_HIGHWAY_TYPES)
+
+            self.graph.append(DirEdge(start, end, is_drivable))
+            self.graph.append(DirEdge(end, start, is_drivable))
 
     def _load_road_graph(self, query: str) -> nx.MultiDiGraph:
         try:
@@ -152,12 +164,13 @@ class CityGraph:
 
 """
 if __name__ == "__main__":
-    cg = CityGraph("Iligan City, Lanao del Norte, Philippines")
+    cg = CityGraph("City of Manila, Philippines")
 
     print(cg.info())
 
     from visualizer import StaticVisualizer
 
+    # all edges
     vis = StaticVisualizer(
         cg.nodes,
         cg.graph,
@@ -170,7 +183,28 @@ if __name__ == "__main__":
         edge_thickness=1,
         landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
     )
+    vis.export("results/test/city_graph_full.png", scale_up=3)
+    del vis
+
+    # print how many edges are drivable vs non-drivable
+    drivable_count = sum(1 for edge in cg.graph if edge.is_drivable)
+    non_drivable_count = len(cg.graph) - drivable_count
+    print(f"Drivable edges: {drivable_count}")
+    print(f"Non-drivable edges: {non_drivable_count}")
     
-    vis.display()
-    vis.export("results/test/city_graph_test.png", scale_up=3)
+    # only drivable edges
+    vis = StaticVisualizer(
+        cg.nodes,
+        [edge for edge in cg.graph if edge.is_drivable],
+        title="CityGraph Test (Drivable Edges Only)",
+        query=cg.query,
+        mode="light_nolabels",
+        labels_on=False,
+        node_radius=1,
+        edge_color="#1f77b4",
+        edge_thickness=1,
+        landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
+    )
+    vis.export("results/test/city_graph_drivable.png", scale_up=3)
+    del vis
 """
