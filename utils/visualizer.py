@@ -124,10 +124,11 @@ class StaticVisualizer:
         edge_color: Optional[str] = None,
         edge_thickness: Optional[float] = None,
         landmarks: Optional[str] = None,
+        scale_up: int = 1,
     ) -> None:
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
-        image.save(filename)
+        _save_scaled_image(image, filename, scale_up)
 
 
 class DynamicVisualizer:
@@ -151,11 +152,11 @@ class DynamicVisualizer:
         image = self.draw(mode, fps)
         _open_gif_window(image, self.title or "Dynamic Visualizer")
 
-    def export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2) -> None:
+    def export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2, scale_up: int = 1) -> None:
         duration = max(1, round(1000 / fps))
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         image = self.draw(mode, fps)
-        image.save(filename, format="GIF", save_all=True, append_images=self.frames[1:], duration=duration, loop=0)
+        _save_scaled_gif(image, self.frames, filename, scale_up=scale_up, duration=duration)
 
 
 
@@ -284,6 +285,36 @@ def _render_to_image(fig: plt.Figure) -> Image.Image:
     plt.close(fig)
     buf.seek(0)
     return Image.open(buf).convert("RGBA")
+
+
+def _save_scaled_image(image: Image.Image, filename: str, scale_up: int) -> None:
+    scaled = _scale_image(image, scale_up)
+    scaled.save(filename)
+
+
+def _save_scaled_gif(image: Image.Image, frames: list[Image.Image], filename: str, scale_up: int, duration: int) -> None:
+    scaled_frames = [_scale_image(frame, scale_up).convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
+    if not scaled_frames:
+        raise ValueError("No frames available to build a GIF.")
+
+    first, *rest = scaled_frames
+    first.save(
+        filename,
+        format="GIF",
+        save_all=True,
+        append_images=rest,
+        duration=duration,
+        loop=0,
+        disposal=2,
+    )
+
+
+def _scale_image(image: Image.Image, scale_up: int) -> Image.Image:
+    if scale_up < 1:
+        raise ValueError("scale_up must be at least 1.")
+    if scale_up == 1:
+        return image
+    return image.resize((image.width * scale_up, image.height * scale_up), Image.LANCZOS)
 
 
 def _frames_to_gif(frames: list[Image.Image], duration: int = 400) -> io.BytesIO:
