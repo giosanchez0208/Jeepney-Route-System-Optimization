@@ -1,19 +1,37 @@
 import io
 import tkinter as tk
+from functools import lru_cache
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 import contextily as ctx
+import osmnx as ox
 from PIL import Image, ImageTk, ImageSequence
 import requests
 
 from typing import Literal, Optional
+try:
+    from osmnx._errors import InsufficientResponseError
+except ImportError:  # pragma: no cover
+    class InsufficientResponseError(Exception):
+        pass
+
 from directed_edge import DirEdge
 from node import Node
 
 WINDOW_SIZE = 800
 MapMode = Literal["street", "terrain", "satellite", "light", "light_nolabels", "dark", "dark_nolabels"]
+_PROVIDERS = {
+    "street": ctx.providers.OpenStreetMap.Mapnik,
+    "terrain": ctx.providers.OpenTopoMap,
+    "satellite": ctx.providers.Esri.WorldImagery,
+    "light": ctx.providers.CartoDB.Positron,
+    "light_nolabels": ctx.providers.CartoDB.PositronNoLabels,
+    "dark": ctx.providers.CartoDB.DarkMatter,
+    "dark_nolabels": ctx.providers.CartoDB.DarkMatterNoLabels,
+}
 
 
 class StaticVisualizer:
@@ -21,6 +39,7 @@ class StaticVisualizer:
         self.Nodes = Nodes
         self.DirEdges = DirEdges
         self.title = title
+        self.query: Optional[str] = None
 
     def draw(
         self,
@@ -30,18 +49,25 @@ class StaticVisualizer:
         node_radius: float = 40,
         edge_color: str = "#d1d1d1",
         edge_thickness: float = 2,
+        landmarks: Optional[str] = None,
     ) -> Image.Image:
         if not self.Nodes:
             raise ValueError("Nodes needed to give visualizer context for basemap.")
 
         lats = [node.lat for node in self.Nodes]
         lons = [node.lon for node in self.Nodes]
+        bounds = _map_bounds(lats, lons)
+        landmark_points = _resolve_landmarks(landmarks, area_query=self.query, bounds=bounds)
+        if landmark_points:
+            lats.extend(lat for _, lat, _ in landmark_points)
+            lons.extend(lon for _, _, lon in landmark_points)
 
         fig, ax = _build_figure(lats, lons)
 
         _add_basemap_or_blank(ax, mode)
         _draw_nodes(ax, self.Nodes, node_color, node_radius, labels_on)
         _draw_edges(ax, self.DirEdges, edge_color, edge_thickness, labels_on)
+        _draw_landmarks(ax, landmark_points)
 
         return _render_to_image(fig)
 
@@ -53,8 +79,9 @@ class StaticVisualizer:
         node_radius: float = 40,
         edge_color: str = "#d1d1d1",
         edge_thickness: float = 2,
+        landmarks: Optional[str] = None,
     ) -> None:
-        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness)
+        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
         _open_window(image, self.title or "Static Visualizer")
 
     def export(
@@ -66,8 +93,9 @@ class StaticVisualizer:
         node_radius: float = 40,
         edge_color: str = "#d1d1d1",
         edge_thickness: float = 2,
+        landmarks: Optional[str] = None,
     ) -> None:
-        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness)
+        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
         image.save(filename)
 
 
@@ -102,15 +130,7 @@ class DynamicVisualizer:
 ### HELPER FUNCTIONS ###
 
 def _get_provider(mode: MapMode):
-    return {
-        "street":          ctx.providers.OpenStreetMap.Mapnik,
-        "terrain":         ctx.providers.OpenTopoMap,
-        "satellite":       ctx.providers.Esri.WorldImagery,
-        "light":           ctx.providers.CartoDB.Positron,
-        "light_nolabels":  ctx.providers.CartoDB.PositronNoLabels,
-        "dark":            ctx.providers.CartoDB.DarkMatter,
-        "dark_nolabels":   ctx.providers.CartoDB.DarkMatterNoLabels,
-    }[mode]
+    return _PROVIDERS[mode]
 
 
 def _build_figure(lats: list[float], lons: list[float]) -> tuple[plt.Figure, plt.Axes]:
@@ -128,23 +148,95 @@ def _build_figure(lats: list[float], lons: list[float]) -> tuple[plt.Figure, plt
 
 
 def _draw_nodes(ax: plt.Axes, nodes: list[Node], node_color: str, node_radius: float, labels_on: bool) -> None:
-    for node in nodes:
-        ax.scatter(node.lon, node.lat, s=node_radius, c=node_color, zorder=3)
-        if labels_on:
+    ax.scatter([node.lon for node in nodes], [node.lat for node in nodes], s=node_radius, c=node_color, zorder=3)
+    if labels_on:
+        for node in nodes:
             ax.annotate(node.id, (node.lon, node.lat), textcoords="offset points", xytext=(5, 5), fontsize=8)
 
 
 def _draw_edges(ax: plt.Axes, edges: list[DirEdge], edge_color: str, edge_thickness: float, labels_on: bool) -> None:
-    for edge in edges:
-        ax.plot(
-            [edge.start.lon, edge.end.lon],
-            [edge.start.lat, edge.end.lat],
-            color=edge_color, linewidth=edge_thickness, zorder=2,
-        )
-        if labels_on:
+    segments = [((edge.start.lon, edge.start.lat), (edge.end.lon, edge.end.lat)) for edge in edges]
+    if segments:
+        ax.add_collection(LineCollection(segments, colors=edge_color, linewidths=edge_thickness, zorder=2))
+
+    if labels_on:
+        for edge in edges:
             mid_lon = (edge.start.lon + edge.end.lon) / 2
             mid_lat = (edge.start.lat + edge.end.lat) / 2
             ax.annotate(edge.id, (mid_lon, mid_lat), textcoords="offset points", xytext=(0, 6), fontsize=7)
+
+
+def _draw_landmarks(ax: plt.Axes, landmarks: list[tuple[str, float, float]]) -> None:
+    for label, lat, lon in landmarks:
+        ax.text(
+            lon,
+            lat,
+            label,
+            fontsize=7,
+            fontweight="bold",
+            color="black",
+            ha="center",
+            va="center",
+            zorder=4,
+        )
+
+
+def _resolve_landmarks(
+    landmarks: Optional[str],
+    *,
+    area_query: Optional[str] = None,
+    bounds: Optional[tuple[float, float, float, float]] = None,
+) -> list[tuple[str, float, float]]:
+    if landmarks is None:
+        return []
+
+    labels = [label.strip() for label in landmarks.split(",") if label.strip()]
+    resolved = []
+    for label in labels:
+        candidate_queries = [label]
+        if area_query:
+            candidate_queries.insert(0, f"{label}, {area_query}")
+            candidate_queries.append(f"{label} near {area_query}")
+
+        for candidate_query in candidate_queries:
+            try:
+                resolved_point = _geocode_landmark(candidate_query, label)
+            except ValueError:
+                continue
+            if bounds is not None and not _within_bounds(resolved_point[1], resolved_point[2], bounds):
+                continue
+            resolved.append(resolved_point)
+            break
+    return resolved
+
+
+@lru_cache(maxsize=256)
+def _geocode_landmark(query: str, label: str) -> tuple[str, float, float]:
+    try:
+        place = ox.geocode_to_gdf(query)
+        if place.empty:
+            raise ValueError
+
+        geometry = place.iloc[0].geometry
+        centroid = geometry.centroid
+        return label, centroid.y, centroid.x
+    except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError):
+        try:
+            lat, lon = ox.geocode(query)
+        except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError) as exc:
+            raise ValueError(f"Could not geocode landmark query: {label}") from exc
+        return label, lat, lon
+
+
+def _within_bounds(lat: float, lon: float, bounds: tuple[float, float, float, float]) -> bool:
+    min_lat, max_lat, min_lon, max_lon = bounds
+    return min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
+
+
+def _map_bounds(lats: list[float], lons: list[float]) -> tuple[float, float, float, float]:
+    lat_pad = max((max(lats) - min(lats)) * 0.15, 0.001)
+    lon_pad = max((max(lons) - min(lons)) * 0.15, 0.001)
+    return min(lats) - lat_pad, max(lats) + lat_pad, min(lons) - lon_pad, max(lons) + lon_pad
 
 
 def _add_basemap_or_blank(ax: plt.Axes, mode: MapMode) -> None:
@@ -191,6 +283,7 @@ def _open_window(image: Image.Image, title: str) -> None:
     photo = ImageTk.PhotoImage(image)
     label = tk.Label(root, image=photo, bd=0)
     label.pack()
+    label.image = photo
 
     root.mainloop()
 

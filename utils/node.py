@@ -1,3 +1,4 @@
+from math import radians
 from typing import Optional
 
 _NODE_ID_COUNTER = 1
@@ -11,3 +12,5 @@ class Node:
 		self.id: str = f"N{_NODE_ID_COUNTER:05d}"
 		_NODE_ID_COUNTER += 1
 		self.is_drivable: bool = True
+		self._lon_rad = radians(lon)
+		self._lat_rad = radians(lat)

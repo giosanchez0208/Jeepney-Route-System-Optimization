@@ -4,6 +4,11 @@ from itertools import count
 
 import networkx as nx
 import osmnx as ox
+try:
+    from osmnx._errors import InsufficientResponseError
+except ImportError:  # pragma: no cover
+    class InsufficientResponseError(Exception):
+        pass
 
 from directed_edge import DirEdge, _getDistance, _stitch
 from node import Node
@@ -17,6 +22,7 @@ class CityGraph:
 
         self._road_graph: nx.MultiDiGraph = self._load_road_graph(query)
         self._node_lookup: dict[int, Node] = {}
+        self._node_set: set[Node] = set()
         self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
 
         self._build_nodes()
@@ -25,7 +31,7 @@ class CityGraph:
 
     def stitch_graph(self) -> None:
         for edge in self.graph:
-            edge.next_edges = []
+            edge.next_edges.clear()
 
         _stitch(self.graph, self.graph)
         self._build_outgoing_edges()
@@ -34,9 +40,9 @@ class CityGraph:
         return f"Nodes: {len(self.nodes)}\nEdges: {len(self.graph)}"
 
     def findShortestPath(self, start: Node, end: Node) -> list[DirEdge]:
-        if start not in self.nodes:
+        if start not in self._node_set:
             raise ValueError("start must belong to this CityGraph.")
-        if end not in self.nodes:
+        if end not in self._node_set:
             raise ValueError("end must belong to this CityGraph.")
         if start is end:
             return []
@@ -47,6 +53,7 @@ class CityGraph:
 
         came_from: dict[Node, tuple[Node, DirEdge]] = {}
         cost_so_far: dict[Node, float] = {start: 0.0}
+        outgoing_edges = self._outgoing_edges
 
         while frontier:
             _, current_cost, _, current = heappop(frontier)
@@ -57,12 +64,12 @@ class CityGraph:
             if current_cost > cost_so_far.get(current, float("inf")):
                 continue
 
-            for edge in self._outgoing_edges.get(current, []):
+            for edge in outgoing_edges.get(current, []):
                 if not edge.is_drivable:
                     continue
 
                 next_node = edge.end
-                new_cost = current_cost + _getDistance(edge.start, edge.end)
+                new_cost = current_cost + edge.getLength()
                 if new_cost >= cost_so_far.get(next_node, float("inf")):
                     continue
 
@@ -82,33 +89,40 @@ class CityGraph:
 
             node = Node(lon, lat)
             self._node_lookup[osm_id] = node
+            self._node_set.add(node)
             self.nodes.append(node)
 
     def _build_graph(self) -> None:
         seen_pairs: set[tuple[int, int]] = set()
+        node_lookup = self._node_lookup
 
         for start_osm_id, end_osm_id, _ in self._road_graph.edges(keys=True):
-            if start_osm_id not in self._node_lookup or end_osm_id not in self._node_lookup:
+            start = node_lookup.get(start_osm_id)
+            end = node_lookup.get(end_osm_id)
+            if start is None or end is None:
                 continue
 
-            pair = tuple(sorted((start_osm_id, end_osm_id)))
+            if start_osm_id <= end_osm_id:
+                pair = (start_osm_id, end_osm_id)
+            else:
+                pair = (end_osm_id, start_osm_id)
             if pair in seen_pairs:
                 continue
             seen_pairs.add(pair)
 
-            start = self._node_lookup[start_osm_id]
-            end = self._node_lookup[end_osm_id]
             self.graph.append(DirEdge(start, end, True))
             self.graph.append(DirEdge(end, start, True))
 
     def _load_road_graph(self, query: str) -> nx.MultiDiGraph:
         try:
             return ox.graph_from_place(query, network_type="drive", simplify=True)
-        except ValueError as exc:
-            if "Found no graph nodes within the requested polygon." not in str(exc):
-                raise
+        except (ValueError, TypeError, IndexError, AttributeError, InsufficientResponseError):
+            try:
+                place = ox.geocode_to_gdf(query)
+            except (ValueError, TypeError, IndexError, AttributeError, InsufficientResponseError):
+                lat, lon = ox.geocode(query)
+                return ox.graph_from_point((lat, lon), dist=5000, network_type="drive", simplify=True)
 
-            place = ox.geocode_to_gdf(query)
             geometry = place.iloc[0].geometry
             centroid = geometry.centroid
             bounds = geometry.bounds
@@ -138,17 +152,19 @@ class CityGraph:
 
 
 if __name__ == "__main__":
-    cg = CityGraph("Iligan City, Lanao del Norte")
+    cg = CityGraph("Iligan City, Lanao del Norte, Philippines")
 
     print(cg.info())
 
     from visualizer import StaticVisualizer
 
     visualizer = StaticVisualizer(cg.nodes, cg.graph, title="CityGraph Sanity Check")
+    visualizer.query = cg.query
     visualizer.display(
         "light_nolabels",
         labels_on=False,
         node_radius=1,
         edge_color="#d62728",
         edge_thickness=1,
+        landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
     )
