@@ -1,3 +1,9 @@
+"""route.py
+
+Route(city_graph: CityGraph, path: list[DirEdge]) -> None creates cg: CityGraph and path: list[DirEdge].
+_generate_route_path(city_graph: CityGraph) -> list[DirEdge] returns a random closed route path from four sampled nodes.
+"""
+
 from node import Node
 from directed_edge import DirEdge
 from city_graph import CityGraph

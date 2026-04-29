@@ -1,3 +1,8 @@
+"""node.py
+
+Node(lon: float, lat: float) -> None creates lon: float, lat: float, layer: Optional[int], id: str, is_drivable: bool, _lon_rad: float, and _lat_rad: float.
+"""
+
 from math import radians
 from typing import Optional
 
