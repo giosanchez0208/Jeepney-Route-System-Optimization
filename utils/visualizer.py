@@ -2,6 +2,7 @@ import io
 import tkinter as tk
 from functools import lru_cache
 from pathlib import Path
+from random import sample
 
 import matplotlib
 matplotlib.use("Agg")
@@ -23,7 +24,30 @@ from directed_edge import DirEdge
 from node import Node
 
 WINDOW_SIZE = 800
+_RENDER_SCALE = 2
 MapMode = Literal["street", "terrain", "satellite", "light", "light_nolabels", "dark", "dark_nolabels"]
+_GOOGLE_ROUTE_COLORS = [
+    "#EA4335",
+    "#FBBC05",
+    "#34A853",
+    "#4285F4",
+    "#F29900",
+    "#A142F4",
+    "#00ACC1",
+    "#E91E63",
+    "#3F51B5",
+    "#009688",
+    "#FF7043",
+    "#03A9F4",
+    "#8BC34A",
+    "#FFC107",
+    "#795548",
+    "#9E9E9E",
+    "#607D8B",
+    "#673AB7",
+    "#D81B60",
+    "#1E88E5",
+]
 _PROVIDERS = {
     "street": ctx.providers.OpenStreetMap.Mapnik,
     "terrain": ctx.providers.OpenTopoMap,
@@ -50,6 +74,8 @@ class StaticVisualizer:
         edge_color: str = "#d1d1d1",
         edge_thickness: float = 2,
         landmarks: Optional[str] = None,
+        Routes: Optional[list["Route"]] = None,
+        route_thickness: float = 2.0,
     ) -> None:
         self.Nodes = Nodes
         self.DirEdges = DirEdges
@@ -62,6 +88,9 @@ class StaticVisualizer:
         self.edge_color = edge_color
         self.edge_thickness = edge_thickness
         self.landmarks = landmarks
+        self.Routes = Routes
+        self.route_colors = _route_colors(len(Routes)) if Routes is not None else []
+        self.route_thickness = route_thickness
 
     def draw(
         self,
@@ -97,6 +126,12 @@ class StaticVisualizer:
         _add_basemap_or_blank(ax, mode)
         _draw_nodes(ax, self.Nodes, node_color, node_radius, labels_on)
         _draw_edges(ax, self.DirEdges, edge_color, edge_thickness, labels_on)
+        _draw_routes(
+            ax,
+            self.Routes,
+            self.route_colors,
+            self.route_thickness,
+        )
         _draw_landmarks(ax, landmark_points)
 
         return _render_to_image(fig)
@@ -170,7 +205,7 @@ def _build_figure(lats: list[float], lons: list[float]) -> tuple[plt.Figure, plt
     lat_pad = max((max(lats) - min(lats)) * 0.15, 0.001)
     lon_pad = max((max(lons) - min(lons)) * 0.15, 0.001)
 
-    dpi = 100
+    dpi = 100 * _RENDER_SCALE
     fig, ax = plt.subplots(figsize=(WINDOW_SIZE / dpi, WINDOW_SIZE / dpi), dpi=dpi)
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
     ax.set_xlim(min(lons) - lon_pad, max(lons) + lon_pad)
@@ -197,6 +232,32 @@ def _draw_edges(ax: plt.Axes, edges: list[DirEdge], edge_color: str, edge_thickn
             mid_lon = (edge.start.lon + edge.end.lon) / 2
             mid_lat = (edge.start.lat + edge.end.lat) / 2
             ax.annotate(edge.id, (mid_lon, mid_lat), textcoords="offset points", xytext=(0, 6), fontsize=7)
+
+
+def _draw_routes(
+    ax: plt.Axes,
+    routes: Optional[list["Route"]],
+    route_colors: list[str],
+    route_thickness: float,
+) -> None:
+    if not routes:
+        return
+
+    for route, color in zip(routes, route_colors):
+        segments = _route_segments(route.path)
+        if not segments:
+            continue
+
+        ax.add_collection(
+            LineCollection(
+                segments,
+                colors=color,
+                linewidths=route_thickness,
+                capstyle="round",
+                joinstyle="round",
+                zorder=5,
+            )
+        )
 
 
 def _draw_landmarks(ax: plt.Axes, landmarks: list[tuple[str, float, float]]) -> None:
@@ -270,6 +331,21 @@ def _map_bounds(lats: list[float], lons: list[float]) -> tuple[float, float, flo
     lat_pad = max((max(lats) - min(lats)) * 0.15, 0.001)
     lon_pad = max((max(lons) - min(lons)) * 0.15, 0.001)
     return min(lats) - lat_pad, max(lats) + lat_pad, min(lons) - lon_pad, max(lons) + lon_pad
+
+
+def _route_colors(count: int) -> list[str]:
+    if count <= 0:
+        return []
+
+    colors: list[str] = []
+    palette = _GOOGLE_ROUTE_COLORS[:]
+    while len(colors) < count:
+        colors.extend(sample(palette, len(palette)))
+    return colors[:count]
+
+
+def _route_segments(path: list[DirEdge]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    return [((edge.start.lon, edge.start.lat), (edge.end.lon, edge.end.lat)) for edge in path]
 
 
 def _add_basemap_or_blank(ax: plt.Axes, mode: MapMode) -> None:
@@ -373,7 +449,6 @@ def _open_gif_window(image: Image.Image, title: str) -> None:
     animate()
     root.mainloop()
 
-"""
 
 ### SANITY CHECK ###
 
@@ -407,4 +482,3 @@ if __name__ == "__main__":
                 
     gif_visualizer = DynamicVisualizer(gif_frames, title="GIF Test")
     gif_visualizer.display("light_nolabels", fps=10)
-"""

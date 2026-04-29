@@ -17,6 +17,7 @@ from city_graph import CityGraph
 from directed_edge import DirEdge
 from node import Node
 WINDOW_SIZE = 800
+_RENDER_DPI = 150
 _LAYERS = (1, 2, 3)
 _LIGHT_FACE_COLOR = "#f7f7f7"
 _DARK_FACE_COLOR = "#171717"
@@ -40,6 +41,28 @@ _JUMP_EDGE_COLORS = {
 	(3, 2): _GOOGLE_CYAN,
 	(1, 3): _GOOGLE_PURPLE,
 }
+_GOOGLE_ROUTE_COLORS = [
+	"#EA4335",
+	"#FBBC05",
+	"#34A853",
+	"#4285F4",
+	"#F29900",
+	"#A142F4",
+	"#00ACC1",
+	"#E91E63",
+	"#3F51B5",
+	"#009688",
+	"#FF7043",
+	"#03A9F4",
+	"#8BC34A",
+	"#FFC107",
+	"#795548",
+	"#9E9E9E",
+	"#607D8B",
+	"#673AB7",
+	"#D81B60",
+	"#1E88E5",
+]
 
 
 class LayeredVisualizer:
@@ -56,9 +79,12 @@ class LayeredVisualizer:
 		edge_color: str = "#d1d1d1",
 		edge_thickness: float = 2,
 		journey_color: str = "#d62728",
-		journey_thickness: float = 3,
+		journey_thickness: float = 2.0,
 		layer_opacity: float = 0.5,
 		legend_on: bool = True,
+		Routes: Optional[list["Route"]] = None,
+		route_thickness: float = 2.0,
+		nodes_on: bool = True,
 	) -> None:
 		self.cg = city_graph
 		self.journey = journey
@@ -73,6 +99,10 @@ class LayeredVisualizer:
 		self.journey_thickness = journey_thickness
 		self.layer_opacity = layer_opacity
 		self.legend_on = legend_on
+		self.Routes = Routes
+		self.route_colors = _route_colors(len(Routes)) if Routes is not None else []
+		self.route_thickness = route_thickness
+		self.nodes_on = nodes_on
 
 	def draw(
 		self,
@@ -86,6 +116,7 @@ class LayeredVisualizer:
 		journey_thickness: Optional[float] = None,
 		layer_opacity: Optional[float] = None,
 		legend_on: Optional[bool] = None,
+		nodes_on: Optional[bool] = None,
 	) -> Image.Image:
 		if not self.cg.nodes:
 			raise ValueError("Nodes needed to give visualizer context.")
@@ -100,10 +131,11 @@ class LayeredVisualizer:
 		journey_thickness = self.journey_thickness if journey_thickness is None else journey_thickness
 		layer_opacity = self.layer_opacity if layer_opacity is None else layer_opacity
 		legend_on = self.legend_on if legend_on is None else legend_on
+		nodes_on = self.nodes_on if nodes_on is None else nodes_on
 
 		layer_gap = _layer_gap(self.cg)
 		center_lon, center_lat = _projection_origin(self.cg)
-		points = _collect_points(self.cg.nodes, self.journey, layer_gap, center_lon, center_lat)
+		points = _collect_points(self.cg.nodes, self.journey, self.Routes, layer_gap, center_lon, center_lat)
 		fig, ax = _build_figure(points)
 
 		face_color = _background_for_mode(mode)
@@ -127,8 +159,10 @@ class LayeredVisualizer:
 				edge_thickness,
 				labels_on,
 				layer_opacity,
+				nodes_on,
 			)
 
+		_draw_routes(ax, self.Routes, self.route_colors, layer_gap, center_lon, center_lat, self.route_thickness)
 		_draw_journey(
 			ax,
 			self.journey,
@@ -156,6 +190,7 @@ class LayeredVisualizer:
 		journey_thickness: Optional[float] = None,
 		layer_opacity: Optional[float] = None,
 		legend_on: Optional[bool] = None,
+		nodes_on: Optional[bool] = None,
 	) -> None:
 		image = self.draw(
 			mode,
@@ -168,6 +203,7 @@ class LayeredVisualizer:
 			journey_thickness,
 			layer_opacity,
 			legend_on,
+			nodes_on,
 		)
 		_open_window(image, self.title or "Layered Visualizer")
 
@@ -184,6 +220,7 @@ class LayeredVisualizer:
 		journey_thickness: Optional[float] = None,
 		layer_opacity: Optional[float] = None,
 		legend_on: Optional[bool] = None,
+		nodes_on: Optional[bool] = None,
 		scale_up: int = 1,
 	) -> None:
 		Path(filename).parent.mkdir(parents=True, exist_ok=True)
@@ -198,6 +235,7 @@ class LayeredVisualizer:
 			journey_thickness,
 			layer_opacity,
 			legend_on,
+			nodes_on,
 		)
 		_save_scaled_image(image, filename, scale_up)
 
@@ -239,6 +277,7 @@ def _projection_origin(city_graph: CityGraph) -> tuple[float, float]:
 def _collect_points(
 	nodes: list[Node],
 	journey: list[DirEdge],
+	routes: Optional[list["Route"]],
 	layer_gap: float,
 	center_lon: float,
 	center_lat: float,
@@ -253,6 +292,13 @@ def _collect_points(
 		end_layer = _node_layer(edge.end)
 		points.append(_project_point(edge.start.lon, edge.start.lat, start_layer, layer_gap, center_lon, center_lat))
 		points.append(_project_point(edge.end.lon, edge.end.lat, end_layer, layer_gap, center_lon, center_lat))
+
+	for route in routes or []:
+		for edge in route.path:
+			start_layer = _route_layer(edge.start)
+			end_layer = _route_layer(edge.end)
+			points.append(_project_point(edge.start.lon, edge.start.lat, start_layer, layer_gap, center_lon, center_lat))
+			points.append(_project_point(edge.end.lon, edge.end.lat, end_layer, layer_gap, center_lon, center_lat))
 
 	for layer in _LAYERS:
 		points.extend(_layer_border_points(nodes, layer, layer_gap, center_lon, center_lat))
@@ -270,8 +316,8 @@ def _build_figure(points: list[tuple[float, float]]) -> tuple[plt.Figure, plt.Ax
 	x_extent = max(abs(max(xs) - x_center), abs(min(xs) - x_center)) + x_pad
 	y_extent = max(abs(max(ys) - y_center), abs(min(ys) - y_center)) + y_pad
 
-	dpi = 100
-	fig, ax = plt.subplots(figsize=(WINDOW_SIZE / dpi, WINDOW_SIZE / dpi), dpi=dpi)
+	dpi = _RENDER_DPI
+	fig, ax = plt.subplots(figsize=(WINDOW_SIZE / 100, WINDOW_SIZE / 100), dpi=dpi)
 	fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 	ax.set_xlim(x_center - x_extent, x_center + x_extent)
 	ax.set_ylim(y_center - y_extent, y_center + y_extent)
@@ -292,6 +338,7 @@ def _draw_layer(
 	edge_thickness: float,
 	labels_on: bool,
 	layer_opacity: float,
+	nodes_on: bool,
 ) -> None:
 	layer_edges = edges if layer != 2 else [edge for edge in edges if edge.is_drivable]
 	node_points = [_project_point(node.lon, node.lat, layer, layer_gap, center_lon, center_lat) for node in nodes]
@@ -306,7 +353,6 @@ def _draw_layer(
 
 	xs = [x for x, _ in node_points]
 	ys = [y for _, y in node_points]
-	ax.scatter(xs, ys, s=node_radius, c=node_color, alpha=layer_opacity, zorder=layer * 2)
 	ax.add_patch(
 		Polygon(
 			layer_border,
@@ -319,9 +365,12 @@ def _draw_layer(
 		)
 	)
 
-	if labels_on:
-		for node, (x, y) in zip(nodes, node_points):
-			ax.annotate(node.id, (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8, alpha=layer_opacity)
+	if nodes_on:
+		ax.scatter(xs, ys, s=node_radius, c=node_color, alpha=layer_opacity, zorder=layer * 2)
+
+		if labels_on:
+			for node, (x, y) in zip(nodes, node_points):
+				ax.annotate(node.id, (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8, alpha=layer_opacity)
 
 	if edge_segments:
 		ax.add_collection(
@@ -343,6 +392,39 @@ def _draw_layer(
 				xytext=(0, 6),
 				fontsize=7,
 				alpha=layer_opacity,
+			)
+
+
+def _draw_routes(
+	ax: plt.Axes,
+	routes: Optional[list["Route"]],
+	route_colors: list[str],
+	layer_gap: float,
+	center_lon: float,
+	center_lat: float,
+	route_thickness: float,
+) -> None:
+	if not routes:
+		return
+
+	for route, color in zip(routes, route_colors):
+		segments = [
+			(
+				_project_point(edge.start.lon, edge.start.lat, _route_layer(edge.start), layer_gap, center_lon, center_lat),
+				_project_point(edge.end.lon, edge.end.lat, _route_layer(edge.end), layer_gap, center_lon, center_lat),
+			)
+			for edge in route.path
+		]
+		if segments:
+			ax.add_collection(
+				LineCollection(
+					segments,
+					colors=color,
+					linewidths=route_thickness,
+					capstyle="round",
+					joinstyle="round",
+					zorder=15,
+				)
 			)
 
 
@@ -389,6 +471,10 @@ def _node_layer(node: Node) -> int:
 	return node.layer
 
 
+def _route_layer(node: Node) -> int:
+	return 2
+
+
 def _journey_color(start_layer: int, end_layer: int, fallback: str) -> str:
 	if start_layer == end_layer:
 		return _LAYER_EDGE_COLORS[start_layer]
@@ -423,6 +509,17 @@ def _layer_border_points(
 	center_lat: float,
 ) -> list[tuple[float, float]]:
 	return _layer_border(nodes, layer, layer_gap, center_lon, center_lat)
+
+
+def _route_colors(count: int) -> list[str]:
+	if count <= 0:
+		return []
+
+	colors: list[str] = []
+	palette = _GOOGLE_ROUTE_COLORS[:]
+	while len(colors) < count:
+		colors.extend(sample(palette, len(palette)))
+	return colors[:count]
 
 
 def _draw_legend(ax: plt.Axes, mode: MapMode) -> None:
