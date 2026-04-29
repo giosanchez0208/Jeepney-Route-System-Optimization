@@ -30,26 +30,32 @@ def _generate_route_path(city_graph: CityGraph) -> list[DirEdge]:
 
 
 if __name__ == "__main__":
-    from visualizer import StaticVisualizer
+    from visualizer import StaticVisualizer, DynamicVisualizer
 
     cg = CityGraph("Iligan City, Lanao del Norte, Philippines")
-    route = Route(cg, None)
+    routes = [Route(cg, None) for _ in range(20)]
+    route_visualizers = [
+        StaticVisualizer(
+            cg.nodes,
+            cg.graph,
+            title=f"Route {index + 1}",
+            query=cg.query,
+            mode="light_nolabels",
+            labels_on=False,
+            node_radius=1,
+            edge_color="#d6d6d6",
+            edge_thickness=0.2,
+            landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
+            Routes=[route],
+            route_thickness=2.0,
+        )
+        for index, route in enumerate(routes)
+    ]
 
     print(f"CityGraph: {cg.info()}")
-    print(f"Route edges: {len(route.path)}")
+    print(f"Routes: {len(routes)}")
+    print(f"Route edges: {sum(len(route.path) for route in routes)}")
 
-    vis = StaticVisualizer(
-        cg.nodes,
-        route.path,
-        title="Route Smoke Test",
-        query=cg.query,
-        mode="light_nolabels",
-        labels_on=False,
-        node_radius=1,
-        edge_color="#d62728",
-        edge_thickness=1,
-        landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
-    )
-    
-    vis.export("results/test/route_test.png", scale_up=6)
+    vis = DynamicVisualizer(route_visualizers, title="Routes Smoke Test")
+    vis.export("results/test/routes_test.gif", mode="light_nolabels", fps=1, scale_up=4)
 
