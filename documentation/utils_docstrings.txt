@@ -1,0 +1,81 @@
+visualizer.py
+"""
+visualizer.py
+
+WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[...] describes basemap modes, and _PROVIDERS stores map tile sources.
+StaticVisualizer(Nodes: list[Node], DirEdges: list[DirEdge], title: Optional[str] = None, *, query: Optional[str] = None, mode: MapMode = "light_nolabels", labels_on: bool = False, node_color: str = "#6fbaf0", node_radius: float = 40, edge_color: str = "#d1d1d1", edge_thickness: float = 2, landmarks: Optional[str] = None, Routes: Optional[list["Route"]] = None, route_thickness: float = 2.0) -> None creates the static map state.
+draw(self, mode: Optional[MapMode] = None, labels_on: Optional[bool] = None, node_color: Optional[str] = None, node_radius: Optional[float] = None, edge_color: Optional[str] = None, edge_thickness: Optional[float] = None, landmarks: Optional[str] = None) -> Image.Image renders an RGBA image.
+display(self, ...) -> None opens a Tk window with the rendered image.
+export(self, filename: str, ..., scale_up: int = 1) -> None saves the rendered image to disk.
+DynamicVisualizer(StaticVisualizers: list[StaticVisualizer], title: Optional[str] = None) -> None creates a GIF visualizer.
+draw(self, mode: MapMode = "light_nolabels", fps: int = 2) -> Image.Image renders a GIF frame sequence.
+display(self, mode: MapMode = "light_nolabels", fps: int = 2) -> None opens a Tk window with the GIF.
+export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2, scale_up: int = 1) -> None saves the GIF to disk.
+"""
+
+travel_graph.py
+"""
+travel_graph.py
+
+WALK_WT: float, RIDE_WT: float, WAIT_WT: float, TRANSFER_WT: float, DIRECT_WT: float, and ALIGHT_WT: float store edge weights.
+TravelGraph(cg: CityGraph, routes: list[Route]) -> None creates cg: CityGraph, routes: list[Route], travel_graph: list[DirEdge], and _outgoing_edges: dict[Node, list[DirEdge]].
+_construct(self) -> None builds the layered travel graph.
+findShortestJourney(self, start: Node, end: Node) -> list[DirEdge] returns the best journey path or an empty list.
+_reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge] returns the recovered journey path.
+calculateJourneyDistance(self, start: Node, end: Node) -> float returns the total walk, ride, and walk distance in meters.
+calculateJourneyWeight(self, start: Node, end: Node) -> float returns the summed journey weight.
+"""
+
+route.py
+"""
+route.py
+
+Route(city_graph: CityGraph, path: list[DirEdge]) -> None creates cg: CityGraph and path: list[DirEdge].
+_generate_route_path(city_graph: CityGraph) -> list[DirEdge] returns a random closed route path from four sampled nodes.
+"""
+
+node.py
+"""
+node.py
+
+Node(lon: float, lat: float) -> None creates lon: float, lat: float, layer: Optional[int], id: str, is_drivable: bool, _lon_rad: float, and _lat_rad: float.
+"""
+
+layered_visualizer.py
+"""
+layered_visualizer.py
+
+WINDOW_SIZE: int, _RENDER_DPI: int, _LAYERS: tuple[int, int, int], and color constants control the layered drawing style.
+LayeredVisualizer(city_graph: CityGraph, journey: list[DirEdge], title: Optional[str] = None, *, mode: MapMode = "light_nolabels", labels_on: bool = False, node_color: str = "#6fbaf0", node_radius: float = 40, edge_color: str = "#d1d1d1", edge_thickness: float = 2, journey_color: str = "#d62728", journey_thickness: float = 2.0, layer_opacity: float = 0.5, legend_on: bool = True, Routes: Optional[list["Route"]] = None, route_thickness: float = 2.0, nodes_on: bool = True) -> None creates the layered map state.
+draw(self, mode: Optional[MapMode] = None, labels_on: Optional[bool] = None, node_color: Optional[str] = None, node_radius: Optional[float] = None, edge_color: Optional[str] = None, edge_thickness: Optional[float] = None, journey_color: Optional[str] = None, journey_thickness: Optional[float] = None, layer_opacity: Optional[float] = None, legend_on: Optional[bool] = None, nodes_on: Optional[bool] = None) -> Image.Image renders an RGBA image.
+display(self, ...) -> None opens a Tk window with the rendered image.
+export(self, filename: str, ..., scale_up: int = 1) -> None saves the rendered image to disk.
+"""
+
+directed_edge.py
+"""
+directed_edge.py
+
+DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None) -> None creates start: Node, end: Node, is_drivable: bool, weight: int, id: str, and next_edges: list[str].
+getLength(self) -> float returns the edge distance in meters.
+isConnectedTo(self, other: DirEdge) -> bool returns whether two edges share matching boundary nodes.
+_getDistance(node1: Node, node2: Node) -> float returns the great-circle distance in meters.
+_connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1) -> bool links compatible edges and returns success.
+_stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1) -> int connects matching edges and returns the stitch count.
+"""
+
+city_graph.py
+"""
+city_graph.py
+
+_DRIVABLE_HIGHWAY_TYPES: set[str] stores highway tags treated as drivable.
+CityGraph(query: str) -> None creates query: str, nodes: list[Node], graph: list[DirEdge], _road_graph: nx.MultiDiGraph, _node_lookup: dict[int, Node], _node_set: set[Node], and _outgoing_edges: dict[Node, list[DirEdge]].
+stitch_graph(self) -> None clears and rebuilds edge stitching.
+info(self) -> str returns node and edge counts.
+findShortestPath(self, start: Node, end: Node) -> list[DirEdge] returns the shortest drivable path or raises ValueError.
+_build_nodes(self) -> None populates nodes from the OSM graph.
+_build_graph(self) -> None populates directed edges from the OSM graph.
+_load_road_graph(self, query: str) -> nx.MultiDiGraph loads the road network for the query.
+_build_outgoing_edges(self) -> None rebuilds the outgoing-edge lookup.
+_reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge] returns the recovered path.
+"""

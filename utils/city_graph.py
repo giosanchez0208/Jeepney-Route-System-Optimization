@@ -1,3 +1,17 @@
+"""city_graph.py
+
+_DRIVABLE_HIGHWAY_TYPES: set[str] stores highway tags treated as drivable.
+CityGraph(query: str) -> None creates query: str, nodes: list[Node], graph: list[DirEdge], _road_graph: nx.MultiDiGraph, _node_lookup: dict[int, Node], _node_set: set[Node], and _outgoing_edges: dict[Node, list[DirEdge]].
+stitch_graph(self) -> None clears and rebuilds edge stitching.
+info(self) -> str returns node and edge counts.
+findShortestPath(self, start: Node, end: Node) -> list[DirEdge] returns the shortest drivable path or raises ValueError.
+_build_nodes(self) -> None populates nodes from the OSM graph.
+_build_graph(self) -> None populates directed edges from the OSM graph.
+_load_road_graph(self, query: str) -> nx.MultiDiGraph loads the road network for the query.
+_build_outgoing_edges(self) -> None rebuilds the outgoing-edge lookup.
+_reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge] returns the recovered path.
+"""
+
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count

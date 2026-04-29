@@ -1,0 +1,794 @@
+\section{Spatial Data Preparation and Network Construction}
+
+This section describes the procedures for constructing the multi-layer graph representation that underlies the agent-based passenger simulation. Building upon the grid-based proof-of-concept framework established in \citet{sanchez2025}, this study extends the network model to accommodate real-world geographic data while introducing a novel three-layer graph architecture that enables standard shortest-path algorithms to handle differentiated boarding and transfer penalties without mid-search modifications.
+
+Respondents will be recruited through an online survey administered via Google Forms, which will be distributed across jeepney user groups, local community pages, and public transport Facebook groups within the study area. Sharing the survey link across different route corridors and user clusters maintains geographic and ridership diversity, allowing the collection of responses from both peak and off-peak travelers to capture variations in travel behavior and user profiles.
+
+\subsection{Spatial Data Preparation and Network Construction}
+The walkable street network of Iligan City is extracted from OpenStreetMap (OSM) using the OSMnx Python package, which retrieves, models, and analyzes geospatial street network data as graph objects compatible with NetworkX \citep{boeing2025a}. OSMnx provides functions to download network data by place name, bounding box, or polygon, returning a topologically corrected directed graph where nodes represent intersections or dead-ends and edges represent street segments with associated length and geometry attributes \citep{boeing2024}. For pedestrian routing, the network is downloaded using the \texttt{network\_type='walk'} parameter, which retrieves all streets and paths accessible to pedestrians while ignoring vehicular one-way restrictions \citep{boeing2025a}.
+
+The resulting graph is simplified using OSMnx's built-in edge simplification and node consolidation algorithms, which remove intermediate nodes that represent only geometric vertices (not true intersections) and merge complex intersection clusters into single nodes \citep{boeing2024}. This preprocessing step yields a parsimonious graph model that more accurately represents the true topology of the street network while reducing computational overhead for subsequent pathfinding operations.
+
+Jeepney route geometries are acquired through route information provided by the city contractor, rather than from GPS traces or OSM relations. Based on these sources, each route is manually constructed and encoded as an ordered sequence of nodes corresponding to stops or waypoints along the route. Because jeepneys in Iligan City typically operate as circular loops, departing from a terminal, following a fixed path through the city, and returning to the same terminal, each route is represented as a unidirectional cycle in the graph. While these manually derived routes do not claim to capture the full operational variability of informal public transport, they serve as baseline reference geometries against which proposed optimized route configurations can later be benchmarked and evaluated.
+
+\begin{figure}[h]
+    \centering    \includegraphics[width=0.8\textwidth]{chap3/figures/iligan_graph_network.png}
+    \caption{Road network graph of Iligan City, Lanao del Norte, Philippines extracted from OpenStreetMap data using OSMnx. The graph represents drivable roads with nodes (intersections) and edges (road segments).}
+    \label{fig:iligan_network}
+\end{figure}
+
+\subsection{Three-Layer Graph Architecture}
+
+The simulation employs a three-layer directed graph structure that separates the passenger journey into distinct phases: origin walking, vehicle riding, and destination walking with potential transfers. This architectural design allows transfer penalties to be applied exactly once per transfer event through standard edge weights, eliminating the need for modified Dijkstra implementations or state-tracking during pathfinding.
+
+\begin{itemize}
+    \item \textbf{Layer 1: Start Walk Graph.} The walkable street network is duplicated to create the start walk layer, representing all locations from which a passenger may originate and walk toward a jeepney boarding point. Edges within this layer are bidirectional and weighted by walk distance multiplied by a walk weight coefficient: $w_{start\rightarrow start} = d \times \beta_{walk}$ where $d$ is the edge length in meters and $\beta_{walk}$ is the empirically derived walk weight obtained from the survey.
+    
+    \item \textbf{Layer 2: Jeep Graph.} Each jeepney route is represented as a separate subgraph of unidirectional edges following the route's circular path. Edges within a route are weighted by travel distance multiplied by a ride weight coefficient: $w_{ride\rightarrow ride} = d \times \beta_{ride}$
+    
+    Different jeepney routes have no direct node-to-node connections between them; passengers must alight to the end walk layer and board again via a transfer edge to change routes. This structural separation ensures that transfers are always mediated by the appropriate penalty edges.
+    
+    \item \textbf{Layer 3: End Walk Graph.} The walkable street network is duplicated again to create the end walk layer, representing locations a passenger may reach after alighting from a jeepney. As with the start walk layer, edges are bidirectional with walk-weighted costs: $w_{end\rightarrow end} = d \times \beta_{walk}$
+
+\end{itemize}
+
+\begin{figure}[h]
+    \centering    \includegraphics[width=0.8\textwidth]{chap3/figures/travel_graph_visualization.jpg}
+    \caption{Travel Graph Visualization}
+    \label{fig:iligan_network}
+\end{figure}
+
+\subsection{Inter-layer Connections}
+
+The three layers are connected by four types of directed edges that encode boarding, alighting, transfer, and direct-walk behaviors:
+
+\begin{itemize}
+    \item \textbf{Wait edges (Start Walk $\rightarrow$ Jeep).} Where a start walk node and a jeep node share the same geographic coordinates (i.e., a passenger can board a jeepney at that location), a directed edge connects the start walk node to the jeep node with a weight equal to the wait weight: $w_{wait} = \beta_{wait}$
+    
+    This weight represents the expected disutility of initial boarding, including anticipated waiting time, and is derived from stated-preference survey responses.
+    
+    \item \textbf{Alight edges (Jeep $\rightarrow$ End Walk).} Where a jeep node and an end walk node share the same coordinates, a directed edge with zero weight connects them: $w_{alight} = 0$
+    
+    The zero weight reflects that alighting itself incurs no additional penalty beyond the in-vehicle travel already accumulated; passengers simply transition from riding to the end walk layer.
+    
+    \item \textbf{Direct edges (Start Walk $\rightarrow$ End Walk).} For origin-destination pairs where the passenger chooses not to use any jeepney (i.e., walks the entire trip), a zero-weight edge connects co-located start walk and end walk nodes: $w_{direct} = 0$
+    
+    This allows the shortest-path algorithm to evaluate pure walking alternatives against jeepney-assisted routes.
+    
+    \item \textbf{Transfer edges (End Walk $\rightarrow$ Jeep).} Where an end walk node and a jeep node share the same coordinates, a directed edge connects them with a weight equal to the transfer weight: $w_{transfer} = \beta_{transfer}$
+    
+    This weight captures the pure transfer penalty (the additional disutility passengers experience when changing vehicles, independent of any walking or waiting time already accounted) calibrated from stated-preference choice experiments.
+\end{itemize}
+
+\subsection{Rationale for Differentiated Wait and Transfer Weights}
+
+The original framework by \citet{sanchez2025} applied a uniform boarding cost \texttt(wait\_cost) to both initial boarding and subsequent transfers. However, empirical research on transfer penalties in public transport has consistently found that the pure transfer penalty, or the disutility of changing vehicles beyond walking and waiting time, is substantial, often equivalent to 13--18 minutes of in-vehicle travel time for bus systems \citep{jara-diaz2022}. Moreover, passengers perceive transfers as qualitatively different from initial boarding: transfers involve additional uncertainty about connection reliability, physical and cognitive effort in navigating to a new vehicle, potential exposure to weather or unsafe environments, and disruption of trip continuity (Yap et al., 2024; Meskell et al., 2024).
+
+By structuring the graph such that initial boarding (start walk $\rightarrow$ jeep) uses a wait weight while subsequent boardings (end walk $\rightarrow$ jeep) use a separate transfer weight, the model can accurately capture this empirical distinction. Passengers incur the transfer penalty exactly once per transfer event, automatically counted by the number of transfer edges traversed in the shortest path. This design:
+
+\begin{enumerate}
+    \item Enables vanilla shortest-path search. Standard Dijkstra's algorithm operates without modification; all penalties are encoded as additive edge weights, preserving the algorithm's correctness and efficiency guarantees.
+    
+    \item Reflects empirical behavioral research. The differentiation between wait and transfer weights aligns with decades of stated-preference research showing that transfer penalties exceed simple waiting-time disutility \citep{jara-diaz2022, yap2024}.
+    
+    \item Avoids double-counting. Because alight edges carry zero weight and transfer edges carry the full transfer penalty, passengers are never penalized twice for the same event.
+    
+    \item Supports sensitivity analysis. The modular weight structure allows researchers to independently vary wait and transfer weights during calibration and sensitivity testing, enabling exploration of how route-choice outcomes change under different behavioral assumptions.
+\end{enumerate}
+
+\subsection{Congestion and Dynamic Weighting}
+
+While the baseline model uses static edge weights, the framework is designed to accommodate dynamic conditions. The ride weight coefficient $\beta_{ride}$ can be replaced with a time-varying or segment-specific value that reflects simulated congestion effects:
+\begin{equation}
+w_{ride}(t) = d \times \beta_{ride}(t) \times \gamma_{congestion}  
+\end{equation}
+where $\gamma_{congestion}$ is a congestion multiplier determined by the current number of jeeps traversing each edge in the network. For simulation purposes, $\gamma_{congestion}$ increases as more jeeps are assigned to a given edge, introducing higher travel disutility on heavily used corridors. This incentivizes the optimization to distribute jeepney flows more efficiently and discourages the over-concentration of vehicle routes on the same street segments. The result is a self-balancing mechanism that models congestion effects and promotes more robust route designs. Future implementations may calibrate $\gamma_{congestion}$ based on observed simulation flow or integrate queueing models for further realism.
+
+\subsection{Graph Construction Summary}
+
+The complete travel graph $G = (V, E)$ is constructed by:
+\begin{enumerate}[nosep]
+    \item Downloading and simplifying the OSM walkable network for the study area.
+    \item Duplicating the network into start walk and end walk layers.
+    \item Encoding each jeepney route as a unidirectional cyclic subgraph with ride-weighted edges.
+    \item Connecting layers via wait, alight, direct, and transfer edges based on coordinate coincidence.
+    \item Assigning empirically calibrated weights to each edge type.
+\end{enumerate}
+
+The resulting graph supports efficient shortest-path queries using standard algorithms (e.g., Dijkstra, A*), with the path cost directly interpretable as generalized travel time in equivalent in-vehicle minutes. This representation enables the agent-based simulation to route each passenger optimally given their origin, destination, and the current jeepney network configuration, providing the fitness evaluation mechanism for the metaheuristic optimization.
+
+\section{Agent-Based Passenger Simulation Module}
+\noindent{The agent-based passenger simulation models individual travelers as autonomous agents that generate trips, determine optimal routes, and execute journeys through the multi-layer travel graph. This section describes the passenger behavior model, the jeepney vehicle operations, and the system integration that drives the framework's fitness evaluation.}
+
+\subsection[Land-Use Data Extraction and Residential/Non-Residential\\Classification]{Land-Use Data Extraction and Residential/\\Non-Residential Classification}
+\noindent{Passenger trips are generated between residential and non-residential areas based on the monocentric city model paradigm, which posits that city residents commute between residential zones (where they reside) and employment/commercial centers (non-residential zones) in structured patterns (\citealt{schiff2024}; \citealt{zhangb2024}). The monocentric model remains a foundational framework in urban economics, with the core mechanism being the relationship between commuting costs, housing prices, and housing consumption—residents trade off proximity to the central business district (CBD) against housing affordability \citep{liotta2022, gaigne2022}. To operationalize this, residential and non-residential building footprints and land-use areas are extracted from OpenStreetMap using an unsupervised classification methodology.}
+
+\subsection{Data Extraction Procedure}
+\noindent{OpenStreetMap building footprints and land-use polygons are downloaded using OSMnx \citep{boeing2024}. Buildings are classified as residential or non-residential through the following decision hierarchy (adapted from \citealt{atwal2024}):}
+
+\begin{enumerate}
+    \item Direct building tags: Buildings with building=residential, building=house, or building=apartments tags are classified as residential. Buildings with tags such as building=commercial, building=industrial, building=office, or amenity=* (e.g., amenity=restaurant, amenity=hospital) are classified as non-residential.
+    \item Inherited land-use tags: Buildings whose centroids spatially intersect with OSM land-use polygons inherit the land-use classification. For example, a building overlapping a polygon tagged landuse=residential is classified as residential, while buildings intersecting landuse=commercial, landuse=industrial, or landuse=retail are classified as non-residential.
+    \item Point-of-interest (POI) inference: Buildings spatially overlapping POI features (amenities, shops, offices) are classified as non-residential. This captures commercial and service buildings that may lack explicit building tags.
+    \item Default classification: Remaining unclassified buildings are labeled as residential, reflecting the empirical observation that the majority of buildings in most urban areas are residential, and OSM users tend to tag non-residential buildings more thoroughly \citep{atwal2024, jochem2018}.
+\end{enumerate}
+
+\indent{This hierarchical approach yields a binary classification where each building or land-use area is labeled either as residential or non-residential. In implementation, the centroid coordinates of each classification group are computed to serve as aggregated origin and destination zones for passenger generation.}
+
+\indent{This study assumes the presence of semi-formalized boarding locations (hereafter "designated stops") that serve as primary boarding and alighting points for jeepney operations within the study area. The optimization framework, demand mapping, and agent boarding rules are therefore calibrated under this assumption: route proposals are evaluated on their ability to serve demand concentrated at these stops and the three-layer travel graph encodes explicit start/ride/end walk transitions around fixed stop nodes. We acknowledge that this assumption restricts the immediate applicability of our results to urban contexts that are sufficiently urbanized or regulated to exhibit recognizably consistent stop behaviour. Cities lacking designated stops (i.e., where boarding occurs at informal key nodes such as intersections or curbside points) require alternative modeling choices discussed below; treating this case is a distinct research problem that motivates the "optimization under informal systems" contribution of this manuscript.}
+
+\subsection{Passenger Spawning and Despawning via Foot Traffic Mapping}
+
+\noindent{Rather than assigning origins and destinations uniformly at random, passenger generation is grounded in an empirically-derived foot traffic map. This approach leverages network topology, built-environment factors, and observed traffic patterns to produce spatially realistic and temporally consistent demand.}
+
+\indent{Boarding points are treated as discrete stop nodes embedded in the ride-layer of the travel graph. This simplifies passenger-waiting logic (WAIT state) and permits straightforward mapping between foot-traffic-weighted edges and explicit stops. In contexts where formal designated stops are absent and passengers instead board at informal key nodes (e.g., intersections, street corners, ad-hoc curbside locations), the same demand-weighting and Poisson-spawning framework can be adapted by (i) treating high-foot-traffic intersections or POI-centroids as probabilistic stop candidates, (ii) representing boarding location choice as a continuous/nearest-node selection rather than a fixed-stop assignment, and (iii) calibrating boarding density using field counts or pheromone-accumulated passenger paths. We therefore separate two operational regimes in our approach: (1) the \emph{designated-stop regime} which benefits directly from stop-centered optimization, and (2) the \emph{informal-stop regime} which requires additional modeling of stop emergence and warrants a dedicated study.}
+
+\subsubsection{Constructing the Foot Traffic Map via Procedural Data Propagation}
+
+The study area is modeled as a primal graph $G = (N, E)$ representing the road network topology. To estimate vehicular flow cost without exhaustive city-wide data collection, a stratified random sampling strategy is employed. Real-time traffic data is acquired via the TomTom Traffic API for a subset of $n=100$ edges (given the limitations of their freemium API), selected to maximize spatial coverage across varying road types.
+
+These observed values function as seed points for a spatiotemporal imputation framework \citep{chen2022}. By utilizing Betweenness Centrality \citep{boeing2021} and local building density as structural priors, the model propagates synthetic Average Daily Traffic (ADT) values to the unobserved edges in the network. This results in a comprehensive traffic map, denoted as $\text{ADT}_{\text{prop}}$, which serves as the primary environmental variable for the pedestrian cost function:
+
+\begin{equation}
+    C_{\text{traffic}} = w_1 \cdot \ln(\text{ADT}_{\text{prop}})
+    \label{eq:traffic_cost}
+\end{equation}
+
+This logarithmic transformation accounts for the diminishing marginal impact of vehicular volume on pedestrian comfort at high saturation levels.
+
+We treat the study area (e.g., Iligan City) as a primal graph $G = (N, E)$. Vehicular traffic data is acquired via the TomTom Traffic API for a stratified random sample of $n=100$ nodes. These ground-truth observations are used to train a spatial regressor, utilizing Betweenness Centrality \citep{boeing2021} and building density as feature inputs. The trained model procedurally generates synthetic Average Daily Traffic (ADT) values for the remaining unobserved edges in the network \citep{pun2019}. This ensures that the traffic variable input into the pedestrian model reflects real-world congestion patterns rather than uniform assumptions.
+
+The estimated pedestrian volume is then computed via a log-linear regression model:
+
+\begin{equation}
+\ln(V_{\text{ped}}) = \beta_0 + \beta_1 \ln(\text{ADT}_{\text{prop}}) + \beta_2 \ln(D_{\text{bldg}}) + \beta_3 \ln(C_B) + \beta_4 (L_{\text{mix}}) + \epsilon
+\label{eq:ped_volume}
+\end{equation}
+
+\noindent{where $V_{\text{ped}}$ denotes the estimated daily pedestrian volume, $\text{ADT}_{\text{prop}}$ is the procedurally propagated vehicular traffic intensity derived from the TomTom sample, $D_{\text{bldg}}$ is building density derived from OSMnx footprints (a proxy for trip generation and land-use intensity), $C_B$ is the Betweenness Centrality score, $L_{\text{mix}}$ is an optional land-use mix entropy measure, and $\beta_i$ are calibration coefficients obtained from local sample counts or transferred from comparable direct-demand studies \citep{sobreira2023, zhangp2024}. The resulting foot traffic map assigns a weighted value to each edge, representing its estimated pedestrian flow.}
+
+\begin{figure}[h]
+    \centering    \includegraphics[width=0.8\textwidth]{chap3/figures/ddm.png}
+    \caption{Projected pedestrian volume across residential and non-residential zones in Iligan City. Intensities are inferred from vehicular Average Daily Traffic (ADT), illustrating that central urban arteries serve as the primary loci for pedestrian activity despite the environmental cost of vehicular flow.}
+    \label{fig:iligan_network}
+\end{figure}
+
+\subsubsection{Passenger Generation via Weighted Spatial Distribution with Poisson and Sociodemographic Conditioning}
+
+Passengers are generated as a spatially heterogeneous Poisson process whose spatial probabilities remain anchored to the foot traffic map. The foot traffic map acts as a spatial probability distribution to bias origins and destinations, while sociodemographic heterogeneity modulates per-location arrival intensities. This integrates the original weighted spatial distribution approach with the survey-derived behavioral heterogeneity described in Section 3.1.
+
+\begin{enumerate}[nosep]
+    \item \textbf{Origin Selection - weighted spatial distribution retained.} A random location is drawn from the foot traffic map, weighted by $V_{\text{ped}}(e,t)$. This preserves the original intent that edges with higher pedestrian volume, influenced by ADT, building density, and centrality, generate proportionally more potential passengers.
+    \item \textbf{Sociodemographic sampling at origin.} For the sampled origin edge $e$, draw a sociodemographic group $g$ from the edge-specific distribution $\pi_g(e)$ obtained by post-stratifying survey responses to local population margins (age bands, mobility-limited flag, income bracket, vehicle ownership, trip purpose). This step conditions each potential passenger on observed sociodemographic heterogeneity.
+    \item \textbf{Individual mode propensity.} For group $g$, use the survey or a fitted logistic model to obtain a jeepney mode-propensity $\rho_g$. Only sampled individuals who pass this probabilistic choice are treated as potential jeepney arrivals.
+    \item \textbf{Destination Selection - gravity or shortest-path probability.} Destination selection follows the previously described gravity-model or shortest-path-based probability distribution, with destination attractiveness measured by $V_{\text{ped}}$ or land-use mix. The gravity model preserves the distance-decay behavior present in the original text.
+    \item \textbf{Per-edge, per-group Poisson intensity.} Arrival intensity at edge \(e\) and time \(t\) contributed by group \(g\) is
+    \begin{equation}
+    \lambda_{e,g}(t)=\kappa\,V_{\mathrm{ped}}(e,t)\,\pi_g(e)\,\rho_g\,h_g(t),
+    \end{equation}
+    where \(\kappa\) is a global scaling constant chosen during calibration and \(h_g(t)\) is a group-specific time-of-day profile. This parameterization is consistent with the non-homogeneous Poisson point process modeling framework, in which the intensity function can be expressed as a log-linear function of predictor variables. ~\citep{baddeley2015spatial}.    
+    \item \textbf{Draw arrivals.} For each $e$ and $g$, draw arrivals $N_{e,g}(t)\sim\text{Poisson}(\lambda_{e,g}(t)\Delta t)$ where $\Delta t$ is the simulation time step. Total arrivals at $e$ are $N_e(t)=\sum_g N_{e,g}(t)$. For each arrival, sample destination as above and initialize the agent in state WALK.
+    \item \textbf{Behavioral parameter assignment.} For the generated agent belonging to group $g$, sample willingness-to-walk from the group-conditional survey distribution and sample transfer aversion. These realized individual parameters are used to constrain or bias pathfinding (e.g., disallow boarding locations beyond the individual's WTW threshold unless chosen as a higher-cost option).
+\end{enumerate}
+
+By explicitly retaining $V_{\text{ped}}$ as the spatial weighting mechanism while conditioning Poisson arrival intensities on $\pi_g(e)$ and $\rho_g$, the model preserves the original weighted spatial distribution and gains behavioral realism. This structure allows experiments that keep the spatial footprint fixed but vary accessibility and equity outcomes by sociodemographic group.
+
+\noindent\textbf{Notes on integration with Arrival Rate Calibration.} Calibrate $\kappa$ so that
+\[
+    \sum_e \sum_g \lambda_{e,g}(t)\Delta t \approx R_{\text{target}}(t),
+\]
+where $R_{\text{target}}(t)$ is derived from observed ridership or modal-share scaling of summed $V_{\text{ped}}(e,t)$. Use post-stratification to compute $\pi_g(e)$ and validate group-level boarding shares against available counts. Preserve the weighted spatial distribution diagnostics: boarding density should remain proportional to $V_{\text{ped}}$ after conditioning, unless policy scenarios or behavioral shifts change $\rho_g$ or $h_g(t)$.
+
+This demand generation mechanism reflects the monocentric model assumption that commuter trips primarily follow radial patterns between residential peripheries and central employment districts \citep{manser2020}, \textit{while explicitly grounding these patterns in the observed spatial structure of the city}. In Philippine cities, jeepneys account for a substantial share of motorized person trips and remain central to everyday mobility and to debates on public transport modernization and just transition \citep{gatarin2024}. By anchoring demand to foot traffic, the model captures the concentration of walking accessibility near jeepney stops and popular destinations, improving realism over uniform random assignment.
+
+\subsubsection{Arrival Rate Calibration}
+
+The Poisson arrival rate $\Lambda$ is calibrated to match observed or target ridership levels. For exploratory simulation and proof-of-concept studies, a typical range is $0.5$–$5$ passengers per simulation step (time step $\Delta t = 1$ second or $10$ seconds, depending on scale). Calibration is performed through the following steps:
+
+\begin{enumerate}[nosep]
+    \item $V_{\text{ped}}$ is summed across all edges to obtain total citywide pedestrian volume.
+    \item The sum is divided by the jeepney modal share (e.g., 40\% in Philippine contexts) to estimate the fraction of pedestrians who convert to jeepney demand.
+    \item $\Lambda$ is scaled to match historical or survey-based jeepney ridership for the study area.
+\end{enumerate}
+
+In agent-based and simulation-based transit studies, passenger arrivals modeled as Poisson processes enable stochastic yet statistically tractable demand generation \citep{singh2023}. Explicit grounding in foot traffic ensures demand heterogeneity reflects real urban structure rather than artificial uniformity.
+
+\subsubsection{Passenger Despawning and Trip Completion}
+
+Passengers despawn upon reaching their destination, transitioning to state DONE. This frees computational resources and enables tracking of completed trips for metrics such as average commute time, total waiting time, boarding location, and route utilization. By measuring boarding points against the foot traffic map, model realism can be validated: areas with high foot traffic should exhibit proportionally higher boarding counts, providing a diagnostic check on demand-supply alignment.
+
+\subsection{Path Determination via Shortest-Path Search}
+Upon generation, each passenger immediately computes their shortest path from their origin location to their destination using Dijkstra's algorithm applied to the travel graph constructed in Section 3.2. The algorithm operates over the three-layer graph structure, with:
+
+\begin{itemize}[nosep]
+    \item Source node: A node in the start walk layer (layer 1) at or near the passenger's origin.
+    \item Sink node: A node in the end walk layer (layer 3) at or near the passenger's destination.
+\end{itemize}
+
+\indent{The cost function is:}
+
+\begin{equation}
+\text{cost}(u, v) =
+\begin{cases}
+d \cdot \beta_{\text{walk}} 
+    & \text{if } u, v \in V_{\text{walk}}, \\
+
+\beta_{\text{wait}} 
+    & \text{if } u \in V_{\text{start\_walk}},\; v \in V_{\text{ride}} \; (\text{boarding}), \\
+
+d \cdot \beta_{\text{ride}}(t) \cdot \gamma_{\text{congestion}}
+    & \text{if } u, v \in V_{\text{ride}} \; (\text{same route}), \\
+
+\beta_{\text{transfer}}
+    & \text{if } u \in V_{\text{end\_walk}},\; v \in V_{\text{ride}} \; (\text{transfer}), \\
+
+0 
+    & \text{if } u \in V_{\text{ride}},\; v \in V_{\text{end\_walk}} \; (\text{alight}), \\
+
+0 
+    & \text{if } u \in V_{\text{start\_walk}},\; v \in V_{\text{end\_walk}} \; (\text{direct}).
+\end{cases}
+\end{equation}
+
+The resulting path encodes the passenger's full itinerary: which streets they walk, which jeepney routes they board and in what order, where they transfer, and where they alight. Crucially, the path cost (in equivalent in-vehicle minutes) reflects the disutility of their entire journey, including walking time, waiting time, riding time, and transfer penalties.
+
+\indent{Once the path is computed, the passenger stores it and begins execution through the state machine described below.}
+
+\indent{Although Dijkstra’s algorithm returns a single shortest path for implementation convenience, the underlying structure of the travel graph often admits multiple paths with equal generalized travel cost. These paths are equivalent in the sense that they correspond to different jeepney routes or transfer combinations that yield the same disutility in equivalent in-vehicle minutes, even if they traverse distinct physical corridors. In this framework, such equivalence reflects the realistic situation where several jeepney lines can accommodate a passenger’s OD pair with indistinguishable perceived cost, and the simulation resolves this by assigning passengers to the first feasible vehicle that can serve any of these cost-equivalent paths.}
+
+\subsection{Passenger State Machine and Travel Execution}
+\Each passenger operates within a four-state finite-state machine (FSM) that governs their behavior throughout the simulation. Agent-based models using finite-state machines are widely employed in transportation simulation to represent discrete behavioral phases such as walking, waiting, and riding \citep{tozluoglu2024, verbas2024}:
+
+\begin{itemize}
+    \item \textbf{State 1: WALK.} The passenger traverses the walkable street network toward an intermediate target node (either a jeepney boarding point, their destination, or an alighting point after exiting a jeepney). Movement occurs at walking speed $v_{\text{walk}}$ along the shortest euclidean path, with each position update advancing the agent by $\Delta x$=$v_{\text{walk}},\Delta t$. The recommended pedestrian walking speed for design purposes is 1.2–1.25 m/s (approximately 4.3–4.5 km/h), which is the standard assumed for crosswalk signal timing internationally \citep{bhuiyan2024, katsaros2024, toprakli2024}. This study adopts $v_{\text{walk}}$=1.2m/s as the baseline walking speed. When the passenger reaches their target node, they transition to the next state according to their precomputed path.
+    \item \textbf{State 2: WAIT.} The passenger remains at a designated waiting point along the jeep route’s path, monitoring approaching vehicles. At each simulation tick, the agent invokes a method willIntersect(position) to detect if any jeepney on the required route will pass the stop within the next time step. If multiple jeepneys are available, the passenger boards the first non-full jeepney (see jeepney capacity constraints below). If no suitable jeepney arrives or all are full, the passenger remains in WAIT state for the next time step. Waiting time accumulates as a metric for each passenger; extended waits are penalized in the fitness function. In the path-finding phase, wait time is already incorporated via the wait weight $\beta_{\text{wait}}$, but actual realized wait time can vary due to jeepney schedule variability and crowding.
+    \item \textbf{State 3: RIDE.} he passenger travels with the jeepney, moving at jeepney speed along the jeepney's predetermined route: $\Delta x$=$v_{\text{jeep}},\Delta t$
+    The passenger remains in RIDE state until the jeepney reaches the passenger's alighting point (as determined by their precomputed path) or until the passenger's intermediate destination is reached. At the alighting point, the passenger exits the jeepney and transitions to WALK state (or DONE if the alighting point is their final.
+    \item \textbf{State 4: DONE.} The passenger has reached their destination and is removed from the simulation. Their trip metrics (total time, walking distance, riding distance, waiting time, number of transfers) are recorded for analysis.
+\end{itemize}
+
+\FloatBarrier 
+% hello radz, i made a figure. feel free to use it for this subsection
+\begin{figure}[h]
+    \centering    \includegraphics[width=0.8\textwidth]{chap3/figures/passenger_graph.jpg}
+    \caption{Passenger Graph Traversal Visualization}
+    \label{fig:iligan_network}
+\end{figure}
+
+\FloatBarrier 
+
+It must be noted that, in practice, multiple travel sequences on the travel graph can yield identical generalized commute costs, especially when distinct jeepney routes overlap along common street segments. In these cases, the agent’s precomputed path specifies a sequence of edges that can be served by more than one jeepney line, and the state machine implements a simple behavioral rule: at each WAIT state, the passenger boards the first non-full jeepney that traverses the required edge/s, thereby operationalizing a first-come, first-served choice among cost-equivalent alternatives without altering the underlying shortest-path solution.
+
+\subsection{Jeepney Operations and Fleet Management}
+The jeepney system comprises multiple routes, each with an assigned fleet of identical vehicles. All jeepneys are characterized by a fixed capacity (typically 16–23 passengers for traditional jeepneys, or up to 24 seated plus 10 standing for modern jeepneys) and operate deterministically along pre-planned circular routes \citep{mendoza2021, inquirer2022}.
+
+\indent{Under the designated-stop regime the model enforces boarding only at defined stop nodes and the fleet scheduling, capacity checks, and boarding rules are implemented with reference to these nodes. This yields clearer service-coverage metrics and simplifies the pheromone-based demand-service gap calculation. If, instead, boarding is informal, route connectivity and vehicle stop-selection must permit opportunistic boarding along route edges; modeling such behaviour increases computational complexity and alters the demand--service gap interpretation because service supply cannot be tallied simply as presence/absence of an edge in a route but must also account for spatially continuous service probability along edges.}
+
+\textbf{Jeepney Speed.} Based on empirical data from Philippine cities, the average operational speed of jeepneys ranges from 9–10 km/h in congested urban areas such as Metro Manila and Baguio City \citep{ranosa2021, changingtransport2021}.
+
+This nominal speed can be modified by congestion effects through the congestion multiplier $\gamma_{\text{congestion}}$. When multiple jeepneys traverse the same edge, the edge's effective ride weight increases, raising the path cost and discouraging over-saturation:
+\begin{equation}
+    v_{jeep}(t) = \frac{v_{jeep}^{nominal}}{\gamma_{\text{congestion}}\!\left(n_{\text{jeep}}\right)}
+\end{equation}
+Where jeep is the number of jeepneys currently on the edge. For simulation purposes, $\gamma_{\text{congestion}}$ increases as more jeeps are assigned to a given edge, introducing higher travel disutility on heavily used corridors. This incentivizes the optimization to distribute jeepney flows more efficiently and discourages the over-concentration of vehicle routes on the same street segments. The result is a self-balancing mechanism that models congestion effects and promotes more robust route designs.
+
+\textbf{Capacity and boarding constraints}. Each jeepney has a fixed capacity C (e.g., 16 passengers for traditional jeepneys). Passengers in WAIT state board a jeepney only if two conditions are met:
+
+\begin{enumerate}[nosep]
+    \item The jeepney will intersect the passenger’s current stop within the next  $\Delta t$.
+    \item The jeepney's current occupancy is less than C (i.e., number of passengers on board < C).
+\end{enumerate}
+
+If both conditions are satisfied, the passenger boards and transitions to RIDE state. If the jeepney is full, the passenger remains in WAIT state and will board the next suitable vehicle. This capacity constraint is critical for realistic simulation, as overloading is a common issue in Philippine public transport, with enforcement agencies recording an average of 16 apprehensions per day for overloading in urban areas \citep{sitchon2023}.
+
+\textbf{Route Operations}. Each jeepney is bound to a single route and continuously cycles along that route throughout the simulation. A route is parameterized by:
+
+\begin{itemize} [nosep]
+    \item An ordered sequence of stop nodes $V_{\text{node}} = \{ v_1,\, v_2,\, \ldots,\, v_m,\, v_1 \}$ (the route is cyclic).
+    \item An edge sequence $E_{route}$ with unidirectional travel costs weighted by ride weight and congestion.
+    \item A fleet size $f$ (number of jeepney vehicles operating on this route).
+\end{itemize}
+
+The Jeep System is queried by the pathfinding algorithm to determine which routes serve which stops and to compute edge weights. It is also updated at each simulation step to advance all vehicles and process boarding/alighting events.
+
+\subsection{Passenger Demand and Trip Generation}
+\noindent{Passengers are generated according to a time-inhomogeneous Poisson process. The arrival rate $\lambda(t)$ can be constant (for simplicity) or time-varying (to model peak vs. off-peak periods):} 
+\begin{equation}
+P(N_{\Delta t} = k \mid \lambda)
+= \frac{(\lambda \Delta t)^k e^{-\lambda \Delta t}}{k!}
+\end{equation}
+\noindent{The formulation found in Equation 3.6 permits time-varying arrival rates $\lambda(t)$ for modeling peak versus off-peak periods, yielding a time-inhomogeneous Poisson process that has been validated for passenger arrivals at transit stops under stochastic demand \citep{zhangj2023, christensen2023}. The time-inhomogeneous extension follows the standard non-homogeneous Poisson process (NHPP) framework, where the arrival rate parameter varies with time while maintaining the memoryless property within infinitesimal intervals \citep{ross1996stochastic, cinlar2013introduction}. For proof-of-concept studies, a constant arrival rate is typically used.
+In calibrated simulations, $\lambda(t)$ is derived from observed or activity-based demand patterns, often segmented by hour of day. Agent-based simulations commonly employ Poisson processes for passenger generation, as this approach balances computational tractability with realistic stochastic variation in demand \citep{christensen2023, zhangj2023}.}
+
+\indent{The total number of passengers in the system at time t is bounded by the simulation duration and arrival rate, with each passenger existing for the duration of their trip (typically 5–30 simulation minutes depending on network size and congestion).}
+
+\subsection{Synchronization and Update Sequence}
+\noindent{At each simulation time step, the following sequence is executed.}
+
+\begin{enumerate}[nosep]
+    \item Passenger generation: Generate Nnew passengers according to $Poisson(\lambda \Delta t)$. Assign each origin, destination, and compute the shortest path.
+    \item Passenger state updates:
+        \begin{enumerate}[label=\alph*., nosep]
+            \item For each passenger in WALK state: advance position by $v_{walk}\Delta t$. 
+            \item For each passenger in WAIT state: check for boarding opportunities.
+            \item For each passenger in RIDE state: advance position with jeepney, check for alighting. 
+        \end{enumerate}
+    \item Jeepney updates:
+        \begin{enumerate}[label=\alph*., nosep]
+            \item For each jeepney: advance position by $v_{jeep}(t)\Delta t$. along route,
+            \item Process boarding and alighting events.
+            \item Update occupancy counts.
+        \end{enumerate}
+    \item Metrics accumulation: Record waiting times, completed trips, and route utilization. 
+\end{enumerate}
+
+\subsection{Formal Model Summary}
+\noindent{The passenger simulation is a discrete-event system:}
+\[
+Simulation = (Passengers, Routes, TravelGraph, TimeStep)
+\]
+\noindent{Where:}
+\begin{itemize}[nosep]
+    \item Passengers: A dynamic set of agent objects, each with\newline 
+    $state$ $\in \{{WALK}, { WAIT}, {RIDE}, {DONE}\}$, position, origin, destination, and scheduled path.
+    \item Routes: A static collection of jeepney routes, each containing a cycle of stops and an associated fleet.
+    \item TravelGraph: The three-layer graph with nodes and weighted edges as described in Section 3.2.
+    \item TimeStep: Discrete updates at intervals $\Delta t$, with passenger and vehicle state transitions driven by the FSM and boarding constraints.
+\end{itemize}
+
+\indent{The simulation evolves deterministically given a jeepney route configuration and a sequence of passenger arrivals. The key output is the average commute time across all completed passengers, computed as:}
+\begin{equation}
+{CommuteTime}_{\mathrm{avg}}
+= \frac{1}{N} \sum_{i=1}^{N} trip\_duration_{i}
+\end{equation}
+\indent{where $N$ is the number of completed passengers in a simulation run. This metric serves as the fitness function that the optimization algorithm in Section 3.4 seeks to minimize through systematic route mutations and re-evaluation.}
+
+\section{Memetic Optimization Framework: Genetic Algorithm with ACO-Inspired Local Search}
+\noindent{The optimization module integrates a genetic algorithm (GA) with ant colony optimization (ACO)-inspired local search to evolve jeepney route configurations that minimize passenger commute time. This memetic approach combines the global exploration capability of evolutionary algorithms with the demand-responsive intensification provided by pheromone-based route biasing, forming a hybrid framework that systematically improves network efficiency across generations.}
+
+\subsection{Initial Population Generation}
+\noindent{A population of $N_{pop}$ individuals are generated using a randomized constructive heuristic. For each individual, routes are constructed by:}
+
+\begin{enumerate}[nosep]
+    \item Selecting a random starting node from the walkable network.
+    \item Performing a random walk of specified length along the street graph.
+    \item Ensuring the route forms a closed loop by connecting the final segment back to the origin.
+    \item Repeating for $k$ routes per individual.
+\end{enumerate}
+
+\indent{This randomized initialization ensures diversity in the initial population, which is critical for avoiding premature convergence \citep{abulail2025, hao2023}. The baseline configuration (number of routes $k$ and fleet size per route $f$) is preserved across all individuals to enable fair comparison.}
+
+\subsection{Fitness Evaluation via Agent-Based Simulation}
+\noindent{Each candidate jeepney system $S_i$ is evaluated by running the agent-based passenger simulation described in Section 3.3. The simulation executes for a fixed duration $T_{sim}$ during which passengers are spawned, routed, and tracked through their journeys.}
+
+\subsection{Primary Fitness Metric}
+\noindent{The primary objective is to minimize average commute time across all passengers. However, relying solely on the mean can obscure poor performance for a subset of passengers (e.g. those stranded by inadequate route coverage). To address this, the fitness function incorporates both the mean and standard deviation of commute times, weighted to penalize high variance:}
+\begin{equation}
+f(s_i) = \bar{T}_{\mathrm{commute}} + \alpha \times \sigma_{\mathrm{commute}}    
+\end{equation}
+where:
+\begin{itemize}[nosep]
+    \item $\bar{T}_{\text{commute}}
+        = \left( \frac{1}{N_{\text{completed}}} \right)
+        \sum_{p \in P_{\text{completed}}} T_p$
+        is the mean commute time of completed passengers.
+
+    \item $\sigma_{\text{commute}}
+        = \sqrt{
+            \left( \frac{1}{N_{\text{completed}}} \right)
+            \left( \sum_{p \in P_{\text{completed}}} (T_p - \bar{T}_{\text{commute}})^2 \right)
+        }$
+        is the standard deviation.
+
+    \item $\sigma \in [0,1]$ is a weighting coefficient that controls 
+        the penalty for variability (default: $\sigma = 0.5$).
+\end{itemize}
+
+\indent{This formulation aligns with multi-objective optimization practices in vehicle routing, where minimizing both average and variance of travel time improves equity and service reliability \citep{huang2024, li2024}.}
+
+Because the weighting coefficient is an explicit parameter, the trade-off between mean commute time and variability can be easily reweighted for future extensions; however, this study deliberately keeps the fitness commute-time–focused (with variability penalty) to prioritize commute time as the primary objective. In this sense, the study acts as a proof-of-workability baseline: it evaluates whether a commute-time–centric fitness can guide effective system reconstruction, while keeping the formulation intentionally extensible so that future work can incorporate additional constraints (e.g., coverage, equity, cost) as weighted penalty terms by modifying the fitness coefficients \citep{nnene2023, borchers2024}.
+
+\subsection{Handling Incomplete Passengers}
+\noindent{Passengers who have not completed their journey by simulation end (have not reached DONE state) represent potential service failures, or individuals who may never reach their destination under the current route configuration. These passengers are assigned a penalty commute time:}
+\begin{equation}
+T_p = T_{\text{elapsed}} + \beta \times T_{\text{remaining}}
+\end{equation}
+\indent{where Telapsed is the time already spent, Tremaining is the estimated remaining travel time based on their current position and destination, and >1 is a penalty multiplier (default: =2.0) that inflates the cost of incomplete journeys. This ensures the fitness function accounts for passengers who are effectively stranded by poor route configurations.}
+\indent{The total fitness is then:}
+\begin{equation}
+f(s_i)
+= \left(
+    \sum_{p_{completed}} T_p
+    \;+\;
+    \sum_{p_{incomplete}} T_p
+  \right)
+  + \alpha \times \sigma_{\text{all}}
+\end{equation}
+\subsection{Pheromone Deposition and Evaporation Rules}
+\noindent{For each passenger p with planned path $\pi_p = \{ e_1,\, e_2,\, \ldots,\, e_m \}$, pheromone is deposited on all edges in the path regardless of whether the passenger completed their journey. This captures latent demand, or edges that passengers would traverse if service were adequate, rather than only realized trips:}
+\begin{equation}
+\tau^{\text{new}}_{e}
+= \tau^{\text{old}}_{e}
++ \Delta \tau_{p}
+\end{equation}
+
+\noindent{where $\Delta \tau_p$ is the pheromone contribution from passenger $p$. Following the ant-quantity pheromone update rule from \citet{dorigo2004} (Equation 3.6, p.~71), the contribution is inversely proportional to path cost:}
+
+\begin{equation}
+\Delta \tau_{p} = \frac{Q}{C(\pi_p)}    
+\end{equation}
+
+\noindent{where $Q$ is a pheromone intensity constant and $C(\pi_p)$ is the total cost of the passenger's path. According to \citeauthor{dorigo2004}'s formulation, shorter paths deposit more pheromone, creating positive feedback toward high-quality solution components. This formulation rewards edges that appear in efficient routes with higher pheromone levels.}
+
+\indent{To prevent unlimited pheromone accumulation and allow the algorithm to adapt to changing conditions across generations, pheromone levels evaporate at each generation:}
+\begin{equation}
+\tau^{g+1}_{e}
+= (1 - \rho) \times \tau^{g}_{e}
+  + \sum_{p \in P^{g}} \Delta \tau_{p}
+\end{equation}
+
+\noindent{where $\rho \in (0,1)$ is the evaporation rate (default: $\rho = 0.1$) and $g$ denotes the generation. This pheromone evaporation mechanism, given by \citet{dorigo2004} (Equation 3.7, p.~73), prevents unbounded accumulation and allows the algorithm to forget outdated information, balancing exploitation of historically good edges with exploration of new configurations \citep{ning2021, du2022}.}
+
+\subsection{Rationale for Hybrid GA-ACO Integration}
+
+\noindent{The integration of genetic algorithms with ant colony optimization-inspired mechanisms forms a memetic algorithm structure that combines complementary search strategies. GAs provide global exploration through population-based evolution, while ACO contributes local intensification through pheromone-guided demand learning \citep{dorigo2004, moscato1989evolution}. This hybridization addresses the limitation of pure GAs, which lack problem-specific guidance in recombination, and pure ACO, which can suffer from premature convergence without population diversity \citep{mottahedi2021multi, hao2023}.}
+
+\indent{The theoretical justification for hybrid GA-ACO rests on the no-free-lunch theorem \citep{wolpert1997no}, which establishes that no single optimization algorithm dominates across all problem classes. By combining multiple search strategies, hybrid approaches can leverage the strengths of each component while mitigating individual weaknesses. For routing problems specifically, hybrid GA-ACO algorithms have demonstrated superior performance compared to either algorithm alone \citep{mottahedi2021multi, zheng2023}. The pheromone matrix in this framework serves as learned problem knowledge that guides both crossover (via pheromone-weighted route selection) and mutation (via demand-gap identification), effectively transforming blind evolutionary search into informed, demand-responsive optimization.}
+
+\subsection{ACO-Inspired Local Search: Demand-Driven Route Biasing}
+
+Following \citet{sanchez2025}, mutation randomly modifies a single route within an individual. The mutation operator selects a route index uniformly at random and applies one of:
+
+\begin{itemize} [nosep]
+    \item Point mutation: Replace a random segment of the route with a new random path. 
+    \item Insertion mutation: Insert a new waypoint into the route.
+    \item Deletion mutation: Remove a waypoint (if route length permits).
+    \item Swap mutation: Exchange two segments within the route.
+\end{itemize}
+
+This study will improve upon their framework and take a more targeted approach in mutation.
+
+\noindent{The core innovation of this framework is the integration of pheromone-guided local search within the genetic algorithm. After fitness evaluation and pheromone deposition, a local search operator incrementally adjusts routes toward high-demand corridors identified by pheromone concentration. Unlike mutation operators that replace entire route segments, this approach performs targeted edge substitutions—replacing individual low-demand edges with high-demand alternatives while preserving route connectivity.}
+
+\subsubsection{Demand-Service Gap Identification}
+
+\indent{To identify underserved demand, the algorithm computes a demand-service gap for each edge $e$ in the network:}
+
+\begin{equation}
+\Delta_e = \tau_e - \sum_{r \in R} \mathbf{1}[e \in r] \times w_r
+\label{eq:demand_gap}
+\end{equation}
+
+\noindent{where:}
+\begin{itemize}[nosep]
+    \item $\tau_e$ is the accumulated pheromone level on edge $e$, serving as a proxy for passenger demand. Higher pheromone indicates that more passengers have traversed this edge in their shortest paths, signaling high utilization.
+    
+    \item $\mathbf{1}[e \in r]$ is an indicator function equal to 1 if edge $e$ is part of route $r$, and 0 otherwise. This identifies which edges currently receive service coverage.
+    
+    \item $w_r$ is the service weight of route $r$, proportional to its fleet size and service frequency. Routes with more vehicles or higher frequency contribute greater service coverage.
+    
+    \item $\sum_{r \in R} \mathbf{1}[e \in r] \times w_r$ represents the total service supply allocated to edge $e$ across all routes in the network. This quantifies how much vehicle capacity currently serves this corridor.
+    
+    \item $\Delta_e$ is the demand-service mismatch: positive values indicate underserved edges (high demand, low supply), while negative values indicate oversupplied edges (low demand, high supply).
+\end{itemize}
+
+\noindent{This demand-service gap formulation, as shown in Equation \ref{eq:demand_gap}, is a novel contribution introduced in this study. It adapts ACO pheromone information to identify spatial mismatches between passenger demand and vehicle supply—a dynamic, real-time assessment that updates as the optimization progresses. The concept draws inspiration from facility location models that minimize unmet demand \citep{farahani2012covering}, but implemented here through pheromone accumulation rather than static optimization. Edges with high positive $\Delta_e$ represent underserved corridors requiring additional service coverage.}
+
+\subsubsection{Demand-Driven Route Adjustment Strategies}
+
+\noindent{Three complementary strategies are employed to incrementally nudge routes toward underserved edges. Each operates through edge substitution: identifying a candidate edge for removal and a candidate edge for insertion, then performing the swap if it maintains route connectivity. These strategies are applied probabilistically during local search, with each offering a distinct mechanism for demand-responsive route refinement.}
+
+\paragraph{Strategy 1: Least-Served Route Extension}
+
+\noindent{This strategy targets the route that currently serves the least passenger demand, redirecting it toward the most underserved corridor. The rationale is that poorly performing routes represent wasted capacity that should be reallocated to high-demand areas.}
+
+\indent{First, identify the route $r^\star$ with the lowest total accumulated pheromone:}
+
+\begin{equation}
+r^\star = \arg\min_{r \in R} \sum_{e \in r} \tau_e
+\label{eq:least_served}
+\end{equation}
+
+\noindent{This route has the lowest cumulative demand signal, indicating that passengers rarely use it in their optimal paths. It is therefore the best candidate for redirection.}
+
+\indent{Next, identify the highest-demand underserved edge:}
+
+\begin{equation}
+e^\ast = \arg\max_{e \in E} \Delta_e
+\label{eq:max_gap}
+\end{equation}
+
+\noindent{This edge has the largest positive demand-service gap, representing the most critical unmet demand in the network.}
+
+\indent{The algorithm then attempts to extend or modify route $r^\star$ to incorporate edge $e^\ast$, subject to geographic proximity and route continuity constraints. Specifically:}
+
+\begin{itemize}[nosep]
+    \item Identify a segment of $r^\star$ that is spatially close to $e^\ast$ (within a threshold distance, e.g., 500 meters).
+    \item Select a low-pheromone edge $e_{\text{old}} \in r^\star$ in this proximate segment.
+    \item Replace $e_{\text{old}}$ with $e^\ast$, ensuring the resulting route remains a connected path.
+    \item If the substitution creates a disconnected route, insert bridge edges to restore connectivity.
+\end{itemize}
+
+\noindent{\textbf{Justification:} This strategy reallocates underperforming routes to critical demand gaps. By targeting the least-served route, the algorithm focuses improvement effort where it is most needed, avoiding unnecessary modifications to already-effective routes. The geographic proximity constraint ensures that route modifications remain practical and do not create excessively circuitous paths.}
+
+\paragraph{Strategy 2: Nearest Route Attraction}
+
+\noindent{This strategy extends existing routes to absorb nearby underserved demand. Rather than redirecting the worst-performing route, it identifies the route already closest to the highest-demand gap and incrementally expands it to capture that demand.}
+
+\indent{For the highest-demand underserved edge $e^\ast$ (from Equation \ref{eq:max_gap}), identify the nearest existing route:}
+
+\begin{equation}
+r_{\text{nearest}} = \arg\min_{r \in R} d(e^\ast, r)
+\label{eq:nearest_route}
+\end{equation}
+
+\noindent{where $d(e^\ast, r)$ is the minimum Euclidean distance from edge $e^\ast$ to any edge in route $r$. This metric identifies the route that can most easily be extended to incorporate $e^\ast$ with minimal detour.}
+
+\indent{The algorithm then performs edge substitution:}
+
+\begin{itemize}[nosep]
+    \item Identify the edge $e_{\text{endpoint}} \in r_{\text{nearest}}$ that is closest to $e^\ast$.
+    \item Find a low-pheromone edge $e_{\text{old}} \in r_{\text{nearest}}$ near $e_{\text{endpoint}}$.
+    \item Replace $e_{\text{old}}$ with $e^\ast$, adding bridge edges as necessary to maintain route connectivity.
+\end{itemize}
+
+\noindent{This approach is inspired by nearest-neighbor insertion heuristics in the traveling salesman problem \citep{rosenkrantz1977}, where new points are added to a tour at the location that minimizes detour cost.}
+
+\noindent{\textbf{Justification:} By selecting the nearest route, this strategy minimizes the disruption to existing route structure while incrementally expanding coverage to underserved areas. It is particularly effective when demand gaps are spatially clustered near existing routes, allowing gradual route refinement without radical reconfiguration. This incremental approach balances exploration (adding new coverage) with exploitation (maintaining proven route structures).}
+
+\paragraph{Strategy 3: Probabilistic Pheromone-Weighted Mutation}
+
+\noindent{This strategy applies a stochastic edge-replacement operator across all routes, with replacement probability proportional to the pheromone differential between candidate edges. Unlike the first two strategies, which target specific routes or edges, this operator scans the entire route set and probabilistically swaps edges based on their demand characteristics.}
+
+\indent{For each edge $e_{\text{old}}$ currently in any route, and for each candidate replacement edge $e_{\text{new}}$ in the network (subject to connectivity constraints), compute the replacement probability:}
+
+\begin{equation}
+P(\text{replace } e_{\text{old}} \text{ with } e_{\text{new}}) 
+= \max\left(0, \frac{\tau_{e_{\text{new}}} - \tau_{e_{\text{old}}}}{\tau_{\max}}\right) \times p_{\text{mutation}}
+\label{eq:prob_mutation}
+\end{equation}
+
+\noindent{where:}
+\begin{itemize}[nosep]
+    \item $\tau_{e_{\text{new}}}$ is the pheromone level on the candidate replacement edge, indicating its demand intensity.
+    \item $\tau_{e_{\text{old}}}$ is the pheromone level on the current edge in the route.
+    \item $\tau_{\max} = \max_{e \in E} \tau_e$ is the maximum pheromone value in the network, used for normalization to ensure $P \in [0, p_{\text{mutation}}]$.
+    \item $p_{\text{mutation}}$ is the base mutation probability (typically 0.1–0.3), controlling the overall mutation rate.
+    \item The $\max(0, \cdot)$ function ensures that only beneficial swaps (where $\tau_{e_{\text{new}}} > \tau_{e_{\text{old}}}$) have positive probability, preventing replacement of high-demand edges with low-demand ones.
+\end{itemize}
+
+\noindent{The replacement probability in Equation \ref{eq:prob_mutation} is proportional to the pheromone differential, normalized by the maximum pheromone. This creates a demand-gradient-based mutation operator:}
+
+\begin{itemize}[nosep]
+    \item If $\tau_{e_{\text{new}}} \gg \tau_{e_{\text{old}}}$, the probability is high (up to $p_{\text{mutation}}$), strongly favoring the swap.
+    \item If $\tau_{e_{\text{new}}} \approx \tau_{e_{\text{old}}}$, the probability is near zero, avoiding neutral or detrimental swaps.
+    \item If $\tau_{e_{\text{new}}} < \tau_{e_{\text{old}}}$, the probability is exactly zero, preventing replacement of high-demand edges.
+\end{itemize}
+
+\noindent{This biased mutation operator is a novel formulation that integrates genetic algorithm mutation with ACO pheromone information. Traditional GA mutation applies uniform random changes without problem-specific guidance \citep{goldberg1989}. By contrast, this operator uses accumulated demand knowledge (pheromone) to bias mutations toward high-quality edge substitutions, creating an adaptive, knowledge-guided mutation strategy similar to adaptive mutation operators that adjust rates based on search progress \citep{eiben1999}.}
+
+\noindent{\textbf{Justification:} This strategy provides broad, stochastic exploration across the entire route network. While Strategies 1 and 2 focus on specific high-priority modifications, Strategy 3 applies probabilistic refinement everywhere, enabling the discovery of non-obvious improvements. The pheromone-weighted probability ensures that mutation effort is concentrated on beneficial swaps, avoiding the inefficiency of random mutation. This creates a pheromone-weighted mutation operator that preferentially introduces high-demand edges \citep{farda2024}, accelerating convergence toward demand-responsive route configurations.}
+
+\subsubsection{Integration and Memetic Structure}
+
+\noindent{The three strategies are applied sequentially with probability $p_{\text{local}}$ (default: 0.5) to each individual in the population after fitness evaluation. For each selected individual:}
+
+\begin{enumerate}[nosep]
+    \item Strategy 1 is applied once, modifying the least-served route if improvement is possible.
+    \item Strategy 2 is applied once, extending the nearest route to the highest-demand gap if feasible.
+    \item Strategy 3 is applied to all routes, performing probabilistic edge swaps according to Equation \ref{eq:prob_mutation}.
+    \item The modified individual is re-evaluated via simulation. If fitness improves, the modified individual replaces the original; otherwise, the original is retained.
+\end{enumerate}
+
+\noindent{This memetic structure—combining global GA search with local ACO-guided refinement—has been shown to outperform pure GA or ACO approaches on routing problems \citep{hao2023, zheng2023}. The local search acts as a problem-specific hill-climbing operator that refines GA-generated solutions using learned demand patterns, accelerating convergence while maintaining population diversity through the stochastic acceptance criterion.}
+
+\subsubsection{Theoretical Justification for Edge Substitution}
+
+\noindent{The edge substitution mechanism preserves the genetic algorithm's population-based search while incorporating local, demand-responsive refinement. Unlike crossover, which recombines entire routes from two parents, edge substitution performs fine-grained adjustments within a single solution. This enables the algorithm to:}
+
+\begin{itemize}[nosep]
+    \item \textbf{Exploit learned demand patterns:} Pheromone accumulation across generations provides increasingly accurate demand estimates. Edge substitution leverages this learned knowledge to guide incremental improvements.
+    
+    \item \textbf{Maintain route continuity:} By replacing individual edges rather than large segments, the operator preserves the overall structure of effective routes while correcting localized inefficiencies.
+    
+    \item \textbf{Balance exploration and exploitation:} Strategies 1 and 2 provide directed, greedy improvement (exploitation), while Strategy 3 introduces stochastic variation (exploration), preventing premature convergence.
+    
+    \item \textbf{Adapt dynamically:} As pheromone levels evolve, the same strategies automatically shift their focus to different edges, enabling the algorithm to track changing demand patterns across generations.
+\end{itemize}
+
+\noindent{This approach aligns with the principles of memetic algorithms \citep{moscato2003memetic}, where domain-specific local search is hybridized with population-based metaheuristics to combine global exploration with local intensification. The demand-service gap metric (Equation \ref{eq:demand_gap}) serves as the problem-specific heuristic that guides local search, transforming generic mutation into intelligent, demand-aware route refinement.}
+
+
+\subsection{Genetic Operators: Selection, Crossover, and Mutation}
+\noindent{Following local search, standard genetic operators are applied to create the next generation.}
+
+\indent{Tournament selection with tournament size $k_{\text{tour}}=3$ is used to select parents for crossover. This balances selection pressure with diversity preservation \citep{hussain2022}:}
+
+\begin{equation}
+P(\text{select } S_i) = \frac{1}{(f(S_i))^{k_{\text{tour}}}}
+\end{equation}
+
+\noindent{where the probability is inversely proportional to fitness (since we minimize commute time). This form of tournament selection \citep{goldberg1991} provides moderate selection pressure while avoiding premature convergence.}
+
+Additionally, elitism preserves the top $n_{elite}$ individuals unchanged
+into the next generation, ensuring that good solutions are not lost.
+
+A novel crossover operator combines routes from two parents while inheriting
+pheromone information. Given parents $S_A$ and $S_B$ with associated pheromone
+matrices $\tau_A$ and $\tau_B$:
+
+\begin{enumerate}
+    \item Route selection:  
+    For each route slot $j \in \{1, \ldots, k\}$, select the route from the
+    parent with higher total pheromone on that route:
+    \begin{equation}
+    R^{child}_j
+    = R^A_j
+      \quad \text{if } \sum_{e \in R^A_j} \tau^A_e
+        >  R^{child}_j,
+      \quad \text{otherwise } R^B_j
+    \end{equation}
+
+    \item Pheromone blending:  
+    The child inherits a blended pheromone matrix:
+    \begin{equation}
+    \tau^{\text{child}}_e
+      = \gamma \cdot \tau^A_e
+      + (1 - \gamma) \cdot \tau^B_e
+    \end{equation}
+    where $\gamma \in [0,1]$ is a blending coefficient (default: $\gamma = 0.5$).
+\end{enumerate}
+
+\noindent{This pheromone-biased crossover operator is a novel contribution of this framework, extending traditional genetic algorithm crossover by incorporating learned demand information from ACO. Rather than selecting parent routes uniformly, routes are chosen based on accumulated pheromone, representing passenger demand patterns. This knowledge-guided recombination combines the population-based search of GAs with ACO's solution quality indicators, following the principle of knowledge-guided search in hybrid metaheuristics \citep{moscato2003memetic}. The pheromone inheritance mechanism transfers learned demand information from parents to offspring, accelerating convergence by preserving knowledge about high-demand corridors \citep{lei2024, abulail2025}.}
+
+\subsection{Hybrid GA-ACO Optimization Loop}
+
+\noindent{The hybrid GA--ACO optimization is decomposed into four main phases (Algorithms~\ref{alg:phaseA}--\ref{alg:phaseD}) and one wrapper loop (Algorithm~\ref{alg:hybrid_ga_aco}). Each phase focuses on a distinct task: simulation-based evaluation, pheromone learning, ACO-biased local refinement, and GA-based global search. This modular presentation clarifies the contribution of each component while preserving the overall workflow.}
+
+\subsubsection{Phase A: Simulation-Based Evaluation}
+
+\noindent{Phase A evaluates all candidate schedules in parallel by running the agent-based simulation over a fixed horizon, computing fitness from system performance (travel times and penalties) and logging passenger paths as empirical demand traces.}
+
+\begin{algorithm}
+\caption{Phase A -- Simulation and Fitness Evaluation}
+\label{alg:phaseA}
+\begin{algorithmic}[1]
+\REQUIRE Population $P = \{S_1, \dots, S_{N_{\text{pop}}}\}$, Simulation time $T_{\text{sim}}$
+\ENSURE Fitness values $f(S_i)$ and recorded passenger paths $\{\pi_p\}$
+\FOR{each individual $S_i$ in $P$}
+    \STATE Run agent-based simulation under schedule $S_i$ for $T_{\text{sim}}$ steps
+    \STATE $f(S_i) \leftarrow$ compute fitness (e.g., travel time + penalties)
+    \STATE Record passenger paths $\{\pi_p\}$ utilized by $S_i$
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Phase B: Pheromone Update}
+
+\noindent{Phase B updates the global pheromone matrix by evaporating existing pheromone and reinforcing edges that lie along frequently used passenger paths, thereby encoding both demand and performance into the ACO memory.}
+
+\begin{algorithm}
+\caption{Phase B -- Pheromone Update}
+\label{alg:phaseB}
+\begin{algorithmic}[1]
+\REQUIRE Pheromone matrix $\tau$, Evaporation rate $\rho$, Recorded paths $\{\pi_p\}$
+\ENSURE Updated pheromone matrix $\tau$
+\FOR{each edge $e$}
+    \STATE $\tau_e \leftarrow (1 - \rho) \cdot \tau_e$ \COMMENT{Evaporation}
+\ENDFOR
+\FOR{each recorded passenger path $\pi_p$}
+    \FOR{each edge $e \in \pi_p$}
+        \STATE $\tau_e \leftarrow \tau_e + \Delta \tau_p$ \COMMENT{Deposit}
+    \ENDFOR
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Phase C: ACO-Biased Local Search}
+
+\noindent{Phase C applies a local search to each schedule, guided by pheromone levels and demand gaps, to incrementally reallocate service toward under-served but high-demand edges while only accepting fitness improvements.}
+
+\begin{algorithm}
+\caption{Phase C -- ACO-Biased Local Search}
+\label{alg:phaseC}
+\begin{algorithmic}[1]
+\REQUIRE Population $P$, Pheromone matrix $\tau$
+\ENSURE Locally improved population $P$
+\FOR{each individual $S_i$ in $P$}
+    \STATE Compute demand gaps $\Delta_e$ on edges
+    \STATE Propose modification $S_i'$ using heuristics (Nearest, Least-Served) biased by $\tau$
+    \IF{$f(S_i') < f(S_i)$}
+        \STATE $S_i \leftarrow S_i'$
+    \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Phase D: Genetic Operators}
+
+\noindent{Phase D performs global search via a GA: elites are preserved, crossover is biased by pheromone information, and mutation operators maintain diversity, yielding a new generation of candidate schedules.}
+
+\begin{algorithm}
+\caption{Phase D -- GA Selection, Crossover, and Mutation}
+\label{alg:phaseD}
+\begin{algorithmic}[1]
+\REQUIRE Current population $P$, Population size $N_{\text{pop}}$, Mutation probability $p_m$, Pheromone matrix $\tau$
+\ENSURE New population $P'$
+\STATE $P' \leftarrow$ select elites from $P$
+\WHILE{$|P'| < N_{\text{pop}}$}
+    \STATE Select parents $p_1, p_2$ via tournament selection
+    \STATE $child \leftarrow$ Crossover($p_1, p_2$, weighted by $\tau$)
+    \IF{$\text{Random}(0,1) < p_m$}
+        \STATE $child \leftarrow$ Mutate($child$) \COMMENT{Point / insertion / deletion / swap}
+    \ENDIF
+    \STATE Add $child$ to $P'$
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Unified Algorithmic Framework}
+
+\noindent{Algorithm~\ref{alg:hybrid_ga_aco} wraps these four phases into an iterative loop over generations, alternating between simulation-based evaluation, pheromone learning, local refinement, and global evolutionary search until convergence or a generation limit is reached.}
+
+\begin{algorithm}
+\caption{Hybrid GA--ACO Optimization Loop}
+\label{alg:hybrid_ga_aco}
+\begin{algorithmic}[1]
+\REQUIRE $N_{\text{pop}}$, $G_{\max}$, $T_{\text{sim}}$, $\rho$, $p_m$
+\ENSURE Schedule $S^\ast$ minimizing $f(S)$
+\STATE Initialize population $P \leftarrow \{ S_1, \dots, S_{N_{\text{pop}}} \}$ randomly
+\STATE Initialize pheromone matrix $\tau \leftarrow \tau_0$ (uniform)
+\FOR{$g = 1$ \textbf{to} $G_{\max}$}
+    \STATE \textbf{Phase A:} Evaluate $P$ via simulation for $T_{\text{sim}}$ and obtain $f(S_i)$, $\{\pi_p\}$
+    \STATE \textbf{Phase B:} Update $\tau$ using recorded paths $\{\pi_p\}$ and evaporation rate $\rho$
+    \STATE \textbf{Phase C:} Apply ACO-biased local search to $P$ using $\tau$
+    \STATE \textbf{Phase D:} Generate new population $P'$ from $P$ using GA operators and $\tau$
+    \STATE $P \leftarrow P'$
+\ENDFOR
+\STATE $S^\ast \leftarrow \arg\min_{S \in P} f(S)$
+\RETURN $S^\ast$
+\end{algorithmic}
+\end{algorithm}
+
+
+The algorithm terminates when  
+(a) maximum generations defined by $G_{\max}$ have been reached, 
+(b) or fitness improvement stagnates for $n_{stag}$ consecutive generations.
+
+\subsection{Theoretical Rationale}
+\noindent{The memetic framework inherits convergence properties from both GA and ACO components. The GA provides global exploration through crossover and mutation, while the ACO-inspired local search intensifies search around promising regions identified by pheromone trails. Theoretical analysis of hybrid GA-ACO algorithms has shown that such combinations can achieve faster convergence than either method alone, particularly on combinatorial routing problems \citep{zheng2023, hao2023}.}
+
+\indent{The pheromone mechanism encodes collective information about passenger demand patterns. Unlike traditional ACO where pheromones guide ant path construction, here pheromones guide route modification, nudging vehicle routes toward corridors where passengers want to travel. This demand-responsive approach ensures that optimized routes serve actual travel patterns rather than arbitrary geometric configurations.}
+
+We can define the computational complexity as follows: 
+Let $|V|$ be the number of network nodes, $|E|$ the number of edges, 
+$N_{pop}$ the population size, and $N_{pass}$ the average number 
+of passengers per simulation. The per-generation complexity is dominated by:
+
+\begin{itemize}[nosep]
+    \item Simulation: 
+    $O\!\left( N_{\text{pop}} \cdot N_{\text{pass}} \cdot |V| \log |V| \right)$ 
+    for Dijkstra-based pathfinding.
+
+    \item Pheromone update: 
+    $O\!\left( N_{\text{pop}} \cdot N_{\text{pass}} \cdot L_{\text{avg}} \right)$ 
+    where $L_{\text{avg}}$ is average path length.
+
+    \item Local search: 
+    $O\!\left( N_{\text{pop}} \cdot k \cdot |E| \right)$ 
+    for demand gap computation and route modification.
+\end{itemize}
+
+The parallelization described in \citet{sanchez2025} distributes simulation across multiple cores, achieving near-linear speedup up to the number of available processors.
+
+\subsection{Integration with Behavioral Simulation}
+\noindent{The optimization loop is tightly integrated with the passenger simulation module. Each fitness evaluation triggers a complete simulation run, during which:}
+
+\begin{enumerate}[nosep]
+    \item Passengers are generated according to the Poisson process with residential/non-residential origin-destination patterns.
+    \item Each passenger computes their shortest path on the travel graph constructed from the candidate jeepney system.
+    \item Passengers execute their journeys through the WALK → WAIT → RIDE → DONE state machine.
+    \item Jeepneys operate along their assigned routes, picking up and dropping off passengers subject to capacity constraints.
+\end{enumerate}
+
+\indent{This behavioral realism ensures that fitness evaluations reflect actual passenger experiences under the candidate route configuration, rather than simplified proxy metrics. The pheromone deposition captures not just realized trips but also planned trips, revealing demand for corridors that may be underserved by current routes.}

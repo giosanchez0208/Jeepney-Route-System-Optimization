@@ -1,3 +1,16 @@
+"""visualizer.py
+
+WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[...] describes basemap modes, and _PROVIDERS stores map tile sources.
+StaticVisualizer(Nodes: list[Node], DirEdges: list[DirEdge], title: Optional[str] = None, *, query: Optional[str] = None, mode: MapMode = "light_nolabels", labels_on: bool = False, node_color: str = "#6fbaf0", node_radius: float = 40, edge_color: str = "#d1d1d1", edge_thickness: float = 2, landmarks: Optional[str] = None, Routes: Optional[list["Route"]] = None, route_thickness: float = 2.0) -> None creates the static map state.
+draw(self, mode: Optional[MapMode] = None, labels_on: Optional[bool] = None, node_color: Optional[str] = None, node_radius: Optional[float] = None, edge_color: Optional[str] = None, edge_thickness: Optional[float] = None, landmarks: Optional[str] = None) -> Image.Image renders an RGBA image.
+display(self, ...) -> None opens a Tk window with the rendered image.
+export(self, filename: str, ..., scale_up: int = 1) -> None saves the rendered image to disk.
+DynamicVisualizer(StaticVisualizers: list[StaticVisualizer], title: Optional[str] = None) -> None creates a GIF visualizer.
+draw(self, mode: MapMode = "light_nolabels", fps: int = 2) -> Image.Image renders a GIF frame sequence.
+display(self, mode: MapMode = "light_nolabels", fps: int = 2) -> None opens a Tk window with the GIF.
+export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2, scale_up: int = 1) -> None saves the GIF to disk.
+"""
+
 import io
 import tkinter as tk
 from functools import lru_cache

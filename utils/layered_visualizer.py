@@ -1,3 +1,12 @@
+"""layered_visualizer.py
+
+WINDOW_SIZE: int, _RENDER_DPI: int, _LAYERS: tuple[int, int, int], and color constants control the layered drawing style.
+LayeredVisualizer(city_graph: CityGraph, journey: list[DirEdge], title: Optional[str] = None, *, mode: MapMode = "light_nolabels", labels_on: bool = False, node_color: str = "#6fbaf0", node_radius: float = 40, edge_color: str = "#d1d1d1", edge_thickness: float = 2, journey_color: str = "#d62728", journey_thickness: float = 2.0, layer_opacity: float = 0.5, legend_on: bool = True, Routes: Optional[list["Route"]] = None, route_thickness: float = 2.0, nodes_on: bool = True) -> None creates the layered map state.
+draw(self, mode: Optional[MapMode] = None, labels_on: Optional[bool] = None, node_color: Optional[str] = None, node_radius: Optional[float] = None, edge_color: Optional[str] = None, edge_thickness: Optional[float] = None, journey_color: Optional[str] = None, journey_thickness: Optional[float] = None, layer_opacity: Optional[float] = None, legend_on: Optional[bool] = None, nodes_on: Optional[bool] = None) -> Image.Image renders an RGBA image.
+display(self, ...) -> None opens a Tk window with the rendered image.
+export(self, filename: str, ..., scale_up: int = 1) -> None saves the rendered image to disk.
+"""
+
 import io
 import tkinter as tk
 from pathlib import Path

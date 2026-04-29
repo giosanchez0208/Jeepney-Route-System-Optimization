@@ -1,3 +1,14 @@
+"""travel_graph.py
+
+WALK_WT: float, RIDE_WT: float, WAIT_WT: float, TRANSFER_WT: float, DIRECT_WT: float, and ALIGHT_WT: float store edge weights.
+TravelGraph(cg: CityGraph, routes: list[Route]) -> None creates cg: CityGraph, routes: list[Route], travel_graph: list[DirEdge], and _outgoing_edges: dict[Node, list[DirEdge]].
+_construct(self) -> None builds the layered travel graph.
+findShortestJourney(self, start: Node, end: Node) -> list[DirEdge] returns the best journey path or an empty list.
+_reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge] returns the recovered journey path.
+calculateJourneyDistance(self, start: Node, end: Node) -> float returns the total walk, ride, and walk distance in meters.
+calculateJourneyWeight(self, start: Node, end: Node) -> float returns the summed journey weight.
+"""
+
 from collections import defaultdict
 from heapq import heappush, heappop
 from itertools import count
