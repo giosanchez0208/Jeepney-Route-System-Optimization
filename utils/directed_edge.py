@@ -22,20 +22,45 @@ class DirEdge:
         weight: int = 1,
         id: Optional[str] = None,
         next_edges: Optional[list[str]] = None,
+        type: Optional[str] = None
     ) -> None:
+        if start is None or end is None:
+            raise ValueError("DirEdge requires both start and end nodes.")
+
         self.start = start
         self.end = end
         self.is_drivable = is_drivable
         self.weight = weight
         self.id = id if id is not None else f"{start.id}{end.id}"
         self.next_edges = next_edges if next_edges is not None else []
+        self.type = type if type is not None else self.getType()
 
     def getLength(self) -> float:
         return _getDistance(self.start, self.end)
 
     def isConnectedTo(self, other: DirEdge) -> bool:
         return _nodes_match(self.end, other.start)
-
+    
+    def getType(self) -> str:
+        match (self.start.layer, self.end.layer):
+            case (1, 1):
+                return "start_walk"
+            case (1, 2):
+                return "wait"
+            case (2, 2):
+                return "ride"
+            case (2, 3):
+                return "alight"
+            case (3, 2):
+                return "transfer"
+            case (3, 3):
+                return "end_walk"
+            case (1, 3):
+                return "direct"
+            case (0, 0) | (None, None):
+                return None
+            case _:
+                raise ValueError(f"Invalid layer combination: {self.start.layer} to {self.end.layer}")
 
 def _nodes_match(node1: Node, node2: Node) -> bool:
     return node1.lon == node2.lon and node1.lat == node2.lat and node1.layer == node2.layer
