@@ -33,8 +33,8 @@ except ImportError:  # pragma: no cover
     class InsufficientResponseError(Exception):
         pass
 
-from directed_edge import DirEdge
-from node import Node
+from .directed_edge import DirEdge
+from .node import Node
 
 WINDOW_SIZE = 800
 _RENDER_SCALE = 2

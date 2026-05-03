@@ -11,8 +11,8 @@ from scipy.spatial import cKDTree
 from pathlib import Path
 from typing import Optional
 
-from city_graph import CityGraph
-from node import Node
+from .city_graph import CityGraph
+from .node import Node
 
 class TrafficAwareODGenerator:
     """Spatially binds static traffic data to dynamic CityGraph nodes to generate demand."""

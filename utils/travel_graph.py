@@ -16,10 +16,10 @@ from pathlib import Path
 
 import yaml
 
-from node import Node
-from directed_edge import DirEdge
-from city_graph import CityGraph
-from route import Route
+from .node import Node
+from .directed_edge import DirEdge
+from .city_graph import CityGraph
+from .route import Route
 
 _CONSTS_PATH = Path(__file__).with_name("configs").joinpath("consts.yaml")
 with _CONSTS_PATH.open("r", encoding="utf-8") as f:

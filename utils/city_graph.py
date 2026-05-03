@@ -19,8 +19,8 @@ from itertools import count
 import networkx as nx
 import osmnx as ox
 from osmnx._errors import InsufficientResponseError
-from directed_edge import DirEdge, _getDistance, _stitch
-from node import Node
+from .directed_edge import DirEdge, _getDistance, _stitch
+from .node import Node
 
 _DRIVABLE_HIGHWAY_TYPES = {
     "motorway", "motorway_link",

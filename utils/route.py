@@ -7,10 +7,10 @@ _generate_route_path(city_graph: CityGraph, od_gen: Optional[TrafficAwareODGener
 from typing import Optional
 from random import sample
 
-from node import Node
-from directed_edge import DirEdge
-from city_graph import CityGraph
-from od_generator import TrafficAwareODGenerator
+from .node import Node
+from .directed_edge import DirEdge
+from .city_graph import CityGraph
+from .od_generator import TrafficAwareODGenerator
     
 class Route:
     def __init__(self, city_graph: CityGraph, path: Optional[list[DirEdge]] = None, od_gen: Optional[TrafficAwareODGenerator] = None) -> None:
