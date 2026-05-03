@@ -12,18 +12,25 @@ calculateJourneyWeight(self, start: Node, end: Node) -> float returns the summed
 from collections import defaultdict
 from heapq import heappush, heappop
 from itertools import count
+from pathlib import Path
+
+import yaml
 
 from node import Node
 from directed_edge import DirEdge
 from city_graph import CityGraph
 from route import Route
 
-WALK_WT = 0.0142
-RIDE_WT = 0.0071
-WAIT_WT = 8.5
-TRANSFER_WT = 14.2
-DIRECT_WT = 0.0
-ALIGHT_WT = 0.0
+_CONSTS_PATH = Path(__file__).with_name("configs").joinpath("consts.yaml")
+with _CONSTS_PATH.open("r", encoding="utf-8") as f:
+    _CONSTS = yaml.safe_load(f)
+
+WALK_WT = _CONSTS["WALK_WT"]
+RIDE_WT = _CONSTS["RIDE_WT"]
+WAIT_WT = _CONSTS["WAIT_WT"]
+TRANSFER_WT = _CONSTS["TRANSFER_WT"]
+DIRECT_WT = _CONSTS["DIRECT_WT"]
+ALIGHT_WT = _CONSTS["ALIGHT_WT"]
 
 class TravelGraph:
     def __init__(self, cg: CityGraph, routes: list[Route]) -> None:
@@ -205,6 +212,14 @@ if __name__ == "__main__":
     print("Constructing TravelGraph...")
     tg = TravelGraph(cg, routes)
     print(f"TravelGraph configured with {len(tg.travel_graph)} total edges.")
+
+    edge_type_counts = defaultdict(int)
+    for edge in tg.travel_graph:
+        edge_type_counts[edge.getType()] += 1
+
+    print("TravelGraph stats:")
+    for edge_type in ("start_walk", "wait", "ride", "alight", "transfer", "end_walk", "direct"):
+        print(f"  {edge_type}: {edge_type_counts.get(edge_type, 0)}")
 
     start_node, end_node = sample(cg.nodes, 2)
     print("\nFinding shortest journey...")
