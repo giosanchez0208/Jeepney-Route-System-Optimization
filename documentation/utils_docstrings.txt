@@ -79,3 +79,11 @@ _load_road_graph(self, query: str) -> nx.MultiDiGraph loads the road network for
 _build_outgoing_edges(self) -> None rebuilds the outgoing-edge lookup.
 _reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge] returns the recovered path.
 """
+
+od_generator.py
+"""od_generator.py
+
+TrafficAwareODGenerator(cg: CityGraph, traffic_csv_path: str, betas: Optional[dict] = None) -> None creates the passenger generation model.
+_bind_data(self) -> None spatially maps dynamic CityGraph nodes to static traffic data and calculates v_ped.
+generate_origins(self, n_points: int) -> list[Node] returns a list of sampled Node objects based on pedestrian volume weights.
+"""
