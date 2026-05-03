@@ -1,32 +1,34 @@
 """visualizer.py
 
-WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[...] describes basemap modes, and _PROVIDERS stores map tile sources.
-StaticVisualizer(Nodes: list[Node], DirEdges: list[DirEdge], title: Optional[str] = None, *, query: Optional[str] = None, mode: MapMode = "light_nolabels", labels_on: bool = False, node_color: str = "#6fbaf0", node_radius: float = 40, edge_color: str = "#d1d1d1", edge_thickness: float = 2, landmarks: Optional[str] = None, Routes: Optional[list["Route"]] = None, route_thickness: float = 2.0) -> None creates the static map state.
-draw(self, mode: Optional[MapMode] = None, labels_on: Optional[bool] = None, node_color: Optional[str] = None, node_radius: Optional[float] = None, edge_color: Optional[str] = None, edge_thickness: Optional[float] = None, landmarks: Optional[str] = None) -> Image.Image renders an RGBA image.
-display(self, ...) -> None opens a Tk window with the rendered image.
-export(self, filename: str, ..., scale_up: int = 1) -> None saves the rendered image to disk.
-DynamicVisualizer(StaticVisualizers: list[StaticVisualizer], title: Optional[str] = None) -> None creates a GIF visualizer.
-draw(self, mode: MapMode = "light_nolabels", fps: int = 2) -> Image.Image renders a GIF frame sequence.
-display(self, mode: MapMode = "light_nolabels", fps: int = 2) -> None opens a Tk window with the GIF.
-export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2, scale_up: int = 1) -> None saves the GIF to disk.
+WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[...] describes basemap modes.
+Passenger(curr_lon: float, curr_lat: float) -> None is a dummy class for passenger tracking.
+StaticVisualizer(area_query, ...) -> None creates the static map state.
+DynamicVisualizer(StaticVisualizers, ...) -> None creates a GIF visualizer.
+LiveVisualizer(area_query, ...) -> None creates an asynchronous parallel simulation visualizer.
 """
 
 import io
+import threading
+import time
 import tkinter as tk
 from functools import lru_cache
 from pathlib import Path
 from random import sample
+from typing import Literal, Optional
 
+import contextily as ctx
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-import contextily as ctx
+from matplotlib.collections import LineCollection, PathCollection
+from matplotlib.markers import MarkerStyle
+from matplotlib.transforms import Affine2D
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
 import osmnx as ox
-from PIL import Image, ImageTk, ImageSequence
 import requests
+from PIL import Image, ImageTk, ImageSequence
 
-from typing import Literal, Optional
 try:
     from osmnx._errors import InsufficientResponseError
 except ImportError:  # pragma: no cover
@@ -35,32 +37,22 @@ except ImportError:  # pragma: no cover
 
 from .directed_edge import DirEdge
 from .node import Node
+from .route import Route
+from .jeep import Jeep
 
 WINDOW_SIZE = 800
 _RENDER_SCALE = 2
 MapMode = Literal["street", "terrain", "satellite", "light", "light_nolabels", "dark", "dark_nolabels"]
+
 _GOOGLE_ROUTE_COLORS = [
-    "#EA4335",
-    "#FBBC05",
-    "#34A853",
-    "#4285F4",
-    "#F29900",
-    "#A142F4",
-    "#00ACC1",
-    "#E91E63",
-    "#3F51B5",
-    "#009688",
-    "#FF7043",
-    "#03A9F4",
-    "#8BC34A",
-    "#FFC107",
-    "#795548",
-    "#9E9E9E",
-    "#607D8B",
-    "#673AB7",
-    "#D81B60",
-    "#1E88E5",
+    "#EA4335", "#FBBC05", "#34A853", "#4285F4", "#F29900",
+    "#A142F4", "#00ACC1", "#E91E63", "#3F51B5", "#009688"
 ]
+_NODE_COLOR = "#4285F4"       
+_EDGE_COLOR = "#9E9E9E"       
+_JEEP_COLOR = "#EA4335"       
+_PASSENGER_COLOR = "#34A853"  
+
 _PROVIDERS = {
     "street": ctx.providers.OpenStreetMap.Mapnik,
     "terrain": ctx.providers.OpenTopoMap,
@@ -72,110 +64,62 @@ _PROVIDERS = {
 }
 
 
+class Passenger:
+    """Dummy class for holding passenger coordinates in the visualization."""
+    def __init__(self, curr_lon: float, curr_lat: float) -> None:
+        self.curr_lon = curr_lon
+        self.curr_lat = curr_lat
+
+
 class StaticVisualizer:
     def __init__(
         self,
-        Nodes: list[Node],
-        DirEdges: list[DirEdge],
+        area_query: str,
         title: Optional[str] = None,
-        *,
-        query: Optional[str] = None,
+        nodes: Optional[list[Node]] = None,
+        edges: Optional[list[DirEdge]] = None,
+        routes: Optional[list[Route]] = None,
+        jeeps: Optional[list[Jeep]] = None,
+        passengers: Optional[list[Passenger]] = None,
         mode: MapMode = "light_nolabels",
-        labels_on: bool = False,
-        node_color: str = "#6fbaf0",
-        node_radius: float = 40,
-        edge_color: str = "#d1d1d1",
-        edge_thickness: float = 2,
-        landmarks: Optional[str] = None,
-        Routes: Optional[list["Route"]] = None,
-        route_thickness: float = 2.0,
     ) -> None:
-        self.Nodes = Nodes
-        self.DirEdges = DirEdges
+        self.area_query = area_query
         self.title = title
-        self.query = query
+        self.nodes = nodes or []
+        self.edges = edges or []
+        self.routes = routes or []
+        self.jeeps = jeeps or []
+        self.passengers = passengers or []
         self.mode = mode
-        self.labels_on = labels_on
-        self.node_color = node_color
-        self.node_radius = node_radius
-        self.edge_color = edge_color
-        self.edge_thickness = edge_thickness
-        self.landmarks = landmarks
-        self.Routes = Routes
-        self.route_colors = _route_colors(len(Routes)) if Routes is not None else []
-        self.route_thickness = route_thickness
+        self.route_colors = _route_colors(len(self.routes))
 
-    def draw(
-        self,
-        mode: Optional[MapMode] = None,
-        labels_on: Optional[bool] = None,
-        node_color: Optional[str] = None,
-        node_radius: Optional[float] = None,
-        edge_color: Optional[str] = None,
-        edge_thickness: Optional[float] = None,
-        landmarks: Optional[str] = None,
-    ) -> Image.Image:
-        if not self.Nodes:
-            raise ValueError("Nodes needed to give visualizer context for basemap.")
+    def draw(self, mode: Optional[MapMode] = None) -> Image.Image:
+        lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
 
-        mode = self.mode if mode is None else mode
-        labels_on = self.labels_on if labels_on is None else labels_on
-        node_color = self.node_color if node_color is None else node_color
-        node_radius = self.node_radius if node_radius is None else node_radius
-        edge_color = self.edge_color if edge_color is None else edge_color
-        edge_thickness = self.edge_thickness if edge_thickness is None else edge_thickness
-        landmarks = self.landmarks if landmarks is None else landmarks
+        if lats and lons:
+            min_lat, max_lat = min(lats), max(lats)
+            min_lon, max_lon = min(lons), max(lons)
+        else:
+            min_lat, max_lat, min_lon, max_lon = _get_bounds(self.area_query)
 
-        lats = [node.lat for node in self.Nodes]
-        lons = [node.lon for node in self.Nodes]
-        bounds = _map_bounds(lats, lons)
-        landmark_points = _resolve_landmarks(landmarks, area_query=self.query, bounds=bounds)
-        if landmark_points:
-            lats.extend(lat for _, lat, _ in landmark_points)
-            lons.extend(lon for _, _, lon in landmark_points)
+        fig, ax = _build_figure(min_lat, max_lat, min_lon, max_lon)
 
-        fig, ax = _build_figure(lats, lons)
-
-        _add_basemap_or_blank(ax, mode)
-        _draw_nodes(ax, self.Nodes, node_color, node_radius, labels_on)
-        _draw_edges(ax, self.DirEdges, edge_color, edge_thickness, labels_on)
-        _draw_routes(
-            ax,
-            self.Routes,
-            self.route_colors,
-            self.route_thickness,
-        )
-        _draw_landmarks(ax, landmark_points)
+        _add_basemap_or_blank(ax, mode or self.mode)
+        _draw_edges(ax, self.edges)
+        _draw_routes(ax, self.routes, self.route_colors)
+        _draw_nodes(ax, self.nodes)
+        _draw_passengers(ax, self.passengers)
+        _draw_jeeps(ax, self.jeeps, self.routes, self.route_colors)
 
         return _render_to_image(fig)
 
-    def display(
-        self,
-        mode: Optional[MapMode] = None,
-        labels_on: Optional[bool] = None,
-        node_color: Optional[str] = None,
-        node_radius: Optional[float] = None,
-        edge_color: Optional[str] = None,
-        edge_thickness: Optional[float] = None,
-        landmarks: Optional[str] = None,
-    ) -> None:
-        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
+    def display(self, mode: Optional[MapMode] = None) -> None:
+        image = self.draw(mode)
         _open_window(image, self.title or "Static Visualizer")
 
-    def export(
-        self,
-        filename: str,
-        mode: Optional[MapMode] = None,
-        labels_on: Optional[bool] = None,
-        node_color: Optional[str] = None,
-        node_radius: Optional[float] = None,
-        edge_color: Optional[str] = None,
-        edge_thickness: Optional[float] = None,
-        landmarks: Optional[str] = None,
-        scale_up: int = 1,
-    ) -> None:
+    def export(self, filename: str, mode: Optional[MapMode] = None, scale_up: int = 1) -> None:
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
-        image = self.draw(mode, labels_on, node_color, node_radius, edge_color, edge_thickness, landmarks)
+        image = self.draw(mode)
         _save_scaled_image(image, filename, scale_up)
 
 
@@ -207,158 +151,227 @@ class DynamicVisualizer:
         _save_scaled_gif(image, self.frames, filename, scale_up=scale_up, duration=duration)
 
 
+class LiveVisualizer:
+    def __init__(
+        self,
+        area_query: str,
+        title: Optional[str] = None,
+        nodes: Optional[list[Node]] = None,
+        edges: Optional[list[DirEdge]] = None,
+        routes: Optional[list[Route]] = None,
+        jeeps: Optional[list[Jeep]] = None,
+        passengers: Optional[list[Passenger]] = None,
+        mode: MapMode = "light_nolabels",
+        sim_tick_rate: float = 0.05, 
+        render_fps: int = 30
+    ) -> None:
+        self.area_query = area_query
+        self.title = title
+        self.nodes = nodes or []
+        self.edges = edges or []
+        self.routes = routes or []
+        self.jeeps = jeeps or []
+        self.passengers = passengers or []
+        self.mode = mode
+        self.route_colors = _route_colors(len(self.routes))
+        
+        self.sim_tick_rate = sim_tick_rate
+        self.render_fps = render_fps
+        
+        self.lock = threading.Lock()
+        self._running = False
+
+    def display(self) -> None:
+        lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
+        if lats and lons:
+            min_lat, max_lat = min(lats), max(lats)
+            min_lon, max_lon = min(lons), max(lons)
+        else:
+            min_lat, max_lat, min_lon, max_lon = _get_bounds(self.area_query)
+
+        fig, ax = _build_figure(min_lat, max_lat, min_lon, max_lon)
+
+        _add_basemap_or_blank(ax, self.mode)
+        _draw_edges(ax, self.edges)
+        _draw_routes(ax, self.routes, self.route_colors)
+        _draw_nodes(ax, self.nodes)
+
+        self._jeep_scatter = _draw_jeeps(ax, self.jeeps, self.routes, self.route_colors)
+
+        p_lons = [p.curr_lon for p in self.passengers]
+        p_lats = [p.curr_lat for p in self.passengers]
+        self._pass_scatter = ax.scatter(p_lons, p_lats, marker="o", s=10, c=_PASSENGER_COLOR, zorder=5)
+
+        root = tk.Tk()
+        root.title(self.title or "Live Visualizer")
+        root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
+        root.resizable(False, False)
+
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.pack(fill=tk.BOTH, expand=True)
+
+        self._running = True
+
+        def _sim_loop():
+            while self._running:
+                start_time = time.time()
+                with self.lock:
+                    for j in self.jeeps:
+                        j.update()
+                elapsed = time.time() - start_time
+                sleep_time = max(0.0, self.sim_tick_rate - elapsed)
+                time.sleep(sleep_time)
+
+        sim_thread = threading.Thread(target=_sim_loop, daemon=True)
+        sim_thread.start()
+
+        def _render_loop():
+            if not self._running:
+                return
+
+            with self.lock:
+                j_offsets = [[j.currPos[1], j.currPos[0]] for j in self.jeeps]
+                p_offsets = [[p.curr_lon, p.curr_lat] for p in self.passengers]
+                j_headings = [j.heading for j in self.jeeps]
+
+            if self._jeep_scatter and j_offsets:
+                self._jeep_scatter.set_offsets(j_offsets)
+                
+                base_path = MarkerStyle('^').get_path()
+                paths = [base_path.transformed(Affine2D().rotate_deg(h)) for h in j_headings]
+                self._jeep_scatter.set_paths(paths)
+
+            if self._pass_scatter:
+                self._pass_scatter.set_offsets(p_offsets if p_offsets else np.empty((0, 2)))
+
+            canvas.draw_idle()
+            root.after(int(1000 / self.render_fps), _render_loop)
+
+        def _on_closing():
+            self._running = False
+            root.destroy()
+
+        root.protocol("WM_DELETE_WINDOW", _on_closing)
+        _render_loop()
+        root.mainloop()
+        sim_thread.join(timeout=1.0)
+
 
 ### HELPER FUNCTIONS ###
+
+def _get_jeep_colors(jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> list[str]:
+    colors = []
+    for j in jeeps:
+        try:
+            idx = routes.index(j.route)
+            colors.append(route_colors[idx])
+        except ValueError:
+            colors.append(_JEEP_COLOR)
+    return colors
+
+
+def _extract_all_coords(nodes, edges, routes, jeeps, passengers) -> tuple[list[float], list[float]]:
+    lats, lons = [], []
+    for n in nodes:
+        lats.append(n.lat)
+        lons.append(n.lon)
+    for e in edges:
+        lats.extend([e.start.lat, e.end.lat])
+        lons.extend([e.start.lon, e.end.lon])
+    for r in routes:
+        for e in r.path:
+            lats.extend([e.start.lat, e.end.lat])
+            lons.extend([e.start.lon, e.end.lon])
+    for j in jeeps:
+        lats.append(j.currPos[0])
+        lons.append(j.currPos[1])
+    for p in passengers:
+        lats.append(p.curr_lat)
+        lons.append(p.curr_lon)
+    return lats, lons
+
+
+@lru_cache(maxsize=32)
+def _get_bounds(area_query: str) -> tuple[float, float, float, float]:
+    try:
+        place = ox.geocode_to_gdf(area_query)
+        min_lon, min_lat, max_lon, max_lat = place.total_bounds
+        return min_lat, max_lat, min_lon, max_lon
+    except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError):
+        lat, lon = ox.geocode(area_query)
+        pad = 0.05
+        return lat - pad, lat + pad, lon - pad, lon + pad
+
 
 def _get_provider(mode: MapMode):
     return _PROVIDERS[mode]
 
 
-def _build_figure(lats: list[float], lons: list[float]) -> tuple[plt.Figure, plt.Axes]:
-    lat_pad = max((max(lats) - min(lats)) * 0.15, 0.001)
-    lon_pad = max((max(lons) - min(lons)) * 0.15, 0.001)
+def _build_figure(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> tuple[plt.Figure, plt.Axes]:
+    lat_pad = max((max_lat - min_lat) * 0.10, 0.002)
+    lon_pad = max((max_lon - min_lon) * 0.10, 0.002)
 
     dpi = 100 * _RENDER_SCALE
     fig, ax = plt.subplots(figsize=(WINDOW_SIZE / dpi, WINDOW_SIZE / dpi), dpi=dpi)
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    ax.set_xlim(min(lons) - lon_pad, max(lons) + lon_pad)
-    ax.set_ylim(min(lats) - lat_pad, max(lats) + lat_pad)
+    ax.set_xlim(min_lon - lon_pad, max_lon + lon_pad)
+    ax.set_ylim(min_lat - lat_pad, max_lat + lat_pad)
     ax.set_aspect("equal", adjustable="box")
     ax.axis("off")
     return fig, ax
 
 
-def _draw_nodes(ax: plt.Axes, nodes: list[Node], node_color: str, node_radius: float, labels_on: bool) -> None:
-    ax.scatter([node.lon for node in nodes], [node.lat for node in nodes], s=node_radius, c=node_color, zorder=3)
-    if labels_on:
-        for node in nodes:
-            ax.annotate(node.id, (node.lon, node.lat), textcoords="offset points", xytext=(5, 5), fontsize=8)
+def _draw_nodes(ax: plt.Axes, nodes: list[Node]) -> None:
+    if not nodes: return
+    ax.scatter([n.lon for n in nodes], [n.lat for n in nodes], s=2, c=_NODE_COLOR, zorder=3)
 
 
-def _draw_edges(ax: plt.Axes, edges: list[DirEdge], edge_color: str, edge_thickness: float, labels_on: bool) -> None:
-    segments = [((edge.start.lon, edge.start.lat), (edge.end.lon, edge.end.lat)) for edge in edges]
-    if segments:
-        ax.add_collection(LineCollection(segments, colors=edge_color, linewidths=edge_thickness, zorder=2))
-
-    if labels_on:
-        for edge in edges:
-            mid_lon = (edge.start.lon + edge.end.lon) / 2
-            mid_lat = (edge.start.lat + edge.end.lat) / 2
-            ax.annotate(edge.id, (mid_lon, mid_lat), textcoords="offset points", xytext=(0, 6), fontsize=7)
+def _draw_edges(ax: plt.Axes, edges: list[DirEdge]) -> None:
+    if not edges: return
+    segments = [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in edges]
+    ax.add_collection(LineCollection(segments, colors=_EDGE_COLOR, linewidths=0.5, linestyle="-", zorder=2))
 
 
-def _draw_routes(
-    ax: plt.Axes,
-    routes: Optional[list["Route"]],
-    route_colors: list[str],
-    route_thickness: float,
-) -> None:
-    if not routes:
-        return
-
+def _draw_routes(ax: plt.Axes, routes: list[Route], route_colors: list[str]) -> None:
+    if not routes: return
     for route, color in zip(routes, route_colors):
-        segments = _route_segments(route.path)
-        if not segments:
-            continue
-
-        ax.add_collection(
-            LineCollection(
-                segments,
-                colors=color,
-                linewidths=route_thickness,
-                capstyle="round",
-                joinstyle="round",
-                zorder=5,
+        segments = [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in route.path]
+        if segments:
+            ax.add_collection(
+                LineCollection(segments, colors=color, linewidths=1.0, linestyle=":", capstyle="round", joinstyle="round", zorder=4)
             )
-        )
 
 
-def _draw_landmarks(ax: plt.Axes, landmarks: list[tuple[str, float, float]]) -> None:
-    for label, lat, lon in landmarks:
-        ax.text(
-            lon,
-            lat,
-            label,
-            fontsize=7,
-            fontweight="bold",
-            color="black",
-            ha="center",
-            va="center",
-            zorder=4,
-        )
+def _draw_jeeps(ax: plt.Axes, jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> Optional[PathCollection]:
+    if not jeeps: return None
+    lons = [j.currPos[1] for j in jeeps]
+    lats = [j.currPos[0] for j in jeeps]
+    colors = _get_jeep_colors(jeeps, routes, route_colors)
+    
+    sc = ax.scatter(lons, lats, marker="^", s=5, c=colors, zorder=6)
+    
+    base_path = MarkerStyle('^').get_path()
+    paths = [base_path.transformed(Affine2D().rotate_deg(j.heading)) for j in jeeps]
+    sc.set_paths(paths)
+    
+    return sc
 
 
-def _resolve_landmarks(
-    landmarks: Optional[str],
-    *,
-    area_query: Optional[str] = None,
-    bounds: Optional[tuple[float, float, float, float]] = None,
-) -> list[tuple[str, float, float]]:
-    if landmarks is None:
-        return []
-
-    labels = [label.strip() for label in landmarks.split(",") if label.strip()]
-    resolved = []
-    for label in labels:
-        candidate_queries = [label]
-        if area_query:
-            candidate_queries.insert(0, f"{label}, {area_query}")
-            candidate_queries.append(f"{label} near {area_query}")
-
-        for candidate_query in candidate_queries:
-            try:
-                resolved_point = _geocode_landmark(candidate_query, label)
-            except ValueError:
-                continue
-            if bounds is not None and not _within_bounds(resolved_point[1], resolved_point[2], bounds):
-                continue
-            resolved.append(resolved_point)
-            break
-    return resolved
-
-
-@lru_cache(maxsize=256)
-def _geocode_landmark(query: str, label: str) -> tuple[str, float, float]:
-    try:
-        place = ox.geocode_to_gdf(query)
-        if place.empty:
-            raise ValueError
-
-        geometry = place.iloc[0].geometry
-        centroid = geometry.centroid
-        return label, centroid.y, centroid.x
-    except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError):
-        try:
-            lat, lon = ox.geocode(query)
-        except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError) as exc:
-            raise ValueError(f"Could not geocode landmark query: {label}") from exc
-        return label, lat, lon
-
-
-def _within_bounds(lat: float, lon: float, bounds: tuple[float, float, float, float]) -> bool:
-    min_lat, max_lat, min_lon, max_lon = bounds
-    return min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
-
-
-def _map_bounds(lats: list[float], lons: list[float]) -> tuple[float, float, float, float]:
-    lat_pad = max((max(lats) - min(lats)) * 0.15, 0.001)
-    lon_pad = max((max(lons) - min(lons)) * 0.15, 0.001)
-    return min(lats) - lat_pad, max(lats) + lat_pad, min(lons) - lon_pad, max(lons) + lon_pad
+def _draw_passengers(ax: plt.Axes, passengers: list[Passenger]) -> None:
+    if not passengers: return
+    lons = [p.curr_lon for p in passengers]
+    lats = [p.curr_lat for p in passengers]
+    ax.scatter(lons, lats, marker="o", s=10, c=_PASSENGER_COLOR, zorder=5)
 
 
 def _route_colors(count: int) -> list[str]:
-    if count <= 0:
-        return []
-
+    if count <= 0: return []
     colors: list[str] = []
     palette = _GOOGLE_ROUTE_COLORS[:]
     while len(colors) < count:
         colors.extend(sample(palette, len(palette)))
     return colors[:count]
-
-
-def _route_segments(path: list[DirEdge]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-    return [((edge.start.lon, edge.start.lat), (edge.end.lon, edge.end.lat)) for edge in path]
 
 
 def _add_basemap_or_blank(ax: plt.Axes, mode: MapMode) -> None:
@@ -385,58 +398,34 @@ def _save_scaled_gif(image: Image.Image, frames: list[Image.Image], filename: st
     scaled_frames = [_scale_image(frame, scale_up).convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
     if not scaled_frames:
         raise ValueError("No frames available to build a GIF.")
-
     first, *rest = scaled_frames
-    first.save(
-        filename,
-        format="GIF",
-        save_all=True,
-        append_images=rest,
-        duration=duration,
-        loop=0,
-        disposal=2,
-    )
+    first.save(filename, format="GIF", save_all=True, append_images=rest, duration=duration, loop=0, disposal=2)
 
 
 def _scale_image(image: Image.Image, scale_up: int) -> Image.Image:
-    if scale_up < 1:
-        raise ValueError("scale_up must be at least 1.")
-    if scale_up == 1:
-        return image
+    if scale_up < 1: raise ValueError("scale_up must be at least 1.")
+    if scale_up == 1: return image
     return image.resize((image.width * scale_up, image.height * scale_up), Image.LANCZOS)
 
 
 def _frames_to_gif(frames: list[Image.Image], duration: int = 400) -> io.BytesIO:
-    if not frames:
-        raise ValueError("No frames available to build a GIF.")
-
+    if not frames: raise ValueError("No frames available to build a GIF.")
     buf = io.BytesIO()
     first, *rest = [frame.convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
-    first.save(
-        buf,
-        format="GIF",
-        save_all=True,
-        append_images=rest,
-        duration=duration,
-        loop=0,
-        disposal=2,
-    )
+    first.save(buf, format="GIF", save_all=True, append_images=rest, duration=duration, loop=0, disposal=2)
     return buf
 
 
 def _open_window(image: Image.Image, title: str) -> None:
     image = image.resize((WINDOW_SIZE, WINDOW_SIZE), Image.LANCZOS)
-
     root = tk.Tk()
     root.title(title)
     root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
     root.resizable(False, False)
-
     photo = ImageTk.PhotoImage(image)
     label = tk.Label(root, image=photo, bd=0)
     label.pack()
     label.image = photo
-
     root.mainloop()
 
 
@@ -445,53 +434,13 @@ def _open_gif_window(image: Image.Image, title: str) -> None:
     root.title(title)
     root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
     root.resizable(False, False)
-
     frames = [frame.copy().resize((WINDOW_SIZE, WINDOW_SIZE), Image.LANCZOS) for frame in ImageSequence.Iterator(image)]
-    if not frames:
-        raise ValueError("GIF has no frames.")
-
+    if not frames: raise ValueError("GIF has no frames.")
     label = tk.Label(root, bd=0)
     label.pack()
-
     photos = [ImageTk.PhotoImage(frame) for frame in frames]
-
     def animate(index: int = 0) -> None:
         label.configure(image=photos[index])
         root.after(image.info.get("duration", 400), animate, (index + 1) % len(photos))
-
     animate()
     root.mainloop()
-
-
-### SANITY CHECK ###
-
-if __name__ == "__main__":
-    a = Node(120.985, 14.599)
-    b = Node(120.990, 14.604)
-
-    edge = DirEdge(a, b, True)
-    visualizer = StaticVisualizer([a, b], [edge], title="Test Map")
-
-    visualizer.display(labels_on=False)
-    
-    nodes = [
-        Node(120.980, 14.598),
-        Node(120.984, 14.600),
-        Node(120.988, 14.603),
-        Node(120.992, 14.606),
-    ]
-
-    gif_frames = []
-    for start in nodes:
-        for end in nodes:
-            if start is not end:
-                gif_frames.append(
-                    StaticVisualizer(
-                        nodes,
-                        [DirEdge(start, end, True)],
-                        title=f"GIF Frame {start.id} to {end.id}",
-                    )
-                )
-                
-    gif_visualizer = DynamicVisualizer(gif_frames, title="GIF Test")
-    gif_visualizer.display("light_nolabels", fps=10)
