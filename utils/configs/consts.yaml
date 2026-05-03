@@ -1,6 +1,11 @@
+# Cost weights for route evaluation.
+
 WALK_WT: 0.0142
 RIDE_WT: 0.0071
 WAIT_WT: 8.5
 TRANSFER_WT: 14.2
 DIRECT_WT: 0.0
 ALIGHT_WT: 0.0
+
+# Speed Parameters
+
