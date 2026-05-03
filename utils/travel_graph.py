@@ -38,6 +38,11 @@ class TravelGraph:
         self.routes = routes
         self.travel_graph: list[DirEdge] = []
         self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
+        
+        # O(1) Lookups for fast Dijkstra initialization
+        self._l1_lookup: dict[tuple[float, float], Node] = {}
+        self._l3_lookup: dict[tuple[float, float], Node] = {}
+        
         self._construct()
 
     def _construct(self) -> None:
@@ -47,13 +52,16 @@ class TravelGraph:
 
         for n in self.cg.nodes:
             coord = (n.lon, n.lat)
+            
             n1 = Node(n.lon, n.lat)
             n1.layer = 1
             l1_nodes[coord] = n1
+            self._l1_lookup[coord] = n1
 
             n3 = Node(n.lon, n.lat)
             n3.layer = 3
             l3_nodes[coord] = n3
+            self._l3_lookup[coord] = n3
 
         for r_idx, r in enumerate(self.routes):
             for e in r.path:
@@ -80,12 +88,15 @@ class TravelGraph:
             c_start = (e.start.lon, e.start.lat)
             c_end = (e.end.lon, e.end.lat)
 
+            # OPTIMIZATION: Calculate Haversine distance only once per physical edge
+            walk_weight = WALK_WT * e.getLength()
+
             sw_edge = DirEdge(l1_nodes[c_start], l1_nodes[c_end], e.is_drivable, id=f"SW{next(sw_c):05d}")
-            sw_edge.weight = WALK_WT * sw_edge.getLength()
+            sw_edge.weight = walk_weight
             sw_edges.append(sw_edge)
 
             ew_edge = DirEdge(l3_nodes[c_start], l3_nodes[c_end], e.is_drivable, id=f"EW{next(ew_c):05d}")
-            ew_edge.weight = WALK_WT * ew_edge.getLength()
+            ew_edge.weight = walk_weight
             ew_edges.append(ew_edge)
 
         # Layer 2 Riding Edges
@@ -147,8 +158,9 @@ class TravelGraph:
         del l1_out, l2_out, l3_out, ri_out
 
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
-        l1_start = next((n for n in self._outgoing_edges.keys() if n.layer == 1 and n.lon == start.lon and n.lat == start.lat), None)
-        l3_end = next((n for n in self._outgoing_edges.keys() if n.layer == 3 and n.lon == end.lon and n.lat == end.lat), None)
+        # OPTIMIZATION: O(1) dictionary lookups instead of scanning list
+        l1_start = self._l1_lookup.get((start.lon, start.lat))
+        l3_end = self._l3_lookup.get((end.lon, end.lat))
 
         if not l1_start or not l3_end:
             return []
@@ -196,8 +208,38 @@ class TravelGraph:
         return sum(e.getLength() for e in path if e.id[:2] in {"SW", "RI", "EW"})
 
     def calculateJourneyWeight(self, start: Node, end: Node) -> float:
-        path = self.findShortestJourney(start, end)
-        return sum(e.weight for e in path)
+        """OPTIMIZATION: A lightweight Dijkstra that only computes total weight and skips path tracking entirely."""
+        l1_start = self._l1_lookup.get((start.lon, start.lat))
+        l3_end = self._l3_lookup.get((end.lon, end.lat))
+
+        if not l1_start or not l3_end:
+            return 0.0
+
+        frontier: list[tuple[float, int, Node]] = []
+        sequence = count()
+        heappush(frontier, (0.0, next(sequence), l1_start))
+
+        cost_so_far = {l1_start: 0.0}
+
+        while frontier:
+            current_cost, _, current = heappop(frontier)
+
+            if current == l3_end:
+                return current_cost
+
+            if current_cost > cost_so_far.get(current, float("inf")):
+                continue
+
+            for edge in self._outgoing_edges.get(current, []):
+                next_node = edge.end
+                new_cost = current_cost + edge.weight
+
+                if new_cost < cost_so_far.get(next_node, float("inf")):
+                    cost_so_far[next_node] = new_cost
+                    heappush(frontier, (new_cost, next(sequence), next_node))
+
+        return 0.0
+
 
 if __name__ == "__main__":
     from random import sample

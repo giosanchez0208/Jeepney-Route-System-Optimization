@@ -42,6 +42,9 @@ class CityGraph:
         self._node_lookup: dict[int, Node] = {}
         self._node_set: set[Node] = set()
         self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
+        
+        # O(1) lookup structure specifically built to accelerate A* search
+        self._fast_edges: dict[Node, list[tuple[DirEdge, Node, float]]] = defaultdict(list)
 
         self._build_nodes()
         self._build_graph()
@@ -67,11 +70,19 @@ class CityGraph:
 
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
-        heappush(frontier, (_getDistance(start, end), 0.0, next(sequence), start))
+        
+        # OPTIMIZATION: Memoize heuristic calculations to avoid redundant trig functions
+        h_cache = {}
+        def get_h(n: Node) -> float:
+            if n not in h_cache:
+                h_cache[n] = _getDistance(n, end)
+            return h_cache[n]
+
+        heappush(frontier, (get_h(start), 0.0, next(sequence), start))
 
         came_from: dict[Node, tuple[Node, DirEdge]] = {}
         cost_so_far: dict[Node, float] = {start: 0.0}
-        outgoing_edges = self._outgoing_edges
+        fast_edges = self._fast_edges
 
         while frontier:
             _, current_cost, _, current = heappop(frontier)
@@ -82,18 +93,16 @@ class CityGraph:
             if current_cost > cost_so_far.get(current, float("inf")):
                 continue
 
-            for edge in outgoing_edges.get(current, []):
-                if not edge.is_drivable:
-                    continue
-
-                next_node = edge.end
-                new_cost = current_cost + edge.getLength()
+            # OPTIMIZATION: Unpack precalculated lengths, bypassing object methods entirely
+            for edge, next_node, edge_length in fast_edges.get(current, []):
+                new_cost = current_cost + edge_length
+                
                 if new_cost >= cost_so_far.get(next_node, float("inf")):
                     continue
 
                 cost_so_far[next_node] = new_cost
                 came_from[next_node] = (current, edge)
-                priority = new_cost + _getDistance(next_node, end)
+                priority = new_cost + get_h(next_node)
                 heappush(frontier, (priority, new_cost, next(sequence), next_node))
 
         raise ValueError("No path found between the provided nodes.")
@@ -128,7 +137,6 @@ class CityGraph:
                 continue
             seen_pairs.add(pair)
 
-            # OSM highway tag can be a string or a list of strings
             highway = data.get("highway", "")
             if isinstance(highway, list):
                 highway_types = set(highway)
@@ -161,8 +169,14 @@ class CityGraph:
 
     def _build_outgoing_edges(self) -> None:
         self._outgoing_edges = defaultdict(list)
+        self._fast_edges = defaultdict(list)
+        
         for edge in self.graph:
             self._outgoing_edges[edge.start].append(edge)
+            
+            # OPTIMIZATION: Pre-filter out non-drivable edges and precalculate distances
+            if edge.is_drivable:
+                self._fast_edges[edge.start].append((edge, edge.end, edge.getLength()))
 
     def _reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge]:
         path: list[DirEdge] = []
