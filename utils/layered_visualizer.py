@@ -22,9 +22,9 @@ from matplotlib.patches import Polygon
 from matplotlib.lines import Line2D
 from PIL import Image, ImageTk
 
-from city_graph import CityGraph
-from directed_edge import DirEdge
-from node import Node
+from .city_graph import CityGraph
+from .directed_edge import DirEdge
+from .node import Node
 WINDOW_SIZE = 800
 _RENDER_DPI = 150
 _LAYERS = (1, 2, 3)

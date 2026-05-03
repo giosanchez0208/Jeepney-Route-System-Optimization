@@ -11,7 +11,7 @@ _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1)
 from math import radians, sin, cos, sqrt, asin
 from typing import Optional
 
-from node import Node
+from .node import Node
 
 class DirEdge:
     def __init__(
