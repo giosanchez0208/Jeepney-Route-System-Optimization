@@ -1,6 +1,6 @@
 """jeep_system.py
 
-JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float) -> None creates the orchestrator.
+JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float, equidistant_spawn: bool) -> None creates the orchestrator.
 add_passenger(self, passenger: Passenger) -> None injects a passenger into the system.
 update(self) -> None triggers system-wide ticks and handles boarding, alighting, and dynamic route substitution.
 """
@@ -10,11 +10,60 @@ from .passenger import Passenger
 from .route import Route
 
 class JeepSystem:
-    def __init__(self, jeeps: list[Jeep], routes: list[Route], weight_tolerance: float = 50.0) -> None:
+    def __init__(
+        self, 
+        jeeps: list[Jeep], 
+        routes: list[Route], 
+        weight_tolerance: float = 50.0, 
+        equidistant_spawn: bool = True
+    ) -> None:
         self.jeeps = jeeps
         self.routes = routes
         self.passengers: list[Passenger] = []
         self.weight_tolerance = weight_tolerance
+
+        if equidistant_spawn:
+            self._space_jeeps_equidistantly()
+
+    def _space_jeeps_equidistantly(self) -> None:
+        route_jeeps = {r: [] for r in self.routes}
+        for j in self.jeeps:
+            if j.route in route_jeeps:
+                route_jeeps[j.route].append(j)
+                
+        for route, assigned_jeeps in route_jeeps.items():
+            if not assigned_jeeps:
+                continue
+                
+            total_length = sum(e.getLength() for e in route.path)
+            if total_length <= 0:
+                continue
+                
+            spacing = total_length / len(assigned_jeeps)
+            
+            for i, jeep in enumerate(assigned_jeeps):
+                target_dist = i * spacing
+                accumulated = 0.0
+                
+                for idx, edge in enumerate(route.path):
+                    edge_len = edge.getLength()
+                    
+                    # 1e-5 tolerance prevents skipping edges on exact float boundaries
+                    if accumulated + edge_len >= target_dist - 1e-5:
+                        jeep._edge_idx = idx
+                        jeep._edge_progress = target_dist - accumulated
+                        
+                        if edge_len > 0:
+                            ratio = jeep._edge_progress / edge_len
+                            lat = edge.start.lat + ratio * (edge.end.lat - edge.start.lat)
+                            lon = edge.start.lon + ratio * (edge.end.lon - edge.start.lon)
+                            jeep.currPos = (lat, lon)
+                        else:
+                            jeep.currPos = (edge.start.lat, edge.start.lon)
+                            
+                        jeep._update_heading()
+                        break
+                    accumulated += edge_len
 
     def add_passenger(self, passenger: Passenger) -> None:
         self.passengers.append(passenger)
