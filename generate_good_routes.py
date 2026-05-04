@@ -7,6 +7,7 @@ import csv
 import json
 import random
 import multiprocessing as mp
+import os
 from pathlib import Path
 
 import numpy as np
@@ -17,28 +18,37 @@ from utils.route import Route
 from utils.travel_graph import StaticTravelGraph, TravelGraph
 from utils.od_generator import TrafficAwareODGenerator
 
+ROOT_DIR = Path(__file__).resolve().parent
+DATA_PATH = ROOT_DIR / "data" / "iligan_node_with_traffic_data.csv"
+OUT_DIR = ROOT_DIR / "results" / "data"
+
 _CG = None
 _STG = None
 _OD_GEN = None
 _TEST_ORIGINS = None
 _TEST_DESTINATIONS = None
 
-def _init_worker():
+def _build_shared_state():
+    cg = CityGraph("Iligan City, Lanao del Norte, Philippines")
+    stg = StaticTravelGraph(cg)
+    od_gen = TrafficAwareODGenerator(cg, DATA_PATH)
+
+    np.random.seed(42)
+    points = od_gen.generate_origins(n_points=200)
+    test_origins = points[:100]
+    test_destinations = points[100:]
+    np.random.seed()
+
+    return cg, stg, od_gen, test_origins, test_destinations
+
+def _init_worker(cg, stg, od_gen, test_origins, test_destinations):
     global _CG, _STG, _OD_GEN, _TEST_ORIGINS, _TEST_DESTINATIONS
     
-    _CG = CityGraph("Iligan City, Lanao del Norte, Philippines")
-    _STG = StaticTravelGraph(_CG)
-    _OD_GEN = TrafficAwareODGenerator(_CG, "data/iligan_node_with_traffic_data.csv")
-    
-    # Generate standardized OD test bank.
-    # Fixed seed ensures identical test pairs across all worker processes.
-    np.random.seed(42)
-    points = _OD_GEN.generate_origins(n_points=200)
-    _TEST_ORIGINS = points[:100]
-    _TEST_DESTINATIONS = points[100:]
-    
-    # Reset seed to restore stochastic generation for routes.
-    np.random.seed()
+    _CG = cg
+    _STG = stg
+    _OD_GEN = od_gen
+    _TEST_ORIGINS = test_origins
+    _TEST_DESTINATIONS = test_destinations
 
 def _evaluate_candidate(seed: int) -> dict:
     global _CG, _STG, _OD_GEN, _TEST_ORIGINS, _TEST_DESTINATIONS
@@ -87,13 +97,20 @@ def _evaluate_candidate(seed: int) -> dict:
     }
 
 if __name__ == "__main__":
+    os.chdir(ROOT_DIR)
+    mp.freeze_support()
+
     N_CANDIDATES = 40
     K_TOP_PERCENT = 0.05
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Missing traffic data file: {DATA_PATH}")
     
     print(f"Spinning up pool to evaluate {N_CANDIDATES} routes...")
     
+    shared_state = _build_shared_state()
     results = []
-    with mp.Pool(processes=mp.cpu_count(), initializer=_init_worker) as pool:
+    with mp.Pool(processes=mp.cpu_count(), initializer=_init_worker, initargs=shared_state) as pool:
         for result in tqdm(pool.imap_unordered(_evaluate_candidate, range(N_CANDIDATES)), total=N_CANDIDATES, desc="Evaluating Routes", unit="route"):
             results.append(result)
             
@@ -108,9 +125,8 @@ if __name__ == "__main__":
     
     print(f"Extracted the top {len(good_routes)} 'Good Routes'.")
     
-    out_dir = Path("results/data")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / "good_routes.csv"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = OUT_DIR / "good_routes.csv"
     
     with out_file.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["path_coords", "score", "mu", "cv"])
