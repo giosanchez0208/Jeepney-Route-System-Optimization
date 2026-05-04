@@ -1,11 +1,12 @@
 """passenger.py
 
-Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float) -> None creates a passenger entity.
+Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None creates a passenger.
 update(self) -> None progresses the passenger through walking, waiting, and alighting states.
 get_target_route_idx(self) -> Optional[int] returns the planned route index.
 get_target_alight_node(self) -> Optional[Node] returns the geographical destination of the current ride.
 get_planned_ride_weight(self) -> float calculates the weight of the pre-calculated ride sequence.
 complete_ride(self) -> None fast-forwards the journey state to the post-ride phase.
+get_remaining_time(self) -> float calculates the sum of weights for all untraversed edges in the journey.
 """
 
 from typing import Optional
@@ -15,7 +16,7 @@ from .directed_edge import DirEdge
 from .jeep import Jeep
 
 class Passenger:
-    def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float) -> None:
+    def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None:
         self._lat = start_pos[0]
         self._lon = start_pos[1]
         self.journey = journey
@@ -28,6 +29,11 @@ class Passenger:
         self._edge_progress = 0.0
         
         self.current_jeep: Optional[Jeep] = None
+        
+        # Metric Tracking
+        self.spawn_tick = spawn_tick
+        self.despawn_tick: Optional[int] = None
+        self.total_path_cost = sum(getattr(edge, 'weight', edge.getLength()) for edge in self.journey)
 
     @property
     def curr_lat(self) -> float:
@@ -130,16 +136,33 @@ class Passenger:
         while idx < len(self.journey):
             edge = self.journey[idx]
             if edge.id.startswith("RI"):
-                weight += edge.weight
+                weight += getattr(edge, 'weight', edge.getLength())
             elif edge.id.startswith(("AL", "TR")):
                 break
             idx += 1
         return weight
         
     def complete_ride(self) -> None:
-        """Advances the edge index past the completed ride and alighting edges."""
         while self._edge_idx < len(self.journey):
             edge_id = self.journey[self._edge_idx].id
             self._edge_idx += 1
             if edge_id.startswith(("AL", "TR")):
                 break
+
+    def get_remaining_time(self) -> float:
+        if self.state == "DONE" or self._edge_idx >= len(self.journey):
+            return 0.0
+            
+        remaining_cost = 0.0
+        for idx in range(self._edge_idx, len(self.journey)):
+            edge = self.journey[idx]
+            remaining_cost += getattr(edge, 'weight', edge.getLength())
+            
+        if self.state == "WALKING" and self._edge_idx < len(self.journey):
+            current_edge = self.journey[self._edge_idx]
+            edge_len = getattr(current_edge, 'weight', current_edge.getLength())
+            if edge_len > 0:
+                ratio = self._edge_progress / current_edge.getLength()
+                remaining_cost -= (edge_len * ratio)
+                
+        return max(0.0, remaining_cost)
