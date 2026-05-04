@@ -6,6 +6,7 @@ update(self) -> None steps the spawn schedule, generates new journeys, updates a
 
 import random
 
+from .directed_edge import DirEdge
 from .passenger import Passenger
 from .travel_graph import TravelGraph
 from .od_generator import TrafficAwareODGenerator
@@ -77,3 +78,8 @@ class PassengerGenerator:
 
         self.passengers = active_passengers
         self.tick_counter += 1
+        
+    def get_all_generated_journeys(self) -> list[list[DirEdge]]:
+        """Extracts the planned paths of all passengers for pheromone deposition."""
+        all_passengers = self.passengers + self.archived_passengers
+        return [p.journey for p in all_passengers]
