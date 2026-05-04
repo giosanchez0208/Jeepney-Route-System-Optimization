@@ -1,72 +1,81 @@
 """test.py
 
-Tests the LiveVisualizer with multiple routes and multiple staggered Jeeps.
-Prints the nodes passed by each Jeep in real-time.
+Tests the LiveVisualizer with one Route, one Passenger, and the centralized JeepSystem.
+The passenger is continuously regenerated until their journey necessitates a ride edge.
 """
 
 from utils.city_graph import CityGraph
 from utils.route import Route
 from utils.jeep import Jeep
+from utils.passenger import Passenger
+from utils.jeep_system import JeepSystem
 from utils.visualizer import LiveVisualizer
+from utils.travel_graph import StaticTravelGraph, TravelGraph
+from utils.od_generator import TrafficAwareODGenerator
 
-class LoggingJeep(Jeep):
-    """A wrapper for the Jeep class that prints to the console whenever it passes a node."""
-    def __init__(self, route: Route, currPos: tuple[float, float], speed: float, name: str) -> None:
-        super().__init__(route, currPos, speed)
-        self.name = name
-
-    def update(self) -> None:
-        super().update()
-        passed_nodes = self.nodes_passed_this_frame()
-        if passed_nodes:
-            for node in passed_nodes:
-                print(f"[{self.name}] crossed node {node.id}")
-
-def test_live_visualizer_multi() -> None:
+def test_passenger_system() -> None:
     area = "Iligan City, Lanao del Norte, Philippines"
     
     print("Constructing CityGraph (this may take a moment)...")
     cg = CityGraph(area)
     
-    print("Generating 2 random looping Routes...")
-    routes = [Route(cg, path=None, od_gen=None) for _ in range(2)]
+    print("Initializing StaticTravelGraph...")
+    stg = StaticTravelGraph(cg)
     
-    print("Initializing 3 Jeeps per Route (staggered spacing)...")
-    jeeps = []
+    print("Loading OD Generator...")
+    od_gen = TrafficAwareODGenerator(cg, "data/iligan_node_with_traffic_data.csv")
     
-    for r_idx, route in enumerate(routes):
-        n_edges = len(route.path)
+    print("Generating 1 random Route...")
+    route = Route(cg, od_gen=od_gen)
+    
+    print("Constructing TravelGraph...")
+    tg = TravelGraph(stg, [route])
+    
+    print("Searching for a valid passenger journey involving a jeep ride...")
+    passenger = None
+    attempts = 0
+    
+    while True:
+        attempts += 1
+        points = od_gen.generate_origins(n_points=2)
+        journey = tg.findShortestJourney(points[0], points[1])
         
-        # Stagger jeeps at ~0%, ~33%, and ~66% along the route length
-        spacing_indices = [0, max(1, n_edges // 3), max(2, 2 * n_edges // 3)]
-        
-        for j_idx, edge_idx in enumerate(spacing_indices):
-            start_node = route.path[edge_idx].start
-            name = f"Route {r_idx+1} - Jeep {j_idx+1}"
+        # Check if the journey uses the route we generated
+        if any(e.id.startswith("RI") for e in journey):
+            print(f"Success! Generated a journey with a ride after {attempts} attempts.")
             
-            # Speed of 15.0m per tick = 300m/s. Fast enough to track visually.
-            j = LoggingJeep(route, currPos=(start_node.lat, start_node.lon), speed=15.0, name=name)
-            jeeps.append(j)
+            # Speed is set relatively high (15.0m/tick walking) so you aren't waiting forever 
+            # for the passenger to walk to the waiting shed.
+            passenger = Passenger((points[0].lat, points[0].lon), journey, speed=15.0)
+            break
+            
+    print("Initializing Jeep and binding to JeepSystem...")
+    start_node = route.path[0].start
     
-    print(f"Launching Live Visualizer with {len(routes)} routes and {len(jeeps)} jeeps...")
-    print("Close the Tkinter window to terminate the simulation.")
+    # Fast jeep speed so it completes its route quickly and meets the passenger
+    jeep = Jeep(route, currPos=(start_node.lat, start_node.lon), speed=25.0)
+    
+    system = JeepSystem([jeep], [route], weight_tolerance=50.0)
+    system.add_passenger(passenger)
+    
+    print("Launching Live Visualizer... Close the Tkinter window to terminate.")
     
     vis = LiveVisualizer(
         area_query=area,
-        title="Multi-Jeep Live Tracking Simulation",
-        nodes=[], 
+        title="Passenger & JeepSystem Integration Test",
+        nodes=[],
         edges=[e for e in cg.graph if e.is_drivable],
-        routes=routes,
-        jeeps=jeeps,
-        passengers=[],
+        routes=[route],
+        jeeps=[jeep],
+        passengers=[passenger],
+        system_manager=system,
         mode="light_nolabels",
-        sim_tick_rate=0.05, 
+        sim_tick_rate=0.05,
         render_fps=30
     )
 
     vis.display()
-    
     print("\nSimulation terminated gracefully.")
 
 if __name__ == "__main__":
-    test_live_visualizer_multi()
+    test_passenger_system()

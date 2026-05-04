@@ -2,7 +2,10 @@
 
 Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None creates a Jeep entity.
 update(self) -> None moves the Jeep along the route and records passed nodes.
-nodes_passed_this_frame(self) -> Optional[list[Node]] returns nodes passed during the current update or None.
+nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]] returns nodes passed during the current update or None.
+modifyPassenger(self, amt: int) -> None modifies the current passenger count.
+returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge] returns the path between two nodes on the route.
+getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float] returns the total weight of the path between two nodes.
 """
 
 import math
@@ -10,15 +13,18 @@ from typing import Optional
 
 from .node import Node
 from .route import Route
-from .directed_edge import _getDistance
+from .directed_edge import DirEdge, _getDistance
 
 class Jeep:
     def __init__(self, route: Route, currPos: tuple[float, float], speed: float) -> None:
         self.route = route
         self.speed = speed
         self.currPos = currPos
-        self.currNodesPassed: Optional[list[Node]] = None
+        self.currNodesPassed: Optional[list[tuple[Node, Route]]] = None
         self.heading: float = 0.0
+        
+        self.passenger_max: int = 16
+        self.curr_passenger_count: int = 0
         
         self._edge_idx = 0
         self._edge_progress = 0.0
@@ -42,14 +48,11 @@ class Jeep:
         self._edge_progress = 0.0
 
     def _update_heading(self) -> None:
-        """Calculates the rotational heading in degrees for the current edge."""
         if not self.route.path:
             return
         edge = self.route.path[self._edge_idx]
         dy = edge.end.lat - edge.start.lat
         dx = edge.end.lon - edge.start.lon
-        # Matplotlib's '^' marker defaults to pointing North (+Y). 
-        # We subtract 90 degrees to align it with standard trigonometric coordinates.
         self.heading = math.degrees(math.atan2(dy, dx)) - 90.0
 
     def update(self) -> None:
@@ -63,7 +66,7 @@ class Jeep:
             
             if distance_to_move >= remaining_edge_dist:
                 distance_to_move -= remaining_edge_dist
-                self.currNodesPassed.append(current_edge.end)
+                self.currNodesPassed.append((current_edge.end, self.route))
                 self._edge_progress = 0.0
                 self._edge_idx = (self._edge_idx + 1) % len(self.route.path)
                 self._update_heading()
@@ -85,5 +88,39 @@ class Jeep:
         if not self.currNodesPassed:
             self.currNodesPassed = None
 
-    def nodes_passed_this_frame(self) -> Optional[list[Node]]:
+    def nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]]:
         return self.currNodesPassed
+
+    def modifyPassenger(self, amt: int) -> None:
+        self.curr_passenger_count += amt
+        if self.curr_passenger_count < 0:
+            self.curr_passenger_count = 0
+        elif self.curr_passenger_count > self.passenger_max:
+            self.curr_passenger_count = self.passenger_max
+
+    def returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge]:
+        start_idx = -1
+        for i, edge in enumerate(self.route.path):
+            if edge.start == start_node:
+                start_idx = i
+                break
+
+        if start_idx == -1:
+            return []
+
+        path = []
+        curr_idx = start_idx
+        for _ in range(len(self.route.path)):
+            edge = self.route.path[curr_idx]
+            path.append(edge)
+            if edge.end == end_node:
+                return path
+            curr_idx = (curr_idx + 1) % len(self.route.path)
+
+        return []
+
+    def getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float]:
+        path = self.returnPathFrom(start_node, end_node)
+        if not path:
+            return None
+        return sum(e.weight for e in path)

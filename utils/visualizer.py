@@ -14,7 +14,7 @@ import tkinter as tk
 from functools import lru_cache
 from pathlib import Path
 from random import sample
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 import contextily as ctx
 import matplotlib
@@ -63,13 +63,11 @@ _PROVIDERS = {
     "dark_nolabels": ctx.providers.CartoDB.DarkMatterNoLabels,
 }
 
-
 class Passenger:
-    """Dummy class for holding passenger coordinates in the visualization."""
+    """Dummy class for holding passenger coordinates in the visualization if actual passenger class isn't used."""
     def __init__(self, curr_lon: float, curr_lat: float) -> None:
         self.curr_lon = curr_lon
         self.curr_lat = curr_lat
-
 
 class StaticVisualizer:
     def __init__(
@@ -80,7 +78,7 @@ class StaticVisualizer:
         edges: Optional[list[DirEdge]] = None,
         routes: Optional[list[Route]] = None,
         jeeps: Optional[list[Jeep]] = None,
-        passengers: Optional[list[Passenger]] = None,
+        passengers: Optional[list[Any]] = None,
         mode: MapMode = "light_nolabels",
     ) -> None:
         self.area_query = area_query
@@ -160,7 +158,8 @@ class LiveVisualizer:
         edges: Optional[list[DirEdge]] = None,
         routes: Optional[list[Route]] = None,
         jeeps: Optional[list[Jeep]] = None,
-        passengers: Optional[list[Passenger]] = None,
+        passengers: Optional[list[Any]] = None,
+        system_manager: Optional[Any] = None,
         mode: MapMode = "light_nolabels",
         sim_tick_rate: float = 0.05, 
         render_fps: int = 30
@@ -172,6 +171,7 @@ class LiveVisualizer:
         self.routes = routes or []
         self.jeeps = jeeps or []
         self.passengers = passengers or []
+        self.system_manager = system_manager
         self.mode = mode
         self.route_colors = _route_colors(len(self.routes))
         
@@ -200,7 +200,7 @@ class LiveVisualizer:
 
         p_lons = [p.curr_lon for p in self.passengers]
         p_lats = [p.curr_lat for p in self.passengers]
-        self._pass_scatter = ax.scatter(p_lons, p_lats, marker="o", s=10, c=_PASSENGER_COLOR, zorder=5)
+        self._pass_scatter = ax.scatter(p_lons, p_lats, marker="o", s=15, c=_PASSENGER_COLOR, zorder=5)
 
         root = tk.Tk()
         root.title(self.title or "Live Visualizer")
@@ -217,8 +217,14 @@ class LiveVisualizer:
             while self._running:
                 start_time = time.time()
                 with self.lock:
-                    for j in self.jeeps:
-                        j.update()
+                    if self.system_manager:
+                        self.system_manager.update()
+                    else:
+                        for j in self.jeeps:
+                            j.update()
+                        for p in self.passengers:
+                            if hasattr(p, 'update'):
+                                p.update()
                 elapsed = time.time() - start_time
                 sleep_time = max(0.0, self.sim_tick_rate - elapsed)
                 time.sleep(sleep_time)
@@ -237,7 +243,6 @@ class LiveVisualizer:
 
             if self._jeep_scatter and j_offsets:
                 self._jeep_scatter.set_offsets(j_offsets)
-                
                 base_path = MarkerStyle('^').get_path()
                 paths = [base_path.transformed(Affine2D().rotate_deg(h)) for h in j_headings]
                 self._jeep_scatter.set_paths(paths)
@@ -270,7 +275,6 @@ def _get_jeep_colors(jeeps: list[Jeep], routes: list[Route], route_colors: list[
             colors.append(_JEEP_COLOR)
     return colors
 
-
 def _extract_all_coords(nodes, edges, routes, jeeps, passengers) -> tuple[list[float], list[float]]:
     lats, lons = [], []
     for n in nodes:
@@ -291,7 +295,6 @@ def _extract_all_coords(nodes, edges, routes, jeeps, passengers) -> tuple[list[f
         lons.append(p.curr_lon)
     return lats, lons
 
-
 @lru_cache(maxsize=32)
 def _get_bounds(area_query: str) -> tuple[float, float, float, float]:
     try:
@@ -303,10 +306,8 @@ def _get_bounds(area_query: str) -> tuple[float, float, float, float]:
         pad = 0.05
         return lat - pad, lat + pad, lon - pad, lon + pad
 
-
 def _get_provider(mode: MapMode):
     return _PROVIDERS[mode]
-
 
 def _build_figure(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> tuple[plt.Figure, plt.Axes]:
     lat_pad = max((max_lat - min_lat) * 0.10, 0.002)
@@ -321,17 +322,14 @@ def _build_figure(min_lat: float, max_lat: float, min_lon: float, max_lon: float
     ax.axis("off")
     return fig, ax
 
-
 def _draw_nodes(ax: plt.Axes, nodes: list[Node]) -> None:
     if not nodes: return
     ax.scatter([n.lon for n in nodes], [n.lat for n in nodes], s=2, c=_NODE_COLOR, zorder=3)
-
 
 def _draw_edges(ax: plt.Axes, edges: list[DirEdge]) -> None:
     if not edges: return
     segments = [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in edges]
     ax.add_collection(LineCollection(segments, colors=_EDGE_COLOR, linewidths=0.5, linestyle="-", zorder=2))
-
 
 def _draw_routes(ax: plt.Axes, routes: list[Route], route_colors: list[str]) -> None:
     if not routes: return
@@ -342,28 +340,24 @@ def _draw_routes(ax: plt.Axes, routes: list[Route], route_colors: list[str]) -> 
                 LineCollection(segments, colors=color, linewidths=1.0, linestyle=":", capstyle="round", joinstyle="round", zorder=4)
             )
 
-
 def _draw_jeeps(ax: plt.Axes, jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> Optional[PathCollection]:
     if not jeeps: return None
     lons = [j.currPos[1] for j in jeeps]
     lats = [j.currPos[0] for j in jeeps]
     colors = _get_jeep_colors(jeeps, routes, route_colors)
     
-    sc = ax.scatter(lons, lats, marker="^", s=5, c=colors, zorder=6)
+    sc = ax.scatter(lons, lats, marker="^", s=20, c=colors, zorder=6)
     
     base_path = MarkerStyle('^').get_path()
     paths = [base_path.transformed(Affine2D().rotate_deg(j.heading)) for j in jeeps]
     sc.set_paths(paths)
-    
     return sc
-
 
 def _draw_passengers(ax: plt.Axes, passengers: list[Passenger]) -> None:
     if not passengers: return
     lons = [p.curr_lon for p in passengers]
     lats = [p.curr_lat for p in passengers]
     ax.scatter(lons, lats, marker="o", s=10, c=_PASSENGER_COLOR, zorder=5)
-
 
 def _route_colors(count: int) -> list[str]:
     if count <= 0: return []
@@ -373,13 +367,11 @@ def _route_colors(count: int) -> list[str]:
         colors.extend(sample(palette, len(palette)))
     return colors[:count]
 
-
 def _add_basemap_or_blank(ax: plt.Axes, mode: MapMode) -> None:
     try:
         ctx.add_basemap(ax, crs="EPSG:4326", source=_get_provider(mode), zorder=1)
     except (requests.RequestException, OSError, ValueError):
         ax.set_facecolor("#f7f7f7")
-
 
 def _render_to_image(fig: plt.Figure) -> Image.Image:
     buf = io.BytesIO()
@@ -388,11 +380,9 @@ def _render_to_image(fig: plt.Figure) -> Image.Image:
     buf.seek(0)
     return Image.open(buf).convert("RGBA")
 
-
 def _save_scaled_image(image: Image.Image, filename: str, scale_up: int) -> None:
     scaled = _scale_image(image, scale_up)
     scaled.save(filename)
-
 
 def _save_scaled_gif(image: Image.Image, frames: list[Image.Image], filename: str, scale_up: int, duration: int) -> None:
     scaled_frames = [_scale_image(frame, scale_up).convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
@@ -401,12 +391,10 @@ def _save_scaled_gif(image: Image.Image, frames: list[Image.Image], filename: st
     first, *rest = scaled_frames
     first.save(filename, format="GIF", save_all=True, append_images=rest, duration=duration, loop=0, disposal=2)
 
-
 def _scale_image(image: Image.Image, scale_up: int) -> Image.Image:
     if scale_up < 1: raise ValueError("scale_up must be at least 1.")
     if scale_up == 1: return image
     return image.resize((image.width * scale_up, image.height * scale_up), Image.LANCZOS)
-
 
 def _frames_to_gif(frames: list[Image.Image], duration: int = 400) -> io.BytesIO:
     if not frames: raise ValueError("No frames available to build a GIF.")
@@ -414,7 +402,6 @@ def _frames_to_gif(frames: list[Image.Image], duration: int = 400) -> io.BytesIO
     first, *rest = [frame.convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
     first.save(buf, format="GIF", save_all=True, append_images=rest, duration=duration, loop=0, disposal=2)
     return buf
-
 
 def _open_window(image: Image.Image, title: str) -> None:
     image = image.resize((WINDOW_SIZE, WINDOW_SIZE), Image.LANCZOS)
@@ -427,7 +414,6 @@ def _open_window(image: Image.Image, title: str) -> None:
     label.pack()
     label.image = photo
     root.mainloop()
-
 
 def _open_gif_window(image: Image.Image, title: str) -> None:
     root = tk.Tk()
