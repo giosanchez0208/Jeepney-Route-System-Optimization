@@ -1,7 +1,7 @@
 """passenger_generator.py
 
-PassengerGenerator(...) -> None coordinates the stochastic generation, updating, and destruction of passengers.
-update(self) -> None steps the spawn schedule, generates new journeys, updates agent states, and culls completed entities.
+PassengerGenerator(...) -> None coordinates the stochastic generation, updating, and archiving of passengers.
+update(self) -> None steps the spawn schedule, generates new journeys, updates agent states, and archives completed entities.
 """
 
 import random
@@ -27,6 +27,8 @@ class PassengerGenerator:
         
         self.passengers: list[Passenger] = []
         self.new_passengers_this_tick: list[Passenger] = []
+        self.archived_passengers: list[Passenger] = []
+        
         self.tick_counter: int = 0
         self.spawn_schedule: list[int] = []
         
@@ -53,13 +55,25 @@ class PassengerGenerator:
             journey = self.tg.findShortestJourney(points[0], points[1])
             
             if journey:
-                p = Passenger(start_pos=(points[0].lat, points[0].lon), journey=journey, speed=self.speed)
+                p = Passenger(
+                    start_pos=(points[0].lat, points[0].lon), 
+                    journey=journey, 
+                    speed=self.speed,
+                    spawn_tick=self.tick_counter
+                )
                 self.passengers.append(p)
                 self.new_passengers_this_tick.append(p)
 
+        active_passengers = []
         for p in self.passengers:
             p.update()
+            
+            if p.state == "DONE":
+                if p.despawn_tick is None:
+                    p.despawn_tick = self.tick_counter
+                self.archived_passengers.append(p)
+            else:
+                active_passengers.append(p)
 
-        # Isolate destruction logic to filter out despawned agents
-        self.passengers = [p for p in self.passengers if p.state != "DONE"]
+        self.passengers = active_passengers
         self.tick_counter += 1
