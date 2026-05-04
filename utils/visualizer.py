@@ -4,12 +4,13 @@ WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[..
 Passenger(curr_lon: float, curr_lat: float) -> None is a dummy class for passenger tracking.
 StaticVisualizer(area_query, ...) -> None creates the static map state.
 DynamicVisualizer(StaticVisualizers, ...) -> None creates a GIF visualizer.
-LiveVisualizer(area_query, ...) -> None creates an asynchronous parallel simulation visualizer.
+LiveVisualizer(area_query, ...) -> None creates an asynchronous parallel simulation visualizer with recording capabilities.
 """
 
 import io
 import threading
 import time
+from datetime import datetime
 import tkinter as tk
 from functools import lru_cache
 from pathlib import Path
@@ -64,7 +65,6 @@ _PROVIDERS = {
 }
 
 class Passenger:
-    """Dummy class for holding passenger coordinates in the visualization if actual passenger class isn't used."""
     def __init__(self, curr_lon: float, curr_lat: float) -> None:
         self.curr_lon = curr_lon
         self.curr_lat = curr_lat
@@ -79,6 +79,7 @@ class StaticVisualizer:
         routes: Optional[list[Route]] = None,
         jeeps: Optional[list[Jeep]] = None,
         passengers: Optional[list[Any]] = None,
+        system_manager: Optional[Any] = None,
         mode: MapMode = "light_nolabels",
     ) -> None:
         self.area_query = area_query
@@ -88,12 +89,12 @@ class StaticVisualizer:
         self.routes = routes or []
         self.jeeps = jeeps or []
         self.passengers = passengers or []
+        self.system_manager = system_manager
         self.mode = mode
         self.route_colors = _route_colors(len(self.routes))
 
     def draw(self, mode: Optional[MapMode] = None) -> Image.Image:
         lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
-
         if lats and lons:
             min_lat, max_lat = min(lats), max(lats)
             min_lon, max_lon = min(lons), max(lons)
@@ -107,7 +108,7 @@ class StaticVisualizer:
         _draw_routes(ax, self.routes, self.route_colors)
         _draw_nodes(ax, self.nodes)
         _draw_passengers(ax, self.passengers)
-        _draw_jeeps(ax, self.jeeps, self.routes, self.route_colors)
+        _draw_jeeps_static(ax, self.jeeps, self.routes, self.route_colors)
 
         return _render_to_image(fig)
 
@@ -180,6 +181,8 @@ class LiveVisualizer:
         
         self.lock = threading.Lock()
         self._running = False
+        self._recording = False
+        self._recorded_frames = []
 
     def display(self) -> None:
         lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
@@ -196,12 +199,29 @@ class LiveVisualizer:
         _draw_routes(ax, self.routes, self.route_colors)
         _draw_nodes(ax, self.nodes)
 
-        self._jeep_scatter = _draw_jeeps(ax, self.jeeps, self.routes, self.route_colors)
+        # 1. Setup Jeep Markers
+        j_colors = _get_jeep_colors(self.jeeps, self.routes, self.route_colors)
+        if self.jeeps:
+            lons = [j.currPos[1] for j in self.jeeps]
+            lats = [j.currPos[0] for j in self.jeeps]
+            self._jeep_scatter = ax.scatter(lons, lats, marker="^", s=5, c=j_colors, zorder=6)
+        else:
+            self._jeep_scatter = None
 
+        # 2. Setup Dynamic Text Objects for passenger counts
+        self._jeep_texts = []
+        for j, color in zip(self.jeeps, j_colors):
+            tc = _get_contrast_color(color)
+            txt = ax.text(j.currPos[1], j.currPos[0], str(getattr(j, 'curr_passenger_count', 0)), 
+                          color=tc, fontsize=5, fontweight='bold', ha='center', va='bottom', zorder=7)
+            self._jeep_texts.append(txt)
+
+        # 3. Setup Passenger Markers
         p_lons = [p.curr_lon for p in self.passengers]
         p_lats = [p.curr_lat for p in self.passengers]
-        self._pass_scatter = ax.scatter(p_lons, p_lats, marker="o", s=15, c=_PASSENGER_COLOR, zorder=5)
+        self._pass_scatter = ax.scatter(p_lons, p_lats, marker="o", s=3, c=_PASSENGER_COLOR, zorder=5)
 
+        # 4. Tkinter Setup
         root = tk.Tk()
         root.title(self.title or "Live Visualizer")
         root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
@@ -213,6 +233,7 @@ class LiveVisualizer:
 
         self._running = True
 
+        # 5. Background Simulation Thread
         def _sim_loop():
             while self._running:
                 start_time = time.time()
@@ -232,6 +253,7 @@ class LiveVisualizer:
         sim_thread = threading.Thread(target=_sim_loop, daemon=True)
         sim_thread.start()
 
+        # 6. Synchronous Render Loop
         def _render_loop():
             if not self._running:
                 return
@@ -240,30 +262,74 @@ class LiveVisualizer:
                 j_offsets = [[j.currPos[1], j.currPos[0]] for j in self.jeeps]
                 p_offsets = [[p.curr_lon, p.curr_lat] for p in self.passengers]
                 j_headings = [j.heading for j in self.jeeps]
+                j_counts = [getattr(j, 'curr_passenger_count', 0) for j in self.jeeps]
 
+            # Update Jeep positions and rotations
             if self._jeep_scatter and j_offsets:
                 self._jeep_scatter.set_offsets(j_offsets)
                 base_path = MarkerStyle('^').get_path()
                 paths = [base_path.transformed(Affine2D().rotate_deg(h)) for h in j_headings]
                 self._jeep_scatter.set_paths(paths)
 
+            # Update Passenger count text positions and values
+            for txt, offset, count in zip(self._jeep_texts, j_offsets, j_counts):
+                txt.set_position(offset)
+                txt.set_text(str(count))
+
+            # Update Passenger positions
             if self._pass_scatter:
                 self._pass_scatter.set_offsets(p_offsets if p_offsets else np.empty((0, 2)))
 
             canvas.draw_idle()
+
+            # Handle Frame Recording
+            if self._recording:
+                width, height = fig.canvas.get_width_height()
+                buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
+                self._recorded_frames.append(Image.fromarray(buf))
+
             root.after(int(1000 / self.render_fps), _render_loop)
+
+        # 7. Hotkeys and Window Protocols
+        def _toggle_record(event):
+            self._recording = not self._recording
+            if self._recording:
+                self._recorded_frames = []
+                print("Recording started...")
+            else:
+                print("Recording stopped. Saving to background thread...")
+                frames = self._recorded_frames.copy()
+                threading.Thread(target=self._save_recording, args=(frames,), daemon=True).start()
 
         def _on_closing():
             self._running = False
             root.destroy()
 
+        root.bind("<r>", _toggle_record)
         root.protocol("WM_DELETE_WINDOW", _on_closing)
+        
         _render_loop()
         root.mainloop()
         sim_thread.join(timeout=1.0)
 
+    def _save_recording(self, frames: list[Image.Image]) -> None:
+        if not frames:
+            return
+        out_dir = Path("results/recordings")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = out_dir / f"record_{timestamp}.gif"
+        _save_scaled_gif(frames[0], frames, str(filename), scale_up=1, duration=int(1000 / self.render_fps))
+        print(f"Recording saved successfully to {filename}")
+
 
 ### HELPER FUNCTIONS ###
+
+def _get_contrast_color(hex_color: str) -> str:
+    hex_color = hex_color.lstrip('#')
+    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return 'black' if luminance > 0.5 else 'white'
 
 def _get_jeep_colors(jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> list[str]:
     colors = []
@@ -340,24 +406,29 @@ def _draw_routes(ax: plt.Axes, routes: list[Route], route_colors: list[str]) -> 
                 LineCollection(segments, colors=color, linewidths=1.0, linestyle=":", capstyle="round", joinstyle="round", zorder=4)
             )
 
-def _draw_jeeps(ax: plt.Axes, jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> Optional[PathCollection]:
-    if not jeeps: return None
+def _draw_jeeps_static(ax: plt.Axes, jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> None:
+    if not jeeps: return
     lons = [j.currPos[1] for j in jeeps]
     lats = [j.currPos[0] for j in jeeps]
     colors = _get_jeep_colors(jeeps, routes, route_colors)
     
-    sc = ax.scatter(lons, lats, marker="^", s=20, c=colors, zorder=6)
-    
+    # Reduced s=250 to s=5
+    sc = ax.scatter(lons, lats, marker="^", s=5, c=colors, zorder=6)
     base_path = MarkerStyle('^').get_path()
     paths = [base_path.transformed(Affine2D().rotate_deg(j.heading)) for j in jeeps]
     sc.set_paths(paths)
-    return sc
+    
+    for j, color in zip(jeeps, colors):
+        tc = _get_contrast_color(color)
+        # Shifted text slightly above the marker to prevent obscuring it
+        ax.text(j.currPos[1], j.currPos[0], str(getattr(j, 'curr_passenger_count', 0)), 
+                color=tc, fontsize=5, fontweight='bold', ha='center', va='bottom', zorder=7)
 
 def _draw_passengers(ax: plt.Axes, passengers: list[Passenger]) -> None:
     if not passengers: return
     lons = [p.curr_lon for p in passengers]
     lats = [p.curr_lat for p in passengers]
-    ax.scatter(lons, lats, marker="o", s=10, c=_PASSENGER_COLOR, zorder=5)
+    ax.scatter(lons, lats, marker="o", s=3, c=_PASSENGER_COLOR, zorder=5)
 
 def _route_colors(count: int) -> list[str]:
     if count <= 0: return []
