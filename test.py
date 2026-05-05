@@ -1,7 +1,8 @@
 """test.py
 
 Phase D Initialization Diagnostic.
-Verifies the integrated Gen-0 OD routing and Mohring fleet allocation pipeline.
+Verifies the integrated Gen-0 OD routing, Mohring fleet allocation pipeline,
+and mathematical allocation metrics.
 """
 
 import yaml
@@ -24,7 +25,7 @@ def run_diagnostics():
     out_dir.mkdir(parents=True, exist_ok=True)
     
     print("="*60)
-    print(" BOOTING PHASE D: INTEGRATED GEN-0 DIAGNOSTIC")
+    print(" BOOTING PHASE D: ALLOCATION METRICS DIAGNOSTIC")
     print("="*60)
     
     config = load_config()
@@ -42,14 +43,23 @@ def run_diagnostics():
     
     jeeps = []
     for route, count in allocation.items():
-        print(f"    Route {sim.jeep_system.routes.index(route)}: Allocated {count} Jeeps")
         start_pos = (route.path[0].start.lat, route.path[0].start.lon)
         for _ in range(count):
             jeep = Jeep(route=route, currPos=start_pos, speed=0.0005)
             jeep.passenger_max = 16
             jeeps.append(jeep)
             
-    print("[*] Spacing Fleet Equidistantly...")
+    print("\n[*] Evaluating Allocation Metrics...")
+    report = FleetAllocator.evaluate_allocation(allocation, pheromones)
+    
+    print(f"{'Route':<8} | {'Jeeps':<6} | {'Demand':<8} | {'Load Factor':<12} | {'Headway Proxy':<14} | {'Parity'}")
+    print("-" * 70)
+    for route, metrics in report.items():
+        r_idx = sim.jeep_system.routes.index(route)
+        parity_str = f"{metrics['parity']:.2f}" if metrics['parity'] != float('inf') else "INF"
+        print(f"Route {r_idx:<2} | {metrics['jeeps']:<6} | {metrics['demand']:<8.0f} | {metrics['load_factor']:<12.2f} | {metrics['headway']:<14.4f} | {parity_str}")
+
+    print("\n[*] Spacing Fleet Equidistantly...")
     JeepSystem(jeeps=jeeps, routes=routes, equidistant_spawn=True)
 
     print("[*] Rendering Visual Proof...")

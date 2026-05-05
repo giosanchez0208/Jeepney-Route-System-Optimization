@@ -5,7 +5,7 @@ Public API:
   coordinates jeep movement and passenger boarding logic.
 - add_passenger() injects a passenger into the system.
 - update() advances passengers and jeeps, then resolves boarding and alighting.
-- FleetAllocator calculates theoretical fleet distributions for system initialization.
+- FleetAllocator calculates theoretical fleet distributions and evaluates them.
 
 Internal API:
 - _space_jeeps_equidistantly() distributes jeeps across each route at startup.
@@ -59,6 +59,42 @@ class FleetAllocator:
             
         allocation[routes[-1]] = max(1, remaining)
         return allocation
+
+    @staticmethod
+    def evaluate_allocation(allocation: dict[Route, int], pheromones: Any) -> dict[Route, dict]:
+        """Calculates operator efficiency and passenger wait time metrics."""
+        total_fleet = sum(allocation.values())
+        if total_fleet == 0: return {}
+        
+        total_tau = sum(pheromones.tau.values()) if pheromones.tau else 1.0
+        if total_tau == 0: total_tau = 1.0
+        
+        report = {}
+        for route, count in allocation.items():
+            tau_sum = sum(pheromones.tau.get(e, 0) for e in route.path)
+            length_sum = sum(e.getLength() for e in route.path)
+            
+            load_factor = tau_sum / count if count > 0 else float('inf')
+            headway = length_sum / count if count > 0 else float('inf')
+            
+            route_demand_share = tau_sum / total_tau
+            route_fleet_share = count / total_fleet
+            
+            # Handle routes with 0 demand to prevent division by zero in parity
+            if route_demand_share > 0:
+                parity = route_fleet_share / route_demand_share
+            else:
+                parity = float('inf') if count > 0 else 0.0
+            
+            report[route] = {
+                "jeeps": count,
+                "demand": tau_sum,
+                "length": length_sum,
+                "load_factor": load_factor,
+                "headway": headway,
+                "parity": parity
+            }
+        return report
 
 class JeepSystem:
     def __init__(
