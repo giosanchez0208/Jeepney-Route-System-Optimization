@@ -83,11 +83,11 @@ class StaticVisualizer:
     ) -> None:
         self.bounds = bounds
         self.title = title
-        self.nodes = nodes or []
-        self.edges = edges or []
-        self.routes = routes or []
-        self.jeeps = jeeps or []
-        self.passengers = passengers or []
+        self.nodes = nodes if nodes is not None else []
+        self.edges = edges if edges is not None else []
+        self.routes = routes if routes is not None else []
+        self.jeeps = jeeps if jeeps is not None else []
+        self.passengers = passengers if passengers is not None else []
         self.system_manager = system_manager
         self.mode = mode
         self.route_colors = _route_colors(len(self.routes))
@@ -162,11 +162,11 @@ class LiveVisualizer:
     ) -> None:
         self.bounds = bounds
         self.title = title
-        self.nodes = nodes or []
-        self.edges = edges or []
-        self.routes = routes or []
-        self.jeeps = jeeps or []
-        self.passengers = passengers or []
+        self.nodes = nodes if nodes is not None else []
+        self.edges = edges if edges is not None else []
+        self.routes = routes if routes is not None else []
+        self.jeeps = jeeps if jeeps is not None else []
+        self.passengers = passengers if passengers is not None else []
         self.system_manager = system_manager
         self.mode = mode
         self.route_colors = _route_colors(len(self.routes))

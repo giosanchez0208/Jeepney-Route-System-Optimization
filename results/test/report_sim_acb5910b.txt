@@ -1,0 +1,22 @@
+SIMULATION ANNOTATION REPORT
+========================================
+Simulation ID : acb5910b
+Timestamp     : 2026-05-05 11:29:18
+Fitness Score : 13457029.1423
+
+--- METRICS ---
+completed_count     : 2523
+incomplete_count    : 2442
+mean_commute_time   : 1169.3076
+std_commute_time    : 1432.2996
+sum_completed_time  : 2950163
+sum_penalty_time    : 10506149.9925
+ticks_simulated     : 10000
+
+--- TOPOLOGY OVERVIEW ---
+Total Routes : 5
+Total Jeeps  : 15
+
+
+--- DATA PAYLOAD (DO NOT EDIT) ---
+{"sim_id": "acb5910b", "fitness_score": 13457029.142253095, "metrics": {"completed_count": 2523, "incomplete_count": 2442, "mean_commute_time": 1169.3075703527547, "std_commute_time": 1432.299601883022, "sum_completed_time": 2950163, "sum_penalty_time": 10506149.992452154, "ticks_simulated": 10000}, "routes_count": 5, "jeeps_count": 15}
