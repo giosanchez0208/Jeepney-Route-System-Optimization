@@ -13,6 +13,7 @@ Internal API:
 """
 
 import math
+import random
 from typing import Any
 from .jeep import Jeep
 from .passenger import Passenger
@@ -20,34 +21,34 @@ from .route import Route
 
 class FleetAllocator:
     @staticmethod
-    def allocate_by_length(total_fleet: int, routes: list[Route]) -> dict[Route, int]:
-        """Pre-pheromone baseline. Allocates jeeps strictly based on route distance."""
+    def allocate_by_mohring(
+        total_fleet: int, 
+        routes: list[Route], 
+        pheromones: Any, 
+        cg: Any, 
+        gen0_sample_size: int = 2000
+    ) -> dict[Route, int]:
         if not routes or total_fleet <= 0: return {}
-        
-        lengths = {r: sum(e.getLength() for e in r.path) for r in routes}
-        total_len = sum(lengths.values())
-        
-        allocation = {}
-        remaining = total_fleet
-        for r in routes[:-1]:
-            count = max(1, int(round(total_fleet * (lengths[r] / total_len))))
-            allocation[r] = count
-            remaining -= count
-            
-        allocation[routes[-1]] = max(1, remaining)
-        return allocation
 
-    @staticmethod
-    def allocate_by_mohring(total_fleet: int, routes: list[Route], pheromones: Any) -> dict[Route, int]:
-        """Post-pheromone optimization. Flattens distribution using the square root of empirical demand."""
-        if not routes or total_fleet <= 0: return {}
+        total_existing_tau = sum(pheromones.tau.values()) if pheromones.tau else 0.0
         
+        if total_existing_tau < 1.0:
+            valid_nodes = cg.nodes
+            for _ in range(gen0_sample_size):
+                origin = random.choice(valid_nodes)
+                dest = random.choice(valid_nodes)
+                path = cg.findShortestPath(origin, dest)
+                if path:
+                    for edge in path:
+                        pheromones.tau[edge] = pheromones.tau.get(edge, 0) + 1.0
+
         route_tau = {}
         for r in routes:
             tau_sum = sum(pheromones.tau.get(e, 0) for e in r.path)
             route_tau[r] = math.sqrt(max(1.0, tau_sum))
             
         total_sqrt_tau = sum(route_tau.values())
+        if total_sqrt_tau == 0: total_sqrt_tau = 1.0
         
         allocation = {}
         remaining = total_fleet
