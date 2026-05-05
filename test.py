@@ -1,50 +1,92 @@
-"""test.py"""
+"""test.py
+
+Multi-Export Asynchronous Test.
+Runs multiple headless simulation generations and exports segregated 
+visual layers (Passengers vs. Network) at the end of each run.
+"""
 
 import yaml
 import time
 import threading
+from pathlib import Path
 from utils.simulation import SimulationSetup
+from utils.pheromone import PheromoneMatrix
 
 def load_config(path: str = "utils/configs/configs.yaml") -> dict:
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-def visual_memory_observer(sim):
-    """Background thread to interrogate the visualizer's memory state."""
-    time.sleep(2)  # Wait for visualizer to boot
-    while not sim.is_complete:
-        # Access the list directly through the visualizer reference chain
-        vis_passengers = sim.jeep_system.passengers
-        loaded_jeeps = sum(1 for j in sim.jeep_system.jeeps if getattr(j, 'curr_passenger_count', 0) > 0)
-        
-        print(f"[Observer] Tick {sim.current_tick}: Visualizer sees {len(vis_passengers)} passengers | {loaded_jeeps} Jeeps loaded")
-        time.sleep(1)
-
 def main():
     CITY = "Iligan City, Philippines"
-    TICKS = 3600
+    GENERATIONS = 3
+    TICKS_PER_GEN = 1500
     
     print("[*] Loading Configurations...")
     config = load_config()
 
     print("[*] Booting Simulation Setup...")
-    # Routes are now automatically generated via OD_Gen inside the builder
     setup = SimulationSetup(city_query=CITY, config=config)
     
-    vis_kwargs = {
-        "title": f"Diagnostic: Live Execution ({CITY})", 
-        "mode": "light_nolabels",
-    }
-    
-    sim = setup.build(visualizer=True, vis_kwargs=vis_kwargs)
-    sim.speed_multiplier = 2
-    sim.max_ticks = TICKS
+    # Setup export directories
+    export_dir = Path("results/sim_export_test")
+    pass_dir = export_dir / "passengers"
+    net_dir = export_dir / "network_buildup"
+    pass_dir.mkdir(parents=True, exist_ok=True)
+    net_dir.mkdir(parents=True, exist_ok=True)
 
-    observer = threading.Thread(target=visual_memory_observer, args=(sim,), daemon=True)
-    observer.start()
+    # Initialize Pheromone Matrix after the first build to ensure routes exist
+    pheromones = None
 
-    print(f"\n[*] Executing Phase A Simulation ({TICKS} Ticks)...")
-    sim.run()
+    print(f"\n[*] Starting {GENERATIONS} Headless Generations...")
+
+    for gen in range(1, GENERATIONS + 1):
+        print(f"\n--- GENERATION {gen} ---")
+        
+        # Build simulation state. This populates setup.routes internally.
+        sim = setup.build(visualizer=False)
+        sim.max_ticks = TICKS_PER_GEN
+        
+        # Initialize pheromones using the graph from the generated routes
+        if pheromones is None:
+            pheromones = PheromoneMatrix(
+                all_edges=sim.jeep_system.routes[0].cg.graph, 
+                initial_tau=config.get("INITIAL_PHEROMONE", 1.0),
+                rho=config.get("RHO_EVAPORATION", 0.1),
+                q=config.get("Q_PHEROMONE_INTENSITY", 1000.0)
+            )
+        
+        start_time = time.time()
+        result = sim.run()
+        print(f"[*] Simulation completed in {time.time() - start_time:.2f}s | Fitness: {result.fitness_score:.2f}")
+
+        # Phase B: Update global pheromones based on this generation's results
+        pheromones.update_pheromones(result.recorded_paths)
+
+        # ==========================================
+        # ASYNC EXPORT 1: Passenger Chokepoints Only
+        # ==========================================
+        pass_file = pass_dir / f"gen_{gen:02d}_passengers.png"
+        sim.export_snapshot(
+            filename=str(pass_file),
+            draw_routes=False,
+            draw_jeeps=False,
+            draw_passengers=True
+        )
+
+        # ==========================================
+        # ASYNC EXPORT 2: Transit Network Isolation
+        # ==========================================
+        net_file = net_dir / f"gen_{gen:02d}_network.png"
+        sim.export_snapshot(
+            filename=str(net_file),
+            draw_routes=True,
+            draw_jeeps=False,
+            draw_passengers=False
+        )
+        
+    print("\n[*] Main thread finished. Waiting briefly for background renders to complete...")
+    time.sleep(5) 
+    print("[*] Pipeline Terminated.")
 
 if __name__ == "__main__":
     main()

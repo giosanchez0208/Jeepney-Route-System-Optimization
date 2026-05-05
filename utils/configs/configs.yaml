@@ -60,3 +60,10 @@ K_TOURNAMENT: 3           # k_tour: Tournament size for parent selection (Defaul
 N_ELITE: 2                # n_elite: Number of top individuals preserved unchanged
 P_MUTATION: 0.2           # p_mutation: Base mutation probability (Target range: 0.1 - 0.3)
 GAMMA_CROSSOVER: 0.5      # Gamma: Pheromone blending coefficient for child inheritance (Default: 0.5)
+
+# ==========================================
+# SNAPSHOT EXPORT LOGIC
+# ==========================================
+SNAPSHOT_INTERVAL: 500              # Export state every N ticks (0 to disable)
+SNAPSHOT_DIR: "results/snapshots"   # Target directory
+SNAPSHOT_PREFIX: "sim_state"        # User-defined filename prefix
