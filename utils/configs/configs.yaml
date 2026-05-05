@@ -2,7 +2,7 @@
 # FILE PATHS & GEOGRAPHY
 # ==========================================
 TRAFFIC_CSV_PATH: "data/iligan_node_with_traffic_data.csv"
-CITY_BOUNDS: [8.1500, 8.3000, 124.1500, 124.3000]
+CITY_BOUNDS: [8.1450, 8.3150, 124.1350, 124.3050]
 
 # ==========================================
 # COST WEIGHTS FOR ROUTE EVALUATION

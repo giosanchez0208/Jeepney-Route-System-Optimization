@@ -33,3 +33,13 @@ I identify low-pheromone segments that meander between two high-demand hubs. I d
 I bridge the resulting gap using the strictest shortest-path calculation available on the city graph.
 Mechanism: This straightens the route. It converts wasted fleet travel time into higher frequency service between profitable hubs.
 Academic Justification: I refer to this as Tortuosity Reduction or Route Directness Optimization.
+
+========================
+
+Updated engine:
+Implements Discrete Frechet Distance for rigorous trajectory comparison
+Mutation logic scaled on intensity parameter
+
+========================
+
+3. Phase C Execution (ACO-Biased Local Search)Build the edge-substitution logic to preserve route connectivity while swapping low-demand edges for high-demand alternatives.  Implement Strategy 1: Redirect the least-served route toward the edge with the maximum $\Delta_e$.  Implement Strategy 2: Extend the route nearest to the highest $\Delta_e$ edge to absorb the local demand.  Implement Strategy 3: Apply the probabilistic, pheromone-weighted mutation across all routes.  4. Phase D Execution (Genetic Operators)Implement tournament selection with $k_{tour}=3$ and elitism preservation.  Build the pheromone-biased crossover operator to select parent routes based on total accumulated pheromone.  Implement the generational pheromone blending function ($\gamma$) for offspring.  5. Visualizer UpgradesAdd the global demand overlay to StaticVisualizer.Render all base graph edges with a logarithmic line thickness scaling based on their $\tau_e$ value.Evaluate this sequence. If approved, dictate which objective to target first.
