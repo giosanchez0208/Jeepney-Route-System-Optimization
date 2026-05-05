@@ -2,7 +2,7 @@
 
 Public API:
 - WALK_WT, RIDE_WT, WAIT_WT, TRANSFER_WT, DIRECT_WT, and ALIGHT_WT are the
-  travel-cost constants loaded from configs/consts.yaml.
+  travel-cost constants loaded from configs/configs.yaml.
 - StaticTravelGraph(cg) precomputes the layer-1 and layer-3 base graph.
 - TravelGraph(stg, routes) adds route, wait, alight, and transfer layers.
 - findShortestJourney(), calculateJourneyDistance(), and
@@ -26,7 +26,7 @@ from .directed_edge import DirEdge, _getDistance
 from .city_graph import CityGraph
 from .route import Route
 
-_CONSTS_PATH = Path(__file__).with_name("configs").joinpath("consts.yaml")
+_CONSTS_PATH = Path(__file__).with_name("configs").joinpath("configs.yaml")
 with _CONSTS_PATH.open("r", encoding="utf-8") as f:
     _CONSTS = yaml.safe_load(f)
 

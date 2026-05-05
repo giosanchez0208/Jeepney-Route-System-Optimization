@@ -20,8 +20,9 @@ from .passenger_generator import PassengerGenerator
 from .jeep_system import JeepSystem
 from .route import Route
 from .jeep import Jeep
-from .visualizer import LiveVisualizer, StaticVisualizer
+from .visualizer import LiveVisualizer, StaticVisualizer, Passenger
 from .pheromone import PheromoneMatrix
+import threading
 
 class SimulationSetup:
     """Wraps the strict instantiation sequence for the simulation environment."""
@@ -137,9 +138,9 @@ class SimulationResult:
 
 
 class Simulation:
-    def __init__(self, city_query: str, bounds: tuple[float, float, float, float], jeep_system: JeepSystem, passenger_generator: PassengerGenerator, max_ticks: int, beta_penalty: float = 2.0, alpha_std_penalty: float = 0.5, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None) -> None:
+    def __init__(self, city_query: str, bounds: tuple[float, float, float, float], jeep_system: JeepSystem, passenger_generator: PassengerGenerator, max_ticks: int, beta_penalty: float = 2.0, alpha_std_penalty: float = 0.5, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None, config: Optional[dict] = None) -> None:
         self.city_query = city_query
-        self.bounds = bounds # <--- SAVING BOUNDS TO ORCHESTRATOR STATE
+        self.bounds = bounds 
         self.jeep_system = jeep_system
         self.passenger_generator = passenger_generator
         self.max_ticks = max_ticks
@@ -147,6 +148,7 @@ class Simulation:
         self.alpha_std_penalty = alpha_std_penalty
         self.visualizer_mode = visualizer
         self.vis_kwargs = vis_kwargs or {}
+        self.config = config or {}
         
         self.current_tick = 0
         self.is_complete = False
@@ -156,6 +158,7 @@ class Simulation:
         self.jeep_system.passengers = self.passenger_generator.passengers
 
     def update(self) -> None:
+        """Advances the simulation state by the speed multiplier."""
         for _ in range(self.speed_multiplier):
             if self.current_tick >= self.max_ticks:
                 self.is_complete = True
@@ -166,6 +169,7 @@ class Simulation:
             self.current_tick += 1
 
     def run(self) -> SimulationResult:
+        """Executes the main loop based on visualizer settings."""
         if self.visualizer_mode:
             self._run_with_visualizer()
         else:
@@ -173,12 +177,14 @@ class Simulation:
         return self._calculate_results()
 
     def _run_headless(self) -> None:
+        """Runs the simulation as fast as the CPU allows."""
         while not self.is_complete: 
             self.update()
 
     def _run_with_visualizer(self) -> None:
+        """Hands off the simulation state to the GUI."""
         vis = LiveVisualizer(
-            bounds=self.bounds, # <--- INJECTING DIRECTLY INTO THE VISUALIZER
+            bounds=self.bounds, 
             routes=self.jeep_system.routes,
             jeeps=self.jeep_system.jeeps,
             passengers=self.passenger_generator.passengers, 
@@ -190,8 +196,10 @@ class Simulation:
         self.is_complete = True 
 
     def _calculate_results(self) -> SimulationResult:
+        """Computes fitness metrics for the Genetic Algorithm."""
         completed = self.passenger_generator.archived_passengers
         incomplete = self.passenger_generator.passengers
+        
         completed_times = [p.despawn_tick - p.spawn_tick for p in completed]
         incomplete_penalties = [self.current_tick - p.spawn_tick + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
         
@@ -211,7 +219,53 @@ class Simulation:
 
         return SimulationResult(
             fitness_score=total_fitness,
-            metrics={"completed_count": n_completed, "incomplete_count": len(incomplete), "mean_commute_time": mean_commute, "std_commute_time": std_commute, "sum_completed_time": sum_completed, "sum_penalty_time": sum_incomplete, "ticks_simulated": self.current_tick},
+            metrics={
+                "completed_count": n_completed, 
+                "incomplete_count": len(incomplete), 
+                "mean_commute_time": mean_commute, 
+                "std_commute_time": std_commute, 
+                "sum_completed_time": sum_completed, 
+                "sum_penalty_time": sum_incomplete, 
+                "ticks_simulated": self.current_tick
+            },
             recorded_paths=all_recorded_paths,
             jeep_system=self.jeep_system
         )
+
+    def export_snapshot(self, filename: str, draw_routes: bool = True, draw_jeeps: bool = True, draw_passengers: bool = True) -> None:
+        """Public API to take an async snapshot of the current state with specific layers."""
+        # Safely extract immutable coordinates so the main thread can keep running
+        pass_coords = [(p.curr_lon, p.curr_lat) for p in self.passenger_generator.passengers] if draw_passengers else []
+        jeep_data = [(j.route, j.currPos, j.heading, getattr(j, 'curr_passenger_count', 0)) for j in self.jeep_system.jeeps] if draw_jeeps else []
+        routes = self.jeep_system.routes if draw_routes else []
+        
+        # Fire and forget the rendering thread
+        thread = threading.Thread(
+            target=self._async_render_worker, 
+            args=(str(filename), pass_coords, jeep_data, routes), 
+            daemon=True
+        )
+        thread.start()
+
+    def _async_render_worker(self, filename: str, pass_coords: list, jeep_data: list, routes: list) -> None:
+        """Background worker that builds the image without blocking the CPU."""
+        dummy_passengers = [Passenger(curr_lon=lon, curr_lat=lat) for lon, lat in pass_coords]
+        
+        dummy_jeeps = []
+        for route, pos, heading, count in jeep_data:
+            dj = Jeep(route=route, currPos=pos, speed=0)
+            dj.heading = heading
+            dj.curr_passenger_count = count
+            dummy_jeeps.append(dj)
+
+        vis = StaticVisualizer(
+            bounds=self.bounds,
+            title=Path(filename).stem,
+            routes=routes,
+            jeeps=dummy_jeeps,
+            passengers=dummy_passengers,
+            system_manager=None,
+            mode="dark_nolabels"
+        )
+        vis.export(filename, scale_up=1)
+        print(f"[Async Export] Saved: {filename}")
