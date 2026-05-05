@@ -1,141 +1,81 @@
 """test.py
 
-Deep Diagnostic Suite for Phase B: Pheromone Engine & Demand-Service Gaps.
-Validates mathematical accuracy and pipeline integration before Phase C execution.
+Phase C Diagnostic: Edge Substitution & Continuity Verification.
+Ensures ACO local search maintains valid graph topology when mutating routes.
 """
 
 import yaml
 import random
 from utils.simulation import SimulationSetup
 from utils.pheromone import PheromoneMatrix
+from utils.local_search import ACOLocalSearch
 
 def load_config(path: str = "utils/configs/configs.yaml") -> dict:
-    try:
-        with open(path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"[!] Config load failed: {e}")
-        return {}
+    with open(path, 'r') as f: return yaml.safe_load(f)
+
+def is_route_continuous(path: list) -> bool:
+    """Verifies that the end of every edge connects exactly to the start of the next."""
+    if not path: return False
+    for i in range(len(path) - 1):
+        if path[i].end != path[i+1].start:
+            print(f"    [!] BREAK DETECTED: {path[i].end} does not connect to {path[i+1].start}")
+            return False
+    # Check loop closure
+    if path[-1].end != path[0].start:
+        print(f"    [!] LOOP BROKEN: Last node {path[-1].end} != First node {path[0].start}")
+        return False
+    return True
 
 def run_diagnostics():
     CITY = "Iligan City, Philippines"
-    
     print("="*60)
-    print(" BOOTING DIAGNOSTIC ENVIRONMENT")
+    print(" BOOTING PHASE C DIAGNOSTIC")
     print("="*60)
     
     config = load_config()
     setup = SimulationSetup(city_query=CITY, config=config)
     sim = setup.build(visualizer=False)
     
-    base_graph = sim.jeep_system.routes[0].cg.graph
+    routes = sim.jeep_system.routes
+    cg = routes[0].cg
     
-    # Initialize matrix with explicit test constants
-    RHO = 0.1
-    Q = 1000.0
-    INITIAL_TAU = 1.0
+    print("[*] Generating fake global demand profile...")
+    pheromones = PheromoneMatrix(all_edges=cg.graph)
     
-    pheromones = PheromoneMatrix(
-        all_edges=base_graph, 
-        initial_tau=INITIAL_TAU,
-        rho=RHO,
-        q=Q
-    )
-    
-    print(f"[*] Matrix initialized tracking {len(pheromones.tau)} edges.")
+    # Artificially spike demand on one random, unserved edge
+    target_edge = random.choice(cg.graph)
+    while any(target_edge in r.path for r in routes):
+        target_edge = random.choice(cg.graph)
+        
+    pheromones.tau[target_edge] = 5000.0  # Massive demand
+    gaps = pheromones.calculate_demand_service_gaps(routes)
+
+    local_search = ACOLocalSearch(cg)
 
     print("\n" + "="*60)
-    print(" TEST 1: CONTROLLED MATHEMATICAL VERIFICATION")
+    print(" TEST 1: STRATEGY 1 (Least-Served Extension)")
     print("="*60)
     
-    # 1. Grab a random edge
-    test_edge = random.choice(base_graph)
-    pre_tau = pheromones.tau[test_edge]
+    # Store original state
+    least_served_route = min(routes, key=lambda r: sum(pheromones.tau.get(e, 0) for e in r.path))
+    original_length = len(least_served_route.path)
     
-    # 2. Inject a controlled fake passenger payload
-    # Payload: 1 passenger took this exact edge, total path cost was 10.0
-    fake_cost = 10.0
-    fake_payload = [([test_edge], fake_cost)]
+    print(f"[*] Target High-Demand Edge : {target_edge}")
+    print(f"[*] Pre-Mutation Route Length: {original_length} edges")
     
-    print(f"[*] Injecting 1 dummy passenger taking a single edge.")
-    print(f"[*] Path Cost: {fake_cost} | Q: {Q} | Rho: {RHO}")
+    success = local_search.strategy_1_least_served_extension(routes, pheromones, gaps)
     
-    # 3. Calculate mathematically expected outcome
-    # Formula: (pre_tau * (1 - rho)) + (Q / cost)
-    expected_tau = (pre_tau * (1 - RHO)) + (Q / fake_cost)
-    
-    # 4. Run update
-    pheromones.update_pheromones(fake_payload)
-    actual_tau = pheromones.tau[test_edge]
-    
-    print(f"[*] Expected Tau : {expected_tau:.4f}")
-    print(f"[*] Actual Tau   : {actual_tau:.4f}")
-    
-    if abs(expected_tau - actual_tau) < 1e-5:
-        print("[+] PASS: Deposition and Evaporation formulas are exact.")
+    if success:
+        print("[+] Mutation Executed.")
+        print(f"[*] Post-Mutation Route Length: {len(least_served_route.path)} edges")
+        print(f"[*] Did the route incorporate the target edge? : {target_edge in least_served_route.path}")
+        
+        if is_route_continuous(least_served_route.path):
+            print("[+] PASS: Route connectivity and loop closure successfully maintained via shortest-path bridging.")
+        else:
+            print("[-] FAIL: The mutation shattered the route continuity.")
     else:
-        print("[-] FAIL: Mathematical mismatch detected.")
-
-    print("\n" + "="*60)
-    print(" TEST 2: PIPELINE INTEGRATION & PAYLOAD PROCESSING")
-    print("="*60)
-    
-    # Run a quick 500-tick simulation to generate real passenger paths
-    print("[*] Running 500-tick headless simulation to generate real payload...")
-    sim.max_ticks = 500
-    result = sim.run()
-    
-    real_payload = result.recorded_paths
-    total_passengers = len(real_payload)
-    valid_paths = sum(1 for path, cost in real_payload if path and cost > 0)
-    
-    print(f"[*] Simulation Complete. Generated {total_passengers} passenger records.")
-    print(f"[*] Valid paths for deposition: {valid_paths}")
-    
-    # Reset the test edge so it doesn't skew the real data
-    pheromones.tau[test_edge] = INITIAL_TAU * (1 - RHO) 
-    
-    # Apply real payload
-    pheromones.update_pheromones(real_payload)
-    
-    # Calculate statistics
-    all_taus = list(pheromones.tau.values())
-    max_tau = max(all_taus)
-    avg_tau = sum(all_taus) / len(all_taus)
-    
-    print(f"[+] PASS: Real payload processed without crashing.")
-    print(f"[*] Global Max Tau : {max_tau:.4f}")
-    print(f"[*] Global Avg Tau : {avg_tau:.4f}")
-
-    print("\n" + "="*60)
-    print(" TEST 3: DEMAND-SERVICE GAP EVALUATION")
-    print("="*60)
-    
-    print("[*] Computing Delta (Gap) across all edges...")
-    gaps = pheromones.calculate_demand_service_gaps(sim.jeep_system.routes)
-    
-    # Sort edges by gap value
-    sorted_edges = sorted(gaps.items(), key=lambda item: item[1], reverse=True)
-    
-    highest_gap_edge, highest_gap_val = sorted_edges[0]
-    lowest_gap_edge, lowest_gap_val = sorted_edges[-1]
-    
-    print(f"[*] Top Underserved Edge (Highest Positive Delta):")
-    print(f"    Edge: {highest_gap_edge.start.lat:.4f},{highest_gap_edge.start.lon:.4f} -> {highest_gap_edge.end.lat:.4f},{highest_gap_edge.end.lon:.4f}")
-    print(f"    Gap Value : +{highest_gap_val:.4f} (High Demand, Low/No Service)")
-    
-    print(f"\n[*] Top Overserved Edge (Lowest Negative Delta):")
-    print(f"    Edge: {lowest_gap_edge.start.lat:.4f},{lowest_gap_edge.start.lon:.4f} -> {lowest_gap_edge.end.lat:.4f},{lowest_gap_edge.end.lon:.4f}")
-    print(f"    Gap Value : {lowest_gap_val:.4f} (Low Demand, High Service)")
-    
-    # Verify that the overserved edge actually has a route on it
-    routes_on_lowest = sum(1 for r in sim.jeep_system.routes if lowest_gap_edge in r.path)
-    print(f"\n[*] Verification: Does the 'Overserved' edge have active routes on it? : {routes_on_lowest > 0} ({routes_on_lowest} routes)")
-    
-    if routes_on_lowest > 0 and highest_gap_val > 0:
-        print("[+] PASS: Gap calculation successfully separates served vs. stranded corridors.")
-    else:
-        print("[-] WARNING: Gap separation may not be polarizing correctly. Check routing density.")
+        print("[-] FAIL: Strategy 1 declined to mutate. Check bridging logic.")
 
 if __name__ == "__main__":
     run_diagnostics()
