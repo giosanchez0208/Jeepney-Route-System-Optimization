@@ -1,73 +1,69 @@
 """pheromone.py
 
-Public API:
-- PheromoneMatrix(all_edges, initial_tau, rho, q) tracks pheromone levels per
-  edge for the ACO workflow.
-- update_pheromones(), get_tau(), get_route_pheromone(), and
-  compute_demand_gaps() are the exposed operations.
-
-Internal API:
-- matrix stores the edge-id to pheromone lookup used by the update logic.
+Manages the global pheromone matrix, encoding latent and realized passenger demand.
+Calculates the Demand-Service Gap to guide ACO-biased local search.
 """
 
-from typing import Sequence
-from .route import Route
-from .directed_edge import DirEdge
+from typing import Iterable, Any
 
 class PheromoneMatrix:
-    """Manages pheromone initialization, evaporation, deposition, and scoring."""
-    def __init__(self, all_edges: Sequence[DirEdge], initial_tau: float, rho: float, q: float) -> None:
-        self.initial_tau = initial_tau
+    def __init__(self, all_edges: Iterable[Any], initial_tau: float = 1.0, rho: float = 0.1, q: float = 1000.0) -> None:
+        """
+        Initializes the global demand matrix.
+        """
+        # Dictionary mapping DirEdge objects to their current pheromone level (\tau_e)
+        self.tau = {edge: initial_tau for edge in all_edges}
         self.rho = rho
         self.q = q
+        self.initial_tau = initial_tau
+
+    def update_pheromones(self, passenger_records: list[tuple[list[Any], float]]) -> None:
+        """
+        Phase B: Pheromone Update.
+        Applies evaporation, then deposits pheromones based on passenger planned paths.
+        """
+        # 1. Evaporation: \tau_e = (1 - \rho) * \tau_e
+        for edge in self.tau:
+            self.tau[edge] = (1 - self.rho) * self.tau[edge]
         
-        # Initialize tau_0 for all edges (Phase B Prep)
-        self.matrix: dict[str, float] = {edge.id: initial_tau for edge in all_edges}
-
-    def update_pheromones(self, passenger_data: list[tuple[list[DirEdge], float]]) -> None:
-        """
-        Executes Phase B: Evaporates existing pheromones, then deposits new pheromones.
-        passenger_data is a list of tuples containing (planned_journey, total_path_cost).
-        """
-        # 1. Evaporate (Equation 6)
-        for edge_id in self.matrix:
-            self.matrix[edge_id] *= (1.0 - self.rho)
-
-        # 2. Deposit (Equations 4 & 5)
-        for journey, cost in passenger_data:
-            if cost <= 0:
+        # 2. Deposition: \Delta \tau_p = Q / C(\pi_p)
+        for path, cost in passenger_records:
+            # Skip invalid paths or zero-cost paths to avoid division by zero
+            if not path or cost <= 0:
                 continue
                 
-            delta_tau = self.q / cost
+            deposit_value = self.q / cost
             
-            for edge in journey:
-                if edge.id in self.matrix:
-                    self.matrix[edge.id] += delta_tau
+            for edge in path:
+                if edge in self.tau:
+                    self.tau[edge] += deposit_value
 
-    def get_tau(self, edge: DirEdge) -> float:
-        """Returns the pheromone level for a specific edge."""
-        return self.matrix.get(edge.id, self.initial_tau)
-
-    def get_route_pheromone(self, route: Route) -> float:
-        """Calculates the total pheromone accumulated along a route."""
-        return sum(self.get_tau(edge) for edge in route.path)
-
-    def compute_demand_gaps(self, routes: list[Route], fleet_sizes: list[int]) -> dict[str, float]:
+    def calculate_demand_service_gaps(self, routes: list[Any], default_jeep_weight: float = 1.0) -> dict[Any, float]:
         """
-        Calculates the demand-service gap Delta_e for all edges (Equation 7).
-        Delta_e = tau_e - sum(service_weight) for routes containing e.
-        """
-        supply: dict[str, float] = {edge_id: 0.0 for edge_id in self.matrix}
+        Computes the Demand-Service Gap (\Delta_e) for all edges to identify underserved corridors.
+        \Delta_e = \tau_e - \sum (1[e \in r] * w_r)
         
-        # Calculate overlapping service supply
-        for route, fleet_size in zip(routes, fleet_sizes):
+        Returns a dictionary mapping edges to their gap values.
+        Positive values indicate underserved demand; negative values indicate oversupply.
+        """
+        gaps = {}
+        
+        # Pre-calculate service supply per edge across the entire network
+        service_supply = {edge: 0.0 for edge in self.tau}
+        
+        for route in routes:
+            # Service weight (w_r) is proportional to fleet size. 
+            # We assume route objects have a 'fleet_size' attribute, otherwise fallback to 1.
+            fleet_size = getattr(route, 'fleet_size', 1)
+            w_r = fleet_size * default_jeep_weight
+            
+            # Add service supply to every edge covered by this route
             for edge in route.path:
-                if edge.id in supply:
-                    supply[edge.id] += fleet_size 
-                    
-        # Calculate mismatch: Demand (tau) - Supply (fleet coverage)
-        gaps: dict[str, float] = {}
-        for edge_id, tau in self.matrix.items():
-            gaps[edge_id] = tau - supply[edge_id]
+                if edge in service_supply:
+                    service_supply[edge] += w_r
+
+        # Calculate the final mismatch (\Delta_e)
+        for edge, tau_e in self.tau.items():
+            gaps[edge] = tau_e - service_supply[edge]
             
         return gaps

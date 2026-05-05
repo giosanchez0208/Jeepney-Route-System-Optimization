@@ -1,0 +1,8 @@
+Hey guys, i'm leaving this here as a personal comment for later.
+How is this an "Hybrid GA with ACO-inspired Local Search"
+if the method is so unconventional?
+
+Three pillars met.
+1. Path-cost deposition: Pheromones are deposited inversely proportional to path cost ($Q / C(\pi_p)$).
+2. Generational evaporation: Pheromones decay over time ($\rho$) to prevent search stagnation.
+3. Probabilistic biasing: The algorithm uses the pheromone matrix to weight its decisions (in your case, crossover and mutation probabilities) rather than making purely random choices.
