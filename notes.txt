@@ -43,3 +43,33 @@ Mutation logic scaled on intensity parameter
 ========================
 
 3. Phase C Execution (ACO-Biased Local Search)Build the edge-substitution logic to preserve route connectivity while swapping low-demand edges for high-demand alternatives.  Implement Strategy 1: Redirect the least-served route toward the edge with the maximum $\Delta_e$.  Implement Strategy 2: Extend the route nearest to the highest $\Delta_e$ edge to absorb the local demand.  Implement Strategy 3: Apply the probabilistic, pheromone-weighted mutation across all routes.  4. Phase D Execution (Genetic Operators)Implement tournament selection with $k_{tour}=3$ and elitism preservation.  Build the pheromone-biased crossover operator to select parent routes based on total accumulated pheromone.  Implement the generational pheromone blending function ($\gamma$) for offspring.  5. Visualizer UpgradesAdd the global demand overlay to StaticVisualizer.Render all base graph edges with a logarithmic line thickness scaling based on their $\tau_e$ value.Evaluate this sequence. If approved, dictate which objective to target first.
+
+========================
+
+Academic framework:
+Transit Network Design and Frequencies Setting Problem (TNDFSP)
+
+=========================
+
+Pre-Pheromone Allocation
+Apply length-proportional allocation. Without demand data, spatial equity is the primary objective. Allocate the fleet based on route distance to maintain a uniform headway across the network.$$F_i = F_{total} \times \frac{L_i}{\sum L}$$Academic Basis: Ceder (2007), Public Transit Planning and Operation. Initial frequency setting relies on vehicle cycle times to satisfy maximum headway policies and establish baseline connectivity.
+
+
+Post-Pheromone AllocationApply the Mohring Effect via square root scaling. Pheromones represent empirical demand. Linear allocation starves low-demand transfer routes and destroys network cooperation. Square root scaling flattens the distribution curve. It subsidizes long routes while adequately serving dense corridors.$$F_i = F_{total} \times \frac{\sqrt{\tau_i}}{\sum \sqrt{\tau}}$$Academic Basis: Mohring (1972), Optimization and Scale Economies in Urban Bus Transportation. This mathematical principle balances fleet operating costs against aggregate passenger wait times.
+
+=========================
+
+1. Route Load Factor (Demand per Jeep)
+This measures operator efficiency and passenger crowding. It divides the total pheromone accumulation (demand) on a route by the number of assigned jeeps.
+Formula: $Load = \frac{\sum \tau_{route}}{F_{route}}$
+A high value indicates overcrowding and missed revenue. A low value indicates empty vehicles and operator financial loss.
+
+2. Estimated Headway (Distance per Jeep)
+This is the primary metric for passenger wait times. Since our simulation uses a constant baseline speed, route distance is directly proportional to cycle time.
+Formula: $Headway \propto \frac{\sum L_{route}}{F_{route}}$
+This quantifies the spatial gap between jeeps. High headway directly degrades system connectivity by breaking transfer links.
+
+3. Demand-Service Parity (Equity Ratio)
+This compares a route's share of the global demand against its share of the total fleet.
+Formula: $Parity = \frac{F_{route} / F_{total}}{\tau_{route} / \tau_{total}}$
+A ratio of 1.0 means perfect proportional service. A ratio below 1.0 means the route is underserved relative to its demand, which the Mohring effect naturally causes to subsidize longer, lower-demand routes. Tracking this ensures the subsidy does not become extreme.
