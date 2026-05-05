@@ -1,7 +1,13 @@
 """pheromone.py
 
-PheromoneMatrix(...) manages the ACO pheromone lifecycle: initialization, evaporation, and deposition.
-Provides utility methods to compute route demand and demand-service gaps for Phase C local search.
+Public API:
+- PheromoneMatrix(all_edges, initial_tau, rho, q) tracks pheromone levels per
+  edge for the ACO workflow.
+- update_pheromones(), get_tau(), get_route_pheromone(), and
+  compute_demand_gaps() are the exposed operations.
+
+Internal API:
+- matrix stores the edge-id to pheromone lookup used by the update logic.
 """
 
 from typing import Sequence
@@ -9,6 +15,7 @@ from .route import Route
 from .directed_edge import DirEdge
 
 class PheromoneMatrix:
+    """Manages pheromone initialization, evaporation, deposition, and scoring."""
     def __init__(self, all_edges: Sequence[DirEdge], initial_tau: float, rho: float, q: float) -> None:
         self.initial_tau = initial_tau
         self.rho = rho

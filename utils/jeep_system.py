@@ -1,8 +1,14 @@
 """jeep_system.py
 
-JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float, equidistant_spawn: bool) -> None creates the orchestrator.
-add_passenger(self, passenger: Passenger) -> None injects a passenger into the system.
-update(self) -> None triggers system-wide ticks and handles boarding, alighting, and dynamic route substitution.
+Public API:
+- JeepSystem(jeeps, routes, weight_tolerance=50.0, equidistant_spawn=True)
+  coordinates jeep movement and passenger boarding logic.
+- add_passenger() injects a passenger into the system.
+- update() advances passengers and jeeps, then resolves boarding and alighting.
+
+Internal API:
+- _space_jeeps_equidistantly() distributes jeeps across each route at startup.
+- passengers is the system-owned passenger list.
 """
 
 from .jeep import Jeep

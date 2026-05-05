@@ -1,11 +1,17 @@
 """travel_graph.py
 
-WALK_WT: float, RIDE_WT: float, WAIT_WT: float, TRANSFER_WT: float, DIRECT_WT: float, and ALIGHT_WT: float store edge weights.
-StaticTravelGraph(cg: CityGraph) -> None precomputes static walking and direct transfer layers.
-TravelGraph(stg: StaticTravelGraph, routes: list[Route]) -> None creates a dynamic graph instance.
-findShortestJourney(self, start: Node, end: Node) -> list[DirEdge] returns the best journey path.
-calculateJourneyDistance(self, start: Node, end: Node) -> float returns the total walk, ride, and walk distance.
-calculateJourneyWeight(self, start: Node, end: Node) -> float returns the summed journey weight using A*.
+Public API:
+- WALK_WT, RIDE_WT, WAIT_WT, TRANSFER_WT, DIRECT_WT, and ALIGHT_WT are the
+  travel-cost constants loaded from configs/consts.yaml.
+- StaticTravelGraph(cg) precomputes the layer-1 and layer-3 base graph.
+- TravelGraph(stg, routes) adds route, wait, alight, and transfer layers.
+- findShortestJourney(), calculateJourneyDistance(), and
+  calculateJourneyWeight() are the main query methods.
+
+Internal API:
+- _CONSTS_PATH and _CONSTS hold the loaded configuration.
+- _construct() and _reconstruct_path() build and recover layered paths.
+- _l1_lookup, _l3_lookup, base_outgoing, and base_edges are internal caches.
 """
 
 from collections import defaultdict

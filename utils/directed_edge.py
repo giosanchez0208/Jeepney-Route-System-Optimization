@@ -1,11 +1,14 @@
 """directed_edge.py
 
-DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None) -> None creates start: Node, end: Node, is_drivable: bool, weight: int, id: str, and next_edges: list[str].
-getLength(self) -> float returns the edge distance in meters.
-isConnectedTo(self, other: DirEdge) -> bool returns whether two edges share matching boundary nodes.
-_getDistance(node1: Node, node2: Node) -> float returns the great-circle distance in meters.
-_connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1) -> bool links compatible edges and returns success.
-_stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1) -> int connects matching edges and returns the stitch count.
+Public API:
+- DirEdge(start, end, is_drivable, weight=1, id=None, next_edges=None, type=None)
+  models a directed road segment.
+- getLength(), isConnectedTo(), and getType() are the public behaviors on the
+  edge object.
+
+Internal API:
+- _nodes_match(), _getDistance(), _connect(), and _stitch() are module helpers
+  used by graph construction and path stitching.
 """
 
 from math import radians, sin, cos, sqrt, asin

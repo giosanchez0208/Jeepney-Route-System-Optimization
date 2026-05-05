@@ -1,8 +1,15 @@
 """od_generator.py
 
-TrafficAwareODGenerator(cg: CityGraph, traffic_csv_path: str, betas: Optional[dict] = None) -> None creates the passenger generation model.
-_bind_data(self) -> None spatially maps dynamic CityGraph nodes to static traffic data and calculates v_ped.
-generate_origins(self, n_points: int) -> list[Node] returns a list of sampled Node objects based on pedestrian volume weights.
+Public API:
+- TrafficAwareODGenerator(cg, traffic_csv_path, betas=None) binds traffic data
+  to a CityGraph and computes pedestrian demand weights.
+- DEFAULT_BETAS defines the default regression coefficients.
+- generate_origins(n_points) samples CityGraph nodes using the computed demand
+  distribution.
+
+Internal API:
+- _bind_data() performs the KD-tree matching and v_ped calculation.
+- df_traffic, node_vped, and the bound betas are the internal data stores.
 """
 
 import numpy as np

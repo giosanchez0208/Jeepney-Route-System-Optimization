@@ -1,7 +1,13 @@
 """route.py
 
-Route(city_graph: CityGraph, path: Optional[list[DirEdge]] = None, od_gen: Optional[TrafficAwareODGenerator] = None) -> None creates cg: CityGraph and path: list[DirEdge].
-_generate_route_path(city_graph: CityGraph, od_gen: Optional[TrafficAwareODGenerator] = None) -> list[DirEdge] returns a traffic-aware (or random) closed route path from four sampled nodes.
+Public API:
+- Route(city_graph, path=None, od_gen=None) stores a route on a CityGraph.
+- route_from_coords(city_graph, coords_json) reconstructs a Route from saved
+  coordinate pairs by snapping them back to the current graph.
+
+Internal API:
+- _generate_route_path(city_graph, od_gen=None) builds the default closed path
+  when no explicit path is supplied.
 """
 
 import json
