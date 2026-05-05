@@ -6,3 +6,30 @@ Three pillars met.
 1. Path-cost deposition: Pheromones are deposited inversely proportional to path cost ($Q / C(\pi_p)$).
 2. Generational evaporation: Pheromones decay over time ($\rho$) to prevent search stagnation.
 3. Probabilistic biasing: The algorithm uses the pheromone matrix to weight its decisions (in your case, crossover and mutation probabilities) rather than making purely random choices.
+
+
+========================
+
+Using pheromones to quantify segment usefulness is mathematically rigorous.
+Pheromones represent empirical passenger pathfinding. Low accumulation directly equates to low utility. 
+No need for external sources to justify this; my simulation data proves it natively.
+
+1. Segment Spatial Attraction (Refining my first idea) Instead of replacing an entire route, I identify a contiguous sequence of low-pheromone edges within a route.
+I identify a regional cluster of high Demand-Service Gap ($\Delta_e$).
+I calculate the geographic vector from the low-utility segment to the demand cluster.
+I reroute the segment to intermediate streets along that vector. Mechanism: This fulfills my "in the direction of" parameter.
+It bends the route toward demand without forcing it to perfectly intersect a specific node.
+Academic Justification: I refer to this as a Gravity-Based Local Search or Spatial Attraction Heuristic.
+
+2. Redundancy Repulsion (Refining my second idea) Moving a highly useful segment away from a low-served area provides no mathematical benefit. 
+If a segment is highly useful, it is exactly where passengers need it to be. Moving it breaks existing transit flows. 
+However, if multiple routes share the same highly useful segment, they create fleet redundancy. 
+I can isolate one of the overlapping routes and "repel" its segment to a parallel street.
+Mechanism: This maintains the general directional utility of the transit corridor while expanding spatial coverage to adjacent blocks.
+Academic Justification: I refer to this as Dispersion Routing or Route Overlap Minimization.
+
+3. Transit Tortuosity Pruning (A proposed third strategy) Urban transit passengers penalize circuitous routes. 
+I identify low-pheromone segments that meander between two high-demand hubs. I delete the useless detour entirely. 
+I bridge the resulting gap using the strictest shortest-path calculation available on the city graph.
+Mechanism: This straightens the route. It converts wasted fleet travel time into higher frequency service between profitable hubs.
+Academic Justification: I refer to this as Tortuosity Reduction or Route Directness Optimization.
