@@ -1,66 +1,50 @@
-"""test_vis.py
+"""test.py"""
 
-A lightweight diagnostic script to test the new LiveVisualizer 
-without running the full simulation orchestrator.
-"""
-
-import random
 import yaml
-from utils.city_graph import CityGraph
-from utils.route import Route
-from utils.jeep import Jeep
-from utils.visualizer import LiveVisualizer, Passenger
+import time
+import threading
+from utils.simulation import SimulationSetup
 
 def load_config(path: str = "utils/configs/configs.yaml") -> dict:
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
+def visual_memory_observer(sim):
+    """Background thread to interrogate the visualizer's memory state."""
+    time.sleep(2)  # Wait for visualizer to boot
+    while not sim.is_complete:
+        # Access the list directly through the visualizer reference chain
+        vis_passengers = sim.jeep_system.passengers
+        loaded_jeeps = sum(1 for j in sim.jeep_system.jeeps if getattr(j, 'curr_passenger_count', 0) > 0)
+        
+        print(f"[Observer] Tick {sim.current_tick}: Visualizer sees {len(vis_passengers)} passengers | {loaded_jeeps} Jeeps loaded")
+        time.sleep(1)
+
 def main():
     CITY = "Iligan City, Philippines"
+    TICKS = 3600
     
     print("[*] Loading Configurations...")
     config = load_config()
 
-    print("[*] Initializing Base City Graph...")
-    cg = CityGraph(CITY)
+    print("[*] Booting Simulation Setup...")
+    # Routes are now automatically generated via OD_Gen inside the builder
+    setup = SimulationSetup(city_query=CITY, config=config)
+    
+    vis_kwargs = {
+        "title": f"Diagnostic: Live Execution ({CITY})", 
+        "mode": "light_nolabels",
+    }
+    
+    sim = setup.build(visualizer=True, vis_kwargs=vis_kwargs)
+    sim.speed_multiplier = 2
+    sim.max_ticks = TICKS
 
-    print("[*] Generating 1 random test route...")
-    # By not passing od_gen, it defaults to a completely random 4-node walk
-    route = Route(cg) 
+    observer = threading.Thread(target=visual_memory_observer, args=(sim,), daemon=True)
+    observer.start()
 
-    print("[*] Deploying 2 Jeeps...")
-    start_node = route.path[0].start
-    # Give them different speeds so you can see them separate
-    jeep1 = Jeep(route, currPos=(start_node.lat, start_node.lon), speed=15.0)
-    jeep2 = Jeep(route, currPos=(start_node.lat, start_node.lon), speed=25.0)
-    
-    # Space them out slightly at tick 0
-    for _ in range(10): jeep2.update() 
-    
-    jeeps = [jeep1, jeep2]
-
-    print("[*] Generating 50 static dummy Passengers...")
-    random_nodes = random.sample(cg.nodes, 50)
-    passengers = [Passenger(curr_lon=n.lon, curr_lat=n.lat) for n in random_nodes]
-
-    print(f"\n[*] Launching LiveVisualizer in Standalone Mode...")
-    
-    # Grab the precise geographic square from configs.yaml
-    bounds = tuple(config.get("CITY_BOUNDS", [8.1500, 8.3000, 124.1500, 124.3000]))
-    
-    vis = LiveVisualizer(
-        bounds=bounds,
-        title="LiveVisualizer Standalone Test",
-        nodes=[], # Opt-out of rendering nodes
-        edges=[e for e in cg.graph if e.is_drivable], # Render base streets
-        routes=[route],
-        jeeps=jeeps,
-        passengers=passengers, 
-        system_manager=None, # Run without the Simulation orchestrator
-        mode="dark_nolabels"
-    )
-    
-    vis.display()
+    print(f"\n[*] Executing Phase A Simulation ({TICKS} Ticks)...")
+    sim.run()
 
 if __name__ == "__main__":
     main()
