@@ -1,0 +1,62 @@
+# ==========================================
+# FILE PATHS & GEOGRAPHY
+# ==========================================
+TRAFFIC_CSV_PATH: "data/iligan_node_with_traffic_data.csv"
+CITY_BOUNDS: [8.1500, 8.3000, 124.1500, 124.3000]
+
+# ==========================================
+# COST WEIGHTS FOR ROUTE EVALUATION
+# ==========================================
+WALK_WT: 0.0142
+RIDE_WT: 0.0071
+WAIT_WT: 8.5
+TRANSFER_WT: 14.2
+DIRECT_WT: 0.0
+ALIGHT_WT: 0.0
+
+# ---------------------------------------------------------
+# Agent Speed & Capacity Parameters
+# ---------------------------------------------------------
+PASSENGER_SPEED: 5.0
+JEEP_SPEED: 10.0
+JEEP_CAPACITY: 16
+
+# ---------------------------------------------------------
+# Passenger Generation Parameters
+# ---------------------------------------------------------
+SPAWN_RATE_PER_100: 50.0  # Mean passengers spawned per 100 ticks
+SPAWN_STDEV: 10.0         # Standard deviation for passenger generation
+
+# ---------------------------------------------------------
+# Jeep System Parameters
+# ---------------------------------------------------------
+WEIGHT_TOLERANCE: 50.0    # Max acceptable penalty for dynamic route substitution
+EQUIDISTANT_SPAWN: true   # Prevent initial bus bunching
+
+# ---------------------------------------------------------
+# Phase A: Simulation Evaluation Parameters
+# ---------------------------------------------------------
+MAX_TICKS: 3600           # T_sim: Total duration of one simulation run
+BETA_PENALTY: 2.0         # Beta: Penalty multiplier for incomplete journeys (Default: 2.0)
+ALPHA_STD_PENALTY: 0.5    # Alpha: Weighting coefficient for commute time standard deviation (Default: 0.5)
+
+# ---------------------------------------------------------
+# Phases B & C: ACO / Pheromone Parameters
+# ---------------------------------------------------------
+INITIAL_PHEROMONE: 1.0        # tau_0: Baseline pheromone level on all edges
+RHO_EVAPORATION: 0.1          # Rho: Pheromone evaporation rate per generation (Default: 0.1)
+Q_PHEROMONE_INTENSITY: 1000.0 # Q: Constant for pheromone deposition (ant-quantity rule)
+P_LOCAL_SEARCH: 0.5           # p_local: Probability of applying local search strategies (Default: 0.5)
+
+# ---------------------------------------------------------
+# Phase D: GA Optimization Parameters
+# ---------------------------------------------------------
+N_POPULATION: 20          # N_pop: Number of individuals in the population
+G_MAX: 100                # G_max: Maximum number of generations
+N_STAGNATION: 15          # n_stag: Generations without improvement before early stopping
+K_ROUTES: 5               # k: Baseline number of routes per individual
+F_FLEET_SIZE: 3           # f: Baseline fleet size (jeeps) per route
+K_TOURNAMENT: 3           # k_tour: Tournament size for parent selection (Default: 3)
+N_ELITE: 2                # n_elite: Number of top individuals preserved unchanged
+P_MUTATION: 0.2           # p_mutation: Base mutation probability (Target range: 0.1 - 0.3)
+GAMMA_CROSSOVER: 0.5      # Gamma: Pheromone blending coefficient for child inheritance (Default: 0.5)

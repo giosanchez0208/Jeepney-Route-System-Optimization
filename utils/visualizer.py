@@ -3,26 +3,22 @@
 Public API:
 - WINDOW_SIZE and MapMode define the shared render size and map-style modes.
 - Passenger(curr_lon, curr_lat) is a lightweight plotting-only passenger model.
-- StaticVisualizer(area_query, ...) renders a single static map image.
+- StaticVisualizer(bounds, ...) renders a single static map image.
 - DynamicVisualizer(static_visualizers, ...) assembles multiple frames into a GIF.
-- LiveVisualizer(area_query, ...) runs the interactive simulation view.
+- LiveVisualizer(bounds, ...) runs the interactive simulation view.
 
 Internal API:
 - _RENDER_SCALE, the color palettes, and _PROVIDERS are module configuration.
-- _get_contrast_color(), _get_jeep_colors(), _extract_all_coords(),
-  _get_bounds(), _get_provider(), _build_figure(), _draw_nodes(),
-  _draw_edges(), _draw_routes(), _draw_jeeps_static(), _draw_passengers(),
-  _route_colors(), _add_basemap_or_blank(), _render_to_image(),
-  _save_scaled_image(), _save_scaled_gif(), _scale_image(), _frames_to_gif(),
-  _open_window(), and _open_gif_window() are implementation helpers.
+- _force_square_bounds() ensures the bounding box is a perfect 1:1 square.
+- Rendering functions gracefully abort if their respective element lists are empty.
 """
 
 import io
+import math
 import threading
 import time
 from datetime import datetime
 import tkinter as tk
-from functools import lru_cache
 from pathlib import Path
 from random import sample
 from typing import Literal, Optional, Any
@@ -31,20 +27,13 @@ import contextily as ctx
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection, PathCollection
+from matplotlib.collections import LineCollection
 from matplotlib.markers import MarkerStyle
 from matplotlib.transforms import Affine2D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
-import osmnx as ox
 import requests
 from PIL import Image, ImageTk, ImageSequence
-
-try:
-    from osmnx._errors import InsufficientResponseError
-except ImportError:  # pragma: no cover
-    class InsufficientResponseError(Exception):
-        pass
 
 from .directed_edge import DirEdge
 from .node import Node
@@ -82,7 +71,7 @@ class Passenger:
 class StaticVisualizer:
     def __init__(
         self,
-        area_query: str,
+        bounds: tuple[float, float, float, float], # (min_lat, max_lat, min_lon, max_lon)
         title: Optional[str] = None,
         nodes: Optional[list[Node]] = None,
         edges: Optional[list[DirEdge]] = None,
@@ -92,7 +81,7 @@ class StaticVisualizer:
         system_manager: Optional[Any] = None,
         mode: MapMode = "light_nolabels",
     ) -> None:
-        self.area_query = area_query
+        self.bounds = bounds
         self.title = title
         self.nodes = nodes or []
         self.edges = edges or []
@@ -104,16 +93,12 @@ class StaticVisualizer:
         self.route_colors = _route_colors(len(self.routes))
 
     def draw(self, mode: Optional[MapMode] = None) -> Image.Image:
-        lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
-        if lats and lons:
-            min_lat, max_lat = min(lats), max(lats)
-            min_lon, max_lon = min(lons), max(lons)
-        else:
-            min_lat, max_lat, min_lon, max_lon = _get_bounds(self.area_query)
-
+        min_lat, max_lat, min_lon, max_lon = _force_square_bounds(self.bounds)
         fig, ax = _build_figure(min_lat, max_lat, min_lon, max_lon)
 
         _add_basemap_or_blank(ax, mode or self.mode)
+        
+        # Rendering layers are purely opt-in
         _draw_edges(ax, self.edges)
         _draw_routes(ax, self.routes, self.route_colors)
         _draw_nodes(ax, self.nodes)
@@ -163,7 +148,7 @@ class DynamicVisualizer:
 class LiveVisualizer:
     def __init__(
         self,
-        area_query: str,
+        bounds: tuple[float, float, float, float], # (min_lat, max_lat, min_lon, max_lon)
         title: Optional[str] = None,
         nodes: Optional[list[Node]] = None,
         edges: Optional[list[DirEdge]] = None,
@@ -175,7 +160,7 @@ class LiveVisualizer:
         sim_tick_rate: float = 0.05, 
         render_fps: int = 30
     ) -> None:
-        self.area_query = area_query
+        self.bounds = bounds
         self.title = title
         self.nodes = nodes or []
         self.edges = edges or []
@@ -195,13 +180,7 @@ class LiveVisualizer:
         self._recorded_frames = []
 
     def display(self) -> None:
-        lats, lons = _extract_all_coords(self.nodes, self.edges, self.routes, self.jeeps, self.passengers)
-        if lats and lons:
-            min_lat, max_lat = min(lats), max(lats)
-            min_lon, max_lon = min(lons), max(lons)
-        else:
-            min_lat, max_lat, min_lon, max_lon = _get_bounds(self.area_query)
-
+        min_lat, max_lat, min_lon, max_lon = _force_square_bounds(self.bounds)
         fig, ax = _build_figure(min_lat, max_lat, min_lon, max_lon)
 
         _add_basemap_or_blank(ax, self.mode)
@@ -326,11 +305,37 @@ class LiveVisualizer:
 
 ### HELPER FUNCTIONS ###
 
+def _force_square_bounds(bounds: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Forces the bounding box to be a perfect square with a 10% outer padding margin."""
+    min_lat, max_lat, min_lon, max_lon = bounds
+    center_lat = (min_lat + max_lat) / 2.0
+    center_lon = (min_lon + max_lon) / 2.0
+    
+    lat_span = max_lat - min_lat
+    # Adjust longitude span for Mercator distortion at this latitude
+    lon_span_adjusted = (max_lon - min_lon) * math.cos(math.radians(center_lat))
+    
+    max_span = max(lat_span, lon_span_adjusted)
+    
+    # Prevent matplotlib singular warning if bounds are missing/flat
+    if max_span <= 1e-6:
+        print("[Visualizer] WARNING: Bounding box span is 0. Did you set CITY_BOUNDS in configs.yaml?")
+        max_span = 0.05 # Fallback to a roughly 5km default square
+    
+    # 10% padding so edge features aren't cut off
+    max_span *= 1.10 
+    
+    new_lat_span = max_span
+    new_lon_span = max_span / math.cos(math.radians(center_lat))
+    
+    return (
+        center_lat - new_lat_span / 2.0,
+        center_lat + new_lat_span / 2.0,
+        center_lon - new_lon_span / 2.0,
+        center_lon + new_lon_span / 2.0
+    )
+
 def _get_contrast_color(hex_color: str) -> str:
-    # hex_color = hex_color.lstrip('#')
-    # r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    # luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    # quick patch
     return 'black'
 
 def _get_jeep_colors(jeeps: list[Jeep], routes: list[Route], route_colors: list[str]) -> list[str]:
@@ -343,49 +348,15 @@ def _get_jeep_colors(jeeps: list[Jeep], routes: list[Route], route_colors: list[
             colors.append(_JEEP_COLOR)
     return colors
 
-def _extract_all_coords(nodes, edges, routes, jeeps, passengers) -> tuple[list[float], list[float]]:
-    lats, lons = [], []
-    for n in nodes:
-        lats.append(n.lat)
-        lons.append(n.lon)
-    for e in edges:
-        lats.extend([e.start.lat, e.end.lat])
-        lons.extend([e.start.lon, e.end.lon])
-    for r in routes:
-        for e in r.path:
-            lats.extend([e.start.lat, e.end.lat])
-            lons.extend([e.start.lon, e.end.lon])
-    for j in jeeps:
-        lats.append(j.currPos[0])
-        lons.append(j.currPos[1])
-    for p in passengers:
-        lats.append(p.curr_lat)
-        lons.append(p.curr_lon)
-    return lats, lons
-
-@lru_cache(maxsize=32)
-def _get_bounds(area_query: str) -> tuple[float, float, float, float]:
-    try:
-        place = ox.geocode_to_gdf(area_query)
-        min_lon, min_lat, max_lon, max_lat = place.total_bounds
-        return min_lat, max_lat, min_lon, max_lon
-    except (TypeError, ValueError, IndexError, AttributeError, InsufficientResponseError):
-        lat, lon = ox.geocode(area_query)
-        pad = 0.05
-        return lat - pad, lat + pad, lon - pad, lon + pad
-
 def _get_provider(mode: MapMode):
     return _PROVIDERS[mode]
 
 def _build_figure(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> tuple[plt.Figure, plt.Axes]:
-    lat_pad = max((max_lat - min_lat) * 0.10, 0.002)
-    lon_pad = max((max_lon - min_lon) * 0.10, 0.002)
-
     dpi = 100 * _RENDER_SCALE
     fig, ax = plt.subplots(figsize=(WINDOW_SIZE / dpi, WINDOW_SIZE / dpi), dpi=dpi)
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    ax.set_xlim(min_lon - lon_pad, max_lon + lon_pad)
-    ax.set_ylim(min_lat - lat_pad, max_lat + lat_pad)
+    ax.set_xlim(min_lon, max_lon)
+    ax.set_ylim(min_lat, max_lat)
     ax.set_aspect("equal", adjustable="box")
     ax.axis("off")
     return fig, ax
