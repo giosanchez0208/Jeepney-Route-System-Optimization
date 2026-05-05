@@ -5,15 +5,59 @@ Public API:
   coordinates jeep movement and passenger boarding logic.
 - add_passenger() injects a passenger into the system.
 - update() advances passengers and jeeps, then resolves boarding and alighting.
+- FleetAllocator calculates theoretical fleet distributions for system initialization.
 
 Internal API:
 - _space_jeeps_equidistantly() distributes jeeps across each route at startup.
 - passengers is the system-owned passenger list.
 """
 
+import math
+from typing import Any
 from .jeep import Jeep
 from .passenger import Passenger
 from .route import Route
+
+class FleetAllocator:
+    @staticmethod
+    def allocate_by_length(total_fleet: int, routes: list[Route]) -> dict[Route, int]:
+        """Pre-pheromone baseline. Allocates jeeps strictly based on route distance."""
+        if not routes or total_fleet <= 0: return {}
+        
+        lengths = {r: sum(e.getLength() for e in r.path) for r in routes}
+        total_len = sum(lengths.values())
+        
+        allocation = {}
+        remaining = total_fleet
+        for r in routes[:-1]:
+            count = max(1, int(round(total_fleet * (lengths[r] / total_len))))
+            allocation[r] = count
+            remaining -= count
+            
+        allocation[routes[-1]] = max(1, remaining)
+        return allocation
+
+    @staticmethod
+    def allocate_by_mohring(total_fleet: int, routes: list[Route], pheromones: Any) -> dict[Route, int]:
+        """Post-pheromone optimization. Flattens distribution using the square root of empirical demand."""
+        if not routes or total_fleet <= 0: return {}
+        
+        route_tau = {}
+        for r in routes:
+            tau_sum = sum(pheromones.tau.get(e, 0) for e in r.path)
+            route_tau[r] = math.sqrt(max(1.0, tau_sum))
+            
+        total_sqrt_tau = sum(route_tau.values())
+        
+        allocation = {}
+        remaining = total_fleet
+        for r in routes[:-1]:
+            count = max(1, int(round(total_fleet * (route_tau[r] / total_sqrt_tau))))
+            allocation[r] = count
+            remaining -= count
+            
+        allocation[routes[-1]] = max(1, remaining)
+        return allocation
 
 class JeepSystem:
     def __init__(
@@ -54,7 +98,6 @@ class JeepSystem:
                 for idx, edge in enumerate(route.path):
                     edge_len = edge.getLength()
                     
-                    # 1e-5 tolerance prevents skipping edges on exact float boundaries
                     if accumulated + edge_len >= target_dist - 1e-5:
                         jeep._edge_idx = idx
                         jeep._edge_progress = target_dist - accumulated
@@ -91,7 +134,6 @@ class JeepSystem:
                 except ValueError:
                     continue
                 
-                # 1. Process Alighting
                 for p in self.passengers:
                     if p.state == "RIDING" and p.current_jeep == jeep:
                         target_node = p.get_target_alight_node()
@@ -103,7 +145,6 @@ class JeepSystem:
                             p.complete_ride()
                             jeep.modifyPassenger(-1)
                             
-                # 2. Process Boarding (Standard and Dynamic Substitution)
                 for p in self.passengers:
                     if p.state == "WAITING":
                         dist = ((p.curr_lat - node.lat)**2 + (p.curr_lon - node.lon)**2)**0.5
