@@ -1,10 +1,20 @@
 """visualizer.py
 
-WINDOW_SIZE: int and _RENDER_SCALE: int control output size, MapMode: Literal[...] describes basemap modes.
-Passenger(curr_lon: float, curr_lat: float) -> None is a dummy class for passenger tracking.
-StaticVisualizer(area_query, ...) -> None creates the static map state.
-DynamicVisualizer(StaticVisualizers, ...) -> None creates a GIF visualizer.
-LiveVisualizer(area_query, ...) -> None creates an asynchronous parallel simulation visualizer with recording capabilities.
+Public API:
+- WINDOW_SIZE and MapMode define the shared render size and map-style modes.
+- Passenger(curr_lon, curr_lat) is a lightweight plotting-only passenger model.
+- StaticVisualizer(area_query, ...) renders a single static map image.
+- DynamicVisualizer(static_visualizers, ...) assembles multiple frames into a GIF.
+- LiveVisualizer(area_query, ...) runs the interactive simulation view.
+
+Internal API:
+- _RENDER_SCALE, the color palettes, and _PROVIDERS are module configuration.
+- _get_contrast_color(), _get_jeep_colors(), _extract_all_coords(),
+  _get_bounds(), _get_provider(), _build_figure(), _draw_nodes(),
+  _draw_edges(), _draw_routes(), _draw_jeeps_static(), _draw_passengers(),
+  _route_colors(), _add_basemap_or_blank(), _render_to_image(),
+  _save_scaled_image(), _save_scaled_gif(), _scale_image(), _frames_to_gif(),
+  _open_window(), and _open_gif_window() are implementation helpers.
 """
 
 import io

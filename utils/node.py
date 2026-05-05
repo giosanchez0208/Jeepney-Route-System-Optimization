@@ -1,6 +1,11 @@
 """node.py
 
-Node(lon: float, lat: float) -> None creates lon: float, lat: float, layer: Optional[int], id: str, is_drivable: bool, _lon_rad: float, and _lat_rad: float.
+Public API:
+- Node(lon: float, lat: float) -> None creates a geospatial node with
+  lon, lat, layer, id, is_drivable, and cached radian coordinates.
+
+Internal API:
+- _NODE_ID_COUNTER: module-local id sequence used to assign stable node ids.
 """
 
 from math import radians

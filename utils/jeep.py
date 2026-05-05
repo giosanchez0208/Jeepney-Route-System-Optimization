@@ -1,11 +1,16 @@
 """jeep.py
 
-Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None creates a Jeep entity.
-update(self) -> None moves the Jeep along the route and records passed nodes.
-nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]] returns nodes passed during the current update or None.
-modifyPassenger(self, amt: int) -> None modifies the current passenger count.
-returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge] returns the path between two nodes on the route.
-getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float] returns the total weight of the path between two nodes.
+Public API:
+- Jeep(route, currPos, speed) models a moving vehicle on a circular route.
+- update() advances the jeep and tracks nodes crossed in the current frame.
+- nodes_passed_this_frame(), modifyPassenger(), returnPathFrom(), and
+  getWeightIf() are the external behavior/query methods.
+- route, currPos, heading, passenger_max, and curr_passenger_count are the
+  primary public attributes.
+
+Internal API:
+- _snap_to_route() and _update_heading() keep the jeep aligned to its path.
+- _edge_idx, _edge_progress, and currNodesPassed store private movement state.
 """
 
 import math

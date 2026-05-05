@@ -1,7 +1,17 @@
 """passenger_generator.py
 
-PassengerGenerator(...) -> None coordinates the stochastic generation, updating, and archiving of passengers.
-update(self) -> None steps the spawn schedule, generates new journeys, updates agent states, and archives completed entities.
+Public API:
+- PassengerGenerator(tg, od_gen, rate_per_100, stdev, speed=5.0) manages
+  stochastic passenger spawning and lifecycle updates.
+- update() advances the spawn schedule, updates all passengers, and archives
+  completed ones.
+- get_all_generated_journeys() returns the journeys for all active and archived
+  passengers.
+
+Internal API:
+- _generate_schedule() produces the randomized 100-tick spawn plan.
+- passengers, new_passengers_this_tick, archived_passengers, tick_counter, and
+  spawn_schedule are the generator's internal state.
 """
 
 import random

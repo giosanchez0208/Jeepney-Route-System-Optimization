@@ -1,12 +1,17 @@
 """passenger.py
 
-Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None creates a passenger.
-update(self) -> None progresses the passenger through walking, waiting, and alighting states.
-get_target_route_idx(self) -> Optional[int] returns the planned route index.
-get_target_alight_node(self) -> Optional[Node] returns the geographical destination of the current ride.
-get_planned_ride_weight(self) -> float calculates the weight of the pre-calculated ride sequence.
-complete_ride(self) -> None fast-forwards the journey state to the post-ride phase.
-get_remaining_time(self) -> float calculates the sum of weights for all untraversed edges in the journey.
+Public API:
+- Passenger(start_pos, journey, speed, spawn_tick=0) models a traveler moving
+  through walking, waiting, riding, and done states.
+- curr_lat and curr_lon expose the passenger's live position.
+- update(), get_target_route_idx(), get_target_alight_node(),
+  get_planned_ride_weight(), complete_ride(), and get_remaining_time() make up
+  the external control/query surface.
+
+Internal API:
+- _walk() advances the walking state across walk edges.
+- _edge_idx, _edge_progress, current_jeep, and the state-machine fields track
+  private journey progress.
 """
 
 from typing import Optional
