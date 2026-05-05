@@ -1,0 +1,22 @@
+SIMULATION ANNOTATION REPORT
+========================================
+Simulation ID : d46920e4
+Timestamp     : 2026-05-05 09:41:47
+Fitness Score : 1440849.8511
+
+--- METRICS ---
+completed_count     : 745
+incomplete_count    : 673
+mean_commute_time   : 928.3450
+std_commute_time    : 620.0469
+sum_completed_time  : 691617
+sum_penalty_time    : 748922.8276
+ticks_simulated     : 2940
+
+--- TOPOLOGY OVERVIEW ---
+Total Routes : 5
+Total Jeeps  : 15
+
+
+--- DATA PAYLOAD (DO NOT EDIT) ---
+{"sim_id": "d46920e4", "fitness_score": 1440849.8510717524, "metrics": {"completed_count": 745, "incomplete_count": 673, "mean_commute_time": 928.344966442953, "std_commute_time": 620.046926502557, "sum_completed_time": 691617, "sum_penalty_time": 748922.827608501, "ticks_simulated": 2940}, "routes_count": 5, "jeeps_count": 15}

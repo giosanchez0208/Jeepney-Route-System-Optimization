@@ -86,7 +86,7 @@ class PassengerGenerator:
             else:
                 active_passengers.append(p)
 
-        self.passengers = active_passengers
+        self.passengers[:] = active_passengers
         self.tick_counter += 1
         
     def get_all_generated_journeys(self) -> list[list[DirEdge]]:

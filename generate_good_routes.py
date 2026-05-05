@@ -33,7 +33,7 @@ def _build_shared_state():
     stg = StaticTravelGraph(cg)
     od_gen = TrafficAwareODGenerator(cg, DATA_PATH)
 
-    np.random.seed(42)
+    np.random.seed()
     points = od_gen.generate_origins(n_points=200)
     test_origins = points[:100]
     test_destinations = points[100:]
