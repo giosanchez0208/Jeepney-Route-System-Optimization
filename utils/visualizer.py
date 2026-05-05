@@ -71,13 +71,14 @@ class Passenger:
 class StaticVisualizer:
     def __init__(
         self,
-        bounds: tuple[float, float, float, float], # (min_lat, max_lat, min_lon, max_lon)
+        bounds: tuple[float, float, float, float],
         title: Optional[str] = None,
         nodes: Optional[list[Node]] = None,
         edges: Optional[list[DirEdge]] = None,
         routes: Optional[list[Route]] = None,
         jeeps: Optional[list[Jeep]] = None,
         passengers: Optional[list[Any]] = None,
+        pheromones: Optional[dict[tuple[float, float, float, float], float]] = None,
         system_manager: Optional[Any] = None,
         mode: MapMode = "light_nolabels",
     ) -> None:
@@ -88,6 +89,7 @@ class StaticVisualizer:
         self.routes = routes if routes is not None else []
         self.jeeps = jeeps if jeeps is not None else []
         self.passengers = passengers if passengers is not None else []
+        self.pheromones = pheromones if pheromones is not None else {}
         self.system_manager = system_manager
         self.mode = mode
         self.route_colors = _route_colors(len(self.routes))
@@ -98,8 +100,11 @@ class StaticVisualizer:
 
         _add_basemap_or_blank(ax, mode or self.mode)
         
-        # Rendering layers are purely opt-in
-        _draw_edges(ax, self.edges)
+        if self.pheromones:
+            _draw_pheromones(ax, self.pheromones)
+        else:
+            _draw_edges(ax, self.edges)
+            
         _draw_routes(ax, self.routes, self.route_colors)
         _draw_nodes(ax, self.nodes)
         _draw_passengers(ax, self.passengers)
@@ -148,7 +153,7 @@ class DynamicVisualizer:
 class LiveVisualizer:
     def __init__(
         self,
-        bounds: tuple[float, float, float, float], # (min_lat, max_lat, min_lon, max_lon)
+        bounds: tuple[float, float, float, float],
         title: Optional[str] = None,
         nodes: Optional[list[Node]] = None,
         edges: Optional[list[DirEdge]] = None,
@@ -306,23 +311,19 @@ class LiveVisualizer:
 ### HELPER FUNCTIONS ###
 
 def _force_square_bounds(bounds: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
-    """Forces the bounding box to be a perfect square with a 10% outer padding margin."""
     min_lat, max_lat, min_lon, max_lon = bounds
     center_lat = (min_lat + max_lat) / 2.0
     center_lon = (min_lon + max_lon) / 2.0
     
     lat_span = max_lat - min_lat
-    # Adjust longitude span for Mercator distortion at this latitude
     lon_span_adjusted = (max_lon - min_lon) * math.cos(math.radians(center_lat))
     
     max_span = max(lat_span, lon_span_adjusted)
     
-    # Prevent matplotlib singular warning if bounds are missing/flat
     if max_span <= 1e-6:
         print("[Visualizer] WARNING: Bounding box span is 0. Did you set CITY_BOUNDS in configs.yaml?")
-        max_span = 0.05 # Fallback to a roughly 5km default square
+        max_span = 0.05
     
-    # 10% padding so edge features aren't cut off
     max_span *= 1.10 
     
     new_lat_span = max_span
@@ -369,6 +370,27 @@ def _draw_edges(ax: plt.Axes, edges: list[DirEdge]) -> None:
     if not edges: return
     segments = [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in edges]
     ax.add_collection(LineCollection(segments, colors=_EDGE_COLOR, linewidths=0.5, linestyle="-", zorder=2))
+
+def _draw_pheromones(ax: plt.Axes, pheromones: dict[tuple[float, float, float, float], float]) -> None:
+    if not pheromones: return
+    segments = []
+    linewidths = []
+    
+    for (start_lon, start_lat, end_lon, end_lat), tau in pheromones.items():
+        segments.append(((start_lon, start_lat), (end_lon, end_lat)))
+        lw = 0.3 + (math.log10(1 + max(0, tau)) * 1.5)
+        linewidths.append(lw)
+
+    ax.add_collection(
+        LineCollection(
+            segments, 
+            colors="#FFD700",
+            linewidths=linewidths, 
+            alpha=0.8, 
+            capstyle="round", 
+            zorder=2
+        )
+    )
 
 def _draw_routes(ax: plt.Axes, routes: list[Route], route_colors: list[str]) -> None:
     if not routes: return
