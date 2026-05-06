@@ -20,24 +20,26 @@ from .passenger import Passenger
 from .route import Route
 
 class FleetAllocator:
-    @staticmethod
+    _edge_length_cache: dict = {}
+    _route_length_cache: dict = {}
+
+    @classmethod
     def allocate_by_mohring(
+        cls,
         total_fleet: int, 
-        routes: list[Route], 
+        routes: list, 
         pheromones: Any, 
         cg: Any, 
         gen0_sample_size: int = 2000,
         route_baseline_tau: float = 100.0
-    ) -> dict[Route, int]:
+    ) -> dict:
         if not routes or total_fleet <= 0: return {}
 
-        # 1. Enforce mathematical baseline directly within the allocator
         if route_baseline_tau > 0.0:
             for r in routes:
                 for edge in r.path:
                     pheromones.tau[edge] = pheromones.tau.get(edge, 0) + route_baseline_tau
 
-        # 2. Execute stochastic Gen-0 sampling if the matrix is still empty
         total_existing_tau = sum(pheromones.tau.values()) if pheromones.tau else 0.0
         if total_existing_tau < 1.0:
             valid_nodes = cg.nodes
@@ -49,7 +51,6 @@ class FleetAllocator:
                     for edge in path:
                         pheromones.tau[edge] = pheromones.tau.get(edge, 0) + 1.0
 
-        # 3. Calculate Mohring fractions based on the secured demand state
         route_tau = {}
         for r in routes:
             tau_sum = sum(pheromones.tau.get(e, 0) for e in r.path)
@@ -68,8 +69,8 @@ class FleetAllocator:
         allocation[routes[-1]] = max(1, remaining)
         return allocation
 
-    @staticmethod
-    def evaluate_allocation(allocation: dict[Route, int], pheromones: Any) -> dict[Route, dict]:
+    @classmethod
+    def evaluate_allocation(cls, allocation: dict, pheromones: Any) -> dict:
         total_fleet = sum(allocation.values())
         if total_fleet == 0: return {}
         
@@ -79,7 +80,16 @@ class FleetAllocator:
         report = {}
         for route, count in allocation.items():
             tau_sum = sum(pheromones.tau.get(e, 0) for e in route.path)
-            length_sum = sum(e.getLength() for e in route.path)
+            
+            if route not in cls._route_length_cache:
+                length_sum = 0.0
+                for e in route.path:
+                    if e not in cls._edge_length_cache:
+                        cls._edge_length_cache[e] = e.getLength()
+                    length_sum += cls._edge_length_cache[e]
+                cls._route_length_cache[route] = length_sum
+            
+            length_sum = cls._route_length_cache[route]
             
             load_factor = tau_sum / count if count > 0 else float('inf')
             headway = length_sum / count if count > 0 else float('inf')

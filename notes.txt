@@ -199,3 +199,46 @@ i don't think i want the soft-body mutations. we might risk over-engineering.
 memetic loop is nice. and good idea bringing up checkpointing. we'll also need to make the memetic loop flexible for future sensitivity analysis. but more important is the I/O of these memetic loops. we should have a way to manage population, maybe keep in elitism (not sure about this), cross breeding, and so on.
 
 and i didn't even think of final convergence analytics. let's save that for last.
+
+===========================
+
+JUSTIFICATION FOR SOFT-BODY OPERATOR:
+
+1. Computational Hemorrhaging
+
+Your current rejection rate is 74.16%. The system discards three out of every four proposed geometries.
+In a diagnostic environment, this is acceptable. In a 100,000-generation production run, it is lethal. You are paying the $O(N^2)$ cost of the Mohring allocation for every mutation. 74,000 rejected mutations translate directly to hours of CPU time burned evaluating dead ends.
+
+2. Asymptotic Stagnation
+
+Hard mutations execute massive topological leaps. This is highly effective in early generations when the search space is unexplored.
+As the population approaches the global optimum, the margin for improvement shrinks. Massive leaps will inevitably overshoot the target minimum. Without a soft operator to execute microscopic nodal fine-tuning, your algorithm will hit an asymptotic wall. It will stagnate because it lacks the precision to crawl down into the final optimum.
+
+3. Execution Hierarchy
+
+You do not replace the hard operator; you layer them.
+
+Step 1 (Soft): Execute a microscopic node nudge or safe prune. Evaluate cost.
+
+Step 2 (Gate): If the soft mutation yields improvement, accept it and terminate the local search early.
+
+Step 3 (Hard): Only if the soft mutation fails, execute the high-risk, high-intensity demand-capture replacement.
+
+This hierarchy acts as a computational filter. It resolves the 74% rejection rate by attempting cheap, high-probability fine-tuning before authorizing expensive, high-risk topological overhauls.
+
+Standard mutation at low intensity executes the primary algorithmic pipeline on a smaller target. A soft-body operator bypasses that pipeline entirely.
+
+1. Time Complexity
+
+Standard mutation, even restricted to a single edge, triggers topological recalculation. It severs a connection and forces the A* algorithm to compute a new path. This incurs an $O((V+E) \log V)$ penalty.
+A soft-body operator is a geometric distortion. It accesses the route's data structure and shifts a single coordinate to an adjacent physical neighbor or drops a terminal node. It requires no pathfinding. It is an $O(1)$ memory update.
+
+2. Disruption Bounding
+
+Low-intensity standard mutation does not guarantee a localized change. If A* determines the optimal reconnection requires a large detour due to one severed edge, the "low intensity" mutation produces a completely different child.
+The soft-body operator is strictly bounded. Shifting one node guarantees the new geometry is nearly identical to the parent. It crawls the local optimum without risking catastrophic structural divergence.
+
+3. Pipeline Isolation
+
+Using low-intensity standard mutations forces the system to use a macroscopic search tool for microscopic refinement. The soft-body operator physically separates these tasks. It executes cheap, low-risk topological smoothing before the Lamarckian gate authorizes expensive, high-risk graph traversals.
+
