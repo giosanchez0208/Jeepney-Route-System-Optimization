@@ -1,0 +1,18 @@
+PHASE D & E: HIGH-INTENSITY LAMARCKIAN ACCEPTANCE DIAGNOSTIC
+============================================================
+
+1. LOCAL SEARCH SURVIVAL METRICS
+Total Proposals:                1000
+Accepted Mutations:             253 (25.30%)
+Rejected Mutations:             747 (74.70%)
+
+2. SYSTEMIC PERFORMANCE (AFTER GATE)
+Final Synergy Rate (< 0.0):     55.20%
+Final Interpolation Rate:       38.70%
+Final Destructive Rate:         6.10%
+Final Mean RPI:                 -1.648591
+
+3. GENETIC STABILITY
+Mean Raw Cost:                  440.162847
+Mean Final Cost:                 430.962658
+Net Efficiency Gain:            9.200189
