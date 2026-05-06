@@ -66,18 +66,30 @@ class ACOLocalSearch:
 
         route_pheromones = {r: sum(pheromones.tau.get(e, 0) for e in r.path) for r in routes}
         r_star = min(route_pheromones, key=route_pheromones.get)
+        
+        path_len = len(r_star.path)
+        if path_len < 2: 
+            return None
 
-        window = max(2, int(self.base_window_size * intensity))
+        # Clamp window to the current path length
+        window = min(path_len, max(2, int(self.base_window_size * intensity)))
+        
         best_idx = 0
         lowest_segment_tau = float('inf')
-        for i in range(len(r_star.path) - window):
+        
+        # Ensure the loop runs even if path_len == window
+        search_range = max(1, path_len - window + 1)
+        for i in range(search_range):
             seg_tau = sum(pheromones.tau.get(e, 0) for e in r_star.path[i:i+window])
             if seg_tau < lowest_segment_tau:
                 lowest_segment_tau = seg_tau
                 best_idx = i
 
-        node_center = r_star.path[best_idx + window // 2].start
-        max_radius = 0.02 * intensity 
+        # Guard against index overflow
+        node_center_idx = min(path_len - 1, best_idx + window // 2)
+        node_center = r_star.path[node_center_idx].start
+        
+        max_radius = 0.02 * intensity
         
         candidate_edges = []
         for e, gap in gaps.items():
