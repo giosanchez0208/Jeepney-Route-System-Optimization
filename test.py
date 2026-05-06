@@ -1,8 +1,7 @@
 """
-Phase D & E: Lamarckian Memetic Diagnostic with Targeted Local Search
-Executes crossover events, applies targeted mutations to the weakest routes, 
-and quantifies the isolated benefit of the local search operator.
-Outputs text diagnostics, dual KDE partition maps, and a cost parity scatter plot.
+Phase D & E: High-Intensity Lamarckian Diagnostic
+Executes crossover events, applies high-intensity mutations (1.5), 
+enforces a survival-of-the-fittest gate, and exports complete visual analytics.
 """
 
 import yaml
@@ -55,26 +54,20 @@ def apply_targeted_mutations(cg, base_routes, local_search, target_fleet, mutati
     for _ in range(mutations):
         phero = PheromoneMatrix(all_edges=cg.graph)
         alloc = FleetAllocator.allocate_by_mohring(target_fleet, current_routes, phero, cg, route_baseline_tau=0.0)
-        
-        # Calculate structural gaps: Difference between supplied fleet parity and raw demand.
-        # Positive gap = Underserved (needs attraction). Negative gap = Overserved (needs repulsion).
         report = FleetAllocator.evaluate_allocation(alloc, phero)
+        
         gaps = {}
         for r in current_routes:
             if r in report:
                 parity = report[r]["parity"]
-                # Assuming parity 1.0 is perfect balance. 
-                # If parity < 1.0, fleet share is less than demand share (Underserved -> Positive gap)
                 gap_value = 1.0 - parity if parity != float('inf') else -1.0 
                 for edge in r.path:
                     gaps[edge] = gaps.get(edge, 0) + gap_value
                     
-        # If an edge has no routes, it is severely underserved
         for edge in cg.graph:
             if edge not in gaps:
                 gaps[edge] = 1.0
 
-        # Execute the ACO Local Search API on the whole system
         local_search.optimize_system(current_routes, phero, gaps, intensity=1.5)
         
     return current_routes
@@ -83,46 +76,32 @@ def calculate_rpi(best, worst, current):
     delta = worst - best
     return (current - best) / delta if delta != 0 else 0.0
 
-def create_genetic_colormap():
-    syn = mcolors.LinearSegmentedColormap.from_list('syn', ['#00FF00', '#FBFF02'])(np.linspace(0, 1, 256))
-    interp = mcolors.LinearSegmentedColormap.from_list('interp', ['#1100FF', '#00FFF2'])(np.linspace(0, 1, 256))
-    dest = mcolors.LinearSegmentedColormap.from_list('dest', ['#FFAE00', '#FF0000'])(np.linspace(0, 1, 256))
-    combined = np.vstack((syn, interp, dest))
-    return mcolors.LinearSegmentedColormap.from_list('GeneticLandscape', combined)
-
 def generate_diagnostic_report(df: pd.DataFrame, out_path: Path):
     total = len(df)
     
-    c_syn = df[df['Child_RPI'] < 0]
-    c_int = df[(df['Child_RPI'] >= 0) & (df['Child_RPI'] <= 1)]
-    c_des = df[df['Child_RPI'] > 1]
+    accepted = df[df['Mutation_Accepted'] == True]
+    rejected = df[df['Mutation_Accepted'] == False]
     
-    m_syn = df[df['Mutated_RPI'] < 0]
-    m_int = df[(df['Mutated_RPI'] >= 0) & (df['Mutated_RPI'] <= 1)]
-    m_des = df[df['Mutated_RPI'] > 1]
-    
-    beneficial = df[df['Mutation_Delta'] < 0]
+    m_syn = df[df['Final_RPI'] < 0]
+    m_int = df[(df['Final_RPI'] >= 0) & (df['Final_RPI'] <= 1)]
+    m_des = df[df['Final_RPI'] > 1]
 
     report = [
-        "PHASE D & E: CROSSOVER AND TARGETED MUTATION DIAGNOSTIC",
-        "=======================================================\n",
-        "1. MACRO STATISTICAL SUMMARY (PARENTS vs RAW CHILD)",
-        f"Total Iterations:               {total}",
-        f"Synergy Rate (< 0.0):           {(len(c_syn)/total)*100:.2f}%",
-        f"Interpolation Rate (0.0 - 1.0): {(len(c_int)/total)*100:.2f}%",
-        f"Destructive Rate (> 1.0):       {(len(c_des)/total)*100:.2f}%",
-        f"Raw Child Mean RPI:             {df['Child_RPI'].mean():.6f}\n",
-        "2. MACRO STATISTICAL SUMMARY (PARENTS vs MUTATED CHILD)",
-        f"Synergy Rate (< 0.0):           {(len(m_syn)/total)*100:.2f}%",
-        f"Interpolation Rate (0.0 - 1.0): {(len(m_int)/total)*100:.2f}%",
-        f"Destructive Rate (> 1.0):       {(len(m_des)/total)*100:.2f}%",
-        f"Mutated Child Mean RPI:         {df['Mutated_RPI'].mean():.6f}\n",
-        "3. LOCAL SEARCH EFFICACY (RAW vs MUTATED)",
-        f"Beneficial Mutations:           {(len(beneficial)/total)*100:.2f}%",
-        f"Mean Cost Delta:                {df['Mutation_Delta'].mean():.6f} (Negative is better)\n",
-        "4. GENETIC GRADIENT CORRELATIONS",
-        f"Parental Gap vs Child RPI:      {df['Parental_Gap'].corr(df['Child_RPI']):.6f}",
-        f"Parental Gap vs Mutated RPI:    {df['Parental_Gap'].corr(df['Mutated_RPI']):.6f}\n"
+        "PHASE D & E: HIGH-INTENSITY LAMARCKIAN ACCEPTANCE DIAGNOSTIC",
+        "============================================================\n",
+        "1. LOCAL SEARCH SURVIVAL METRICS",
+        f"Total Proposals:                {total}",
+        f"Accepted Mutations:             {len(accepted)} ({len(accepted)/total:.2%})",
+        f"Rejected Mutations:             {len(rejected)} ({len(rejected)/total:.2%})\n",
+        "2. SYSTEMIC PERFORMANCE (AFTER GATE)",
+        f"Final Synergy Rate (< 0.0):     {(len(m_syn)/total)*100:.2f}%",
+        f"Final Interpolation Rate:       {(len(m_int)/total)*100:.2f}%",
+        f"Final Destructive Rate:         {(len(m_des)/total)*100:.2f}%",
+        f"Final Mean RPI:                 {df['Final_RPI'].mean():.6f}\n",
+        "3. GENETIC STABILITY",
+        f"Mean Raw Cost:                  {df['Raw_Cost'].mean():.6f}",
+        f"Mean Final Cost:                 {df['Final_Cost'].mean():.6f}",
+        f"Net Efficiency Gain:            {df['Raw_Cost'].mean() - df['Final_Cost'].mean():.6f}"
     ]
     out_path.write_text("\n".join(report))
 
@@ -174,8 +153,8 @@ def plot_smooth_partition_map(df: pd.DataFrame, out_dir: Path, target_col: str, 
 def plot_cost_parity(df: pd.DataFrame, out_dir: Path):
     fig, ax = plt.subplots(figsize=(8, 8))
     
-    colors = np.where(df['Mutation_Delta'] < 0, 'green', 'red')
-    ax.scatter(df['Raw_Cost'], df['Mutated_Cost'], c=colors, alpha=0.5, s=15, edgecolor='none')
+    colors = np.where(df['Mutation_Accepted'], 'green', 'red')
+    ax.scatter(df['Raw_Cost'], df['Final_Cost'], c=colors, alpha=0.5, s=15, edgecolor='none')
     
     limits = [
         np.min([ax.get_xlim(), ax.get_ylim()]),  
@@ -186,9 +165,9 @@ def plot_cost_parity(df: pd.DataFrame, out_dir: Path):
     ax.set_aspect('equal')
     ax.set_xlim(limits)
     ax.set_ylim(limits)
-    ax.set_title("Local Search Efficacy: Raw Cost vs Mutated Cost")
+    ax.set_title("Lamarckian Gate: Raw Child vs Final Child Cost")
     ax.set_xlabel("Raw Child Cost (Before Mutation)")
-    ax.set_ylabel("Mutated Child Cost (After Mutation)")
+    ax.set_ylabel("Final Child Cost (After Gating)")
     ax.legend()
     
     plt.savefig(out_dir / "mutation_cost_parity.png", dpi=300)
@@ -209,12 +188,10 @@ def run_analysis(iterations=1000):
     for _ in tqdm(range(iterations), desc="Simulating Generations", unit="gen"):
         p_a = construct_chromosome(cg, generate_independent_routes(cg, 5), 100, is_parent=True)
         p_b = construct_chromosome(cg, generate_independent_routes(cg, 5), 100, is_parent=True)
-        
         best_p, worst_p = (p_a, p_b) if p_a.cost < p_b.cost else (p_b, p_a)
         
         c_routes = memetic.crossover_topological_hub(p_a, p_b)
         c_phero = memetic.inherit_pheromones(p_a, p_b)
-        
         c_alloc = FleetAllocator.allocate_by_mohring(100, c_routes, c_phero, cg, route_baseline_tau=0.0)
         raw_child = Chromosome(routes=c_routes, allocation=c_alloc, pheromones=c_phero)
         c_report = FleetAllocator.evaluate_allocation(c_alloc, raw_child.pheromones)
@@ -226,23 +203,25 @@ def run_analysis(iterations=1000):
         m_report = FleetAllocator.evaluate_allocation(m_alloc, mutated_child.pheromones)
         mutated_child.cost = (sum(m["headway"] for m in m_report.values()) + sum(m["load_factor"] for m in m_report.values())) / (2.0 * len(m_report))
         
+        accepted = mutated_child.cost < raw_child.cost
+        final_child = mutated_child if accepted else raw_child
+        
         records.append({
             "Best_Parent_Cost": best_p.cost,
             "Parental_Gap": worst_p.cost - best_p.cost,
             "Raw_Cost": raw_child.cost,
-            "Mutated_Cost": mutated_child.cost,
+            "Final_Cost": final_child.cost,
+            "Mutation_Accepted": accepted,
             "Child_RPI": calculate_rpi(best_p.cost, worst_p.cost, raw_child.cost),
-            "Mutated_RPI": calculate_rpi(best_p.cost, worst_p.cost, mutated_child.cost),
-            "Mutation_Delta": mutated_child.cost - raw_child.cost
+            "Final_RPI": calculate_rpi(best_p.cost, worst_p.cost, final_child.cost)
         })
 
     df = pd.DataFrame(records)
-    df.to_csv(out_dir / "genetic_mutation_raw_data.csv", index=False)
+    df.to_csv(out_dir / "lamarckian_gated_data.csv", index=False)
     
-    generate_diagnostic_report(df, out_dir / "mutation_diagnostic_report.txt")
-    
+    generate_diagnostic_report(df, out_dir / "gate_diagnostic_report.txt")
     plot_smooth_partition_map(df, out_dir, "Child_RPI", "Raw Child")
-    plot_smooth_partition_map(df, out_dir, "Mutated_RPI", "Mutated Child")
+    plot_smooth_partition_map(df, out_dir, "Final_RPI", "Final Child")
     plot_cost_parity(df, out_dir)
 
 if __name__ == "__main__":
