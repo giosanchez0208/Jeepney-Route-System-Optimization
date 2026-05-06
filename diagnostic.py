@@ -18,8 +18,7 @@ def run_diagnostic():
     print("Initializing Optimizer Builder...")
     try:
         opt = Optimizer.create(config_path)
-        opt.config = opt.config.__class__(**{**opt.config.__dict__, 'g_max': 5, 'telemetry_interval': 1, 'checkpoint_interval': 5})
-        
+
         # Inject bounding box for telemetry spatial mapping
         opt.telemetry.bounds = opt.config.city_bounds
         
@@ -47,7 +46,7 @@ def run_diagnostic():
             opt.telemetry.log_lineage(opt.state.population)
             
             # Export decoupled JSON topology
-            opt.telemetry.export_json_snapshot(opt.state.generation, best_cost, mean_cost, opt.state.population[0])
+            opt.telemetry.export_json_snapshot(opt.state.generation, best_cost, mean_cost, opt.state.population)
 
         opt.preservation.save_state(opt.state)
         print("-" * 60)

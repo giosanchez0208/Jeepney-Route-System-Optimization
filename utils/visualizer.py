@@ -66,19 +66,35 @@ class Passenger:
         self.curr_lon = curr_lon
         self.curr_lat = curr_lat
 
+def _draw_chokepoints(ax, chokepoints: list[dict]):
+    if not chokepoints:
+        return
+    c_lons = [c['lon'] for c in chokepoints]
+    c_lats = [c['lat'] for c in chokepoints]
+    # Removed multiplier and strictly capped size at 80
+    c_sizes = [min(c.get('gap_value', 10), 80) for c in chokepoints]
+    ax.scatter(c_lons, c_lats, s=c_sizes, color='red', alpha=0.5, edgecolors='darkred', zorder=5)
+
+def _draw_topological_hub(ax, hub: dict):
+    if not hub:
+        return
+    ax.plot(hub['lon'], hub['lat'], marker='*', color='red', markersize=15, markeredgecolor='black', zorder=6)
+
 class StaticVisualizer:
     def __init__(
         self,
         bounds: tuple[float, float, float, float],
         title: Optional[str] = None,
-        nodes: Optional[list[Node]] = None,
-        edges: Optional[list[DirEdge]] = None,
-        routes: Optional[list[Route]] = None,
-        jeeps: Optional[list[Jeep]] = None,
+        nodes: Optional[list[Any]] = None,
+        edges: Optional[list[Any]] = None,
+        routes: Optional[list[Any]] = None,
+        jeeps: Optional[list[Any]] = None,
         passengers: Optional[list[Any]] = None,
-        pheromones: Optional[dict[tuple[float, float, float, float], float]] = None,
+        pheromones: Optional[dict] = None,
+        chokepoints: Optional[list[dict]] = None,
+        topological_hub: Optional[dict] = None,
         system_manager: Optional[Any] = None,
-        mode: MapMode = "light_nolabels",
+        mode: str = "light_nolabels",
     ) -> None:
         self.bounds = bounds
         self.title = title
@@ -88,11 +104,15 @@ class StaticVisualizer:
         self.jeeps = jeeps if jeeps is not None else []
         self.passengers = passengers if passengers is not None else []
         self.pheromones = pheromones if pheromones is not None else {}
+        self.chokepoints = chokepoints if chokepoints is not None else []
+        self.topological_hub = topological_hub
         self.system_manager = system_manager
         self.mode = mode
-        self.route_colors = _route_colors(len(self.routes))
+        
+        # Guard against empty routes causing color generator errors
+        self.route_colors = _route_colors(len(self.routes)) if self.routes else []
 
-    def draw(self, mode: Optional[MapMode] = None) -> Image.Image:
+    def draw(self, mode: Optional[str] = None) -> Image.Image:
         min_lat, max_lat, min_lon, max_lon = _force_square_bounds(self.bounds)
         fig, ax = _build_figure(min_lat, max_lat, min_lon, max_lon)
 
@@ -103,18 +123,28 @@ class StaticVisualizer:
         else:
             _draw_edges(ax, self.edges)
             
-        _draw_routes(ax, self.routes, self.route_colors)
+        if self.routes:
+            _draw_routes(ax, self.routes, self.route_colors)
+            
         _draw_nodes(ax, self.nodes)
         _draw_passengers(ax, self.passengers)
-        _draw_jeeps_static(ax, self.jeeps, self.routes, self.route_colors)
+        
+        if self.jeeps:
+            _draw_jeeps_static(ax, self.jeeps, self.routes, self.route_colors)
+
+        if self.chokepoints:
+            _draw_chokepoints(ax, self.chokepoints)
+            
+        if self.topological_hub:
+            _draw_topological_hub(ax, self.topological_hub)
 
         return _render_to_image(fig)
 
-    def display(self, mode: Optional[MapMode] = None) -> None:
+    def display(self, mode: Optional[str] = None) -> None:
         image = self.draw(mode)
         _open_window(image, self.title or "Static Visualizer")
 
-    def export(self, filename: str, mode: Optional[MapMode] = None, scale_up: int = 1) -> None:
+    def export(self, filename: str, mode: Optional[str] = None, scale_up: int = 1) -> None:
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         image = self.draw(mode)
         _save_scaled_image(image, filename, scale_up)
