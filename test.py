@@ -5,6 +5,12 @@ enforces a survival-of-the-fittest gate, and exports two CSVs alongside
 all continuous heatmaps and KDE partition maps.
 """
 
+"""
+
+note: we ran this simulation earler
+and have CSVs, so
+we're just gonna use those from now on
+
 import yaml
 import random
 import pandas as pd
@@ -268,4 +274,164 @@ def run_analysis(iterations=1000):
     plot_cost_parity(df, out_dir)
 
 if __name__ == "__main__":
-    run_analysis(iterations=20000)
+    run_analysis(iterations=50000)
+"""
+
+"""
+offline_visualizer.py
+
+Full three-tier diagnostic suite.
+Tier 1: Pre-Mutation (Unfiltered)
+Tier 2: Post-Mutation (Accepted)
+Tier 3: Topological Intersection (Transitions)
+
+Color Harmonies:
+- Synergy: Yellow (#FBBC05) to Green (#34A853)
+- Interpolation: Cyan ("#4FE5F9") to Blue (#4285F4)
+- Destructive: Red (#EA4335) to Orange (#FF6D00)
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+from scipy.stats import binned_statistic_2d, gaussian_kde
+from pathlib import Path
+
+# --- GOOGLE BRANDING & HARMONIES ---
+G_GREEN  = '#00906c'
+G_BLUE   = "#5151fc"
+G_RED    = "#ff4632"
+G_YELLOW = "#Ffea00"
+G_CYAN   = "#00e1f3"
+G_ORANGE = "#ff9800"
+
+# --- COLOR TOOLS ---
+
+def create_gradient_genetic_cmap():
+    """
+    Creates three distinct gradients with hard boundaries.
+    Synergy: Yellow -> Green
+    Interpolation: Cyan -> Blue
+    Destructive: Red -> Orange
+    """
+    syn_grads = mcolors.LinearSegmentedColormap.from_list('syn', [G_YELLOW, G_GREEN])(np.linspace(0, 1, 256))
+    int_grads = mcolors.LinearSegmentedColormap.from_list('int', [G_CYAN, G_BLUE])(np.linspace(0, 1, 256))
+    des_grads = mcolors.LinearSegmentedColormap.from_list('des', [G_RED, G_ORANGE])(np.linspace(0, 1, 256))
+    
+    cmap = mcolors.ListedColormap(np.vstack((syn_grads, int_grads, des_grads)))
+    norm = mcolors.BoundaryNorm([-1.0, 0.0, 1.0, 2.0], cmap.N)
+    return cmap, norm
+
+def create_impact_colormap():
+    return mcolors.LinearSegmentedColormap.from_list('impact', ['#FFFFFF', G_YELLOW, G_RED])
+
+# --- GRID CALCULATION ---
+
+def get_kde_grid(df, rpi_col, xx, yy, positions):
+    """Generates state grid. Uses subsampling to resolve latency issues."""
+    # Subsample for KDE speed-up if dataset is large
+    sample_size = min(len(df), 5000)
+    df_sub = df.sample(n=sample_size, random_state=42)
+    
+    syn = df_sub[df_sub[rpi_col] < 0]
+    interp = df_sub[(df_sub[rpi_col] >= 0) & (df_sub[rpi_col] <= 1)]
+    dest = df_sub[df_sub[rpi_col] > 1]
+    
+    stack = []
+    for subset in [syn, interp, dest]:
+        if len(subset) > 10:
+            kde = gaussian_kde(np.vstack([subset['Best_Parent_Cost'], subset['Parental_Gap']]))
+            stack.append(kde(positions) * (len(subset) / len(df_sub)))
+        else:
+            stack.append(np.zeros_like(xx.ravel()))
+    
+    Z = np.argmax(np.vstack(stack), axis=0).reshape(xx.shape)
+    total_density = np.sum(np.vstack(stack), axis=0).reshape(xx.shape)
+    return np.ma.masked_where(total_density < 1e-10, Z)
+
+# --- PLOTTING SUITE ---
+
+def plot_performance_suite(df, out_dir, prefix, rpi_col, bounds):
+    cmap, norm = create_gradient_genetic_cmap()
+    range_bins = [[bounds['x_min'], bounds['x_max']], [bounds['y_min'], bounds['y_max']]]
+    
+    for res in [20, 40, 60, 80, 100]:
+        stat, x_edges, y_edges, _ = binned_statistic_2d(
+            df["Best_Parent_Cost"], df["Parental_Gap"], df[rpi_col].clip(-1, 2), 
+            statistic='mean', bins=res, range=range_bins
+        )
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(stat.T, origin='lower', extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+                       aspect='auto', cmap=cmap, norm=norm)
+        
+        ax.set_title(f"{prefix} Performance Heatmap ({res}x{res})")
+        cbar = plt.colorbar(im, ax=ax, spacing='proportional')
+        cbar.set_ticks([-0.5, 0.5, 1.5])
+        cbar.set_ticklabels(['Synergy', 'Interpolation', 'Destructive'])
+        plt.savefig(out_dir / f"{prefix.lower()}_heatmap_{res}x{res}.png", dpi=300)
+        plt.close()
+
+    xx, yy = np.meshgrid(np.linspace(bounds['x_min'], bounds['x_max'], 300),
+                         np.linspace(bounds['y_min'], bounds['y_max'], 300))
+    grid = get_kde_grid(df, rpi_col, xx, yy, np.vstack([xx.ravel(), yy.ravel()]))
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.contourf(xx, yy, grid, levels=[-0.5, 0.5, 1.5, 2.5], colors=[G_GREEN, G_BLUE, G_RED], alpha=0.5)
+    ax.set_title(f"{prefix} Partition Map")
+    handles = [mpatches.Patch(color=c, alpha=0.5, label=l) for c, l in zip([G_GREEN, G_BLUE, G_RED], ['Synergy', 'Interpolation', 'Destructive'])]
+    ax.legend(handles=handles, loc='upper right')
+    plt.savefig(out_dir / f"{prefix.lower()}_partition_map.png", dpi=300)
+    plt.close()
+
+def plot_transition_suite(df_all, out_dir, bounds):
+    df_all['Impact_Delta'] = df_all['Raw_Cost'] - df_all['Final_Cost']
+    xx, yy = np.meshgrid(np.linspace(bounds['x_min'], bounds['x_max'], 300),
+                         np.linspace(bounds['y_min'], bounds['y_max'], 300))
+    pos = np.vstack([xx.ravel(), yy.ravel()])
+    grid_pre = get_kde_grid(df_all, 'Child_RPI', xx, yy, pos)
+    grid_post = get_kde_grid(df_all[df_all['Mutation_Accepted']], 'Final_RPI', xx, yy, pos)
+
+    fig, ax = plt.subplots(figsize=(12, 9))
+    ax.contourf(xx, yy, (grid_pre == 0) & (grid_post == 0), levels=[0.5, 1.5], colors=['#1e6130'], alpha=0.7) 
+    ax.contourf(xx, yy, (grid_pre == 1) & (grid_post == 0), levels=[0.5, 1.5], colors=[G_GREEN], alpha=0.8) 
+    ax.contourf(xx, yy, (grid_pre == 1) & (grid_post == 1), levels=[0.5, 1.5], colors=[G_BLUE], alpha=0.4) 
+    ax.contourf(xx, yy, (grid_pre == 2) & (grid_post <= 1), levels=[0.5, 1.5], colors=[G_YELLOW], alpha=0.7) 
+    ax.contourf(xx, yy, (grid_pre == 2) & (grid_post == 2), levels=[0.5, 1.5], colors=[G_RED], alpha=0.5) 
+    ax.contourf(xx, yy, (grid_pre <= 1) & (grid_post == 2), levels=[0.5, 1.5], colors=['#000000'], alpha=0.8) 
+
+    handles = [
+        mpatches.Patch(color='#085e55', alpha=0.7, label='Synergy -> Synergy (Stable)'),
+        mpatches.Patch(color=G_GREEN, alpha=0.8, label='Interp -> Synergy (Improved)'),
+        mpatches.Patch(color=G_BLUE, alpha=0.4, label='Interp -> Interp (Stable)'),
+        mpatches.Patch(color=G_YELLOW, alpha=0.7, label='Destruct -> Rescued'),
+        mpatches.Patch(color=G_RED, alpha=0.5, label='Destruct (Stable Failure)'),
+        mpatches.Patch(color='#090909', alpha=0.8, label='Catastrophic Degradation')
+    ]
+    ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.set_title("Topological Mutation Transitions")
+    plt.tight_layout()
+    plt.savefig(out_dir / "mutation_state_transitions_intersection.png", dpi=300)
+    plt.close()
+
+def write_reports(df_all, df_acc, out_dir):
+    s1 = {'syn': (df_all['Child_RPI'] < 0).mean()*100, 'cost': df_all['Raw_Cost'].mean()}
+    s2 = {'syn': (df_acc['Final_RPI'] < 0).mean()*100, 'cost': df_acc['Final_Cost'].mean()}
+    report = [
+        "TIER 1: PRE-MUTATION", f"Synergy Rate: {s1['syn']:.2f}% | Mean Cost: {s1['cost']:.4f}\n",
+        "TIER 2: POST-MUTATION", f"Synergy Rate: {s2['syn']:.2f}% | Mean Cost: {s2['cost']:.4f}\n",
+        "TIER 3: TRANSITIONS", f"Acceptance: {(len(df_acc)/len(df_all))*100:.2f}% | Gain: {s1['cost'] - s2['cost']:.6f}"
+    ]
+    (out_dir / "diagnostic_report.txt").write_text("\n".join(report))
+
+if __name__ == "__main__":
+    out_dir = Path("test/parent-child_relationship")
+    df_all = pd.read_csv(out_dir / "lamarckian_all_proposals.csv")
+    df_acc = pd.read_csv(out_dir / "lamarckian_accepted_mutations.csv")
+    bounds = {'x_min': df_all['Best_Parent_Cost'].min(), 'x_max': df_all['Best_Parent_Cost'].max(),
+              'y_min': df_all['Parental_Gap'].min(), 'y_max': df_all['Parental_Gap'].max()}
+    plot_performance_suite(df_all, out_dir, "Pre_Mutation", "Child_RPI", bounds)
+    plot_performance_suite(df_acc, out_dir, "Post_Mutation", "Final_RPI", bounds)
+    plot_transition_suite(df_all, out_dir, bounds)
+    write_reports(df_all, df_acc, out_dir)

@@ -187,3 +187,15 @@ This is a significant structural improvement. A net drop of 9.2 cost units per g
 The synergy rate has increased. Over half of all generated networks now outperform both of their parents. The destructive rate remains safely suppressed at 6.10%.
 
 The diagnostic phase is complete. The operators are balanced. You are cleared to integrate this into the main evolutionary loop and execute the full batch.
+
+===================
+
+let's keep the mutation operators as is. honestly the whole mutation thing is already pretty good so let's stop that here.
+
+global memoization layer sounds good. speed is important and more optimization won't hurt since we cut down simulation time.
+
+i don't think i want the soft-body mutations. we might risk over-engineering.
+
+memetic loop is nice. and good idea bringing up checkpointing. we'll also need to make the memetic loop flexible for future sensitivity analysis. but more important is the I/O of these memetic loops. we should have a way to manage population, maybe keep in elitism (not sure about this), cross breeding, and so on.
+
+and i didn't even think of final convergence analytics. let's save that for last.
