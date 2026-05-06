@@ -9,6 +9,7 @@ Internal API:
 - _DRIVABLE_HIGHWAY_TYPES filters road tags considered traversable.
 - _road_graph, _node_lookup, _node_set, _outgoing_edges, and _fast_edges are
   internal caches.
+- _path_cache memoizes shortest path computations.
 - _build_nodes(), _build_graph(), _load_road_graph(), _build_outgoing_edges(),
   and _reconstruct_path() are implementation helpers.
 """
@@ -16,6 +17,7 @@ Internal API:
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count
+from typing import Optional
 
 import networkx as nx
 import osmnx as ox
@@ -46,6 +48,9 @@ class CityGraph:
         
         # O(1) lookup structure specifically built to accelerate A* search
         self._fast_edges: dict[Node, list[tuple[DirEdge, Node, float]]] = defaultdict(list)
+        
+        # O(1) memoization for previously computed shortest paths
+        self._path_cache: dict[tuple[Node, Node], list[DirEdge]] = {}
 
         self._build_nodes()
         self._build_graph()
@@ -69,6 +74,10 @@ class CityGraph:
         if start is end:
             return []
 
+        cache_key = (start, end)
+        if cache_key in self._path_cache:
+            return self._path_cache[cache_key]
+
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
         
@@ -89,7 +98,9 @@ class CityGraph:
             _, current_cost, _, current = heappop(frontier)
 
             if current is end:
-                return self._reconstruct_path(came_from, start, end)
+                path = self._reconstruct_path(came_from, start, end)
+                self._path_cache[cache_key] = path
+                return path
 
             if current_cost > cost_so_far.get(current, float("inf")):
                 continue
@@ -190,50 +201,3 @@ class CityGraph:
 
         path.reverse()
         return path
-
-"""
-if __name__ == "__main__":
-    cg = CityGraph("City of Manila, Philippines")
-
-    print(cg.info())
-
-    from visualizer import StaticVisualizer
-
-    # all edges
-    vis = StaticVisualizer(
-        cg.nodes,
-        cg.graph,
-        title="CityGraph Test",
-        query=cg.query,
-        mode="light_nolabels",
-        labels_on=False,
-        node_radius=1,
-        edge_color="#d62728",
-        edge_thickness=1,
-        landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
-    )
-    vis.export("results/test/city_graph_full.png", scale_up=3)
-    del vis
-
-    # print how many edges are drivable vs non-drivable
-    drivable_count = sum(1 for edge in cg.graph if edge.is_drivable)
-    non_drivable_count = len(cg.graph) - drivable_count
-    print(f"Drivable edges: {drivable_count}")
-    print(f"Non-drivable edges: {non_drivable_count}")
-    
-    # only drivable edges
-    vis = StaticVisualizer(
-        cg.nodes,
-        [edge for edge in cg.graph if edge.is_drivable],
-        title="CityGraph Test (Drivable Edges Only)",
-        query=cg.query,
-        mode="light_nolabels",
-        labels_on=False,
-        node_radius=1,
-        edge_color="#1f77b4",
-        edge_thickness=1,
-        landmarks="MSU-IIT, Robinsons, Tibanga, Tambo, Tubod",
-    )
-    vis.export("results/test/city_graph_drivable.png", scale_up=3)
-    del vis
-"""

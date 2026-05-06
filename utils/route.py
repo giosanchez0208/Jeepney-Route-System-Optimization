@@ -14,6 +14,7 @@ import json
 from typing import Optional
 from random import sample
 from scipy.spatial import cKDTree
+import numpy as np
 
 from .node import Node
 from .directed_edge import DirEdge

@@ -1,7 +1,8 @@
 """
-Phase D & E: High-Intensity Lamarckian Diagnostic
+Phase D & E: High-Intensity Lamarckian Diagnostic (Complete Visual Suite)
 Executes crossover events, applies high-intensity mutations (1.5), 
-enforces a survival-of-the-fittest gate, and exports complete visual analytics.
+enforces a survival-of-the-fittest gate, and exports two CSVs alongside
+all continuous heatmaps and KDE partition maps.
 """
 
 import yaml
@@ -76,9 +77,15 @@ def calculate_rpi(best, worst, current):
     delta = worst - best
     return (current - best) / delta if delta != 0 else 0.0
 
+def create_genetic_colormap():
+    syn = mcolors.LinearSegmentedColormap.from_list('syn', ['#00FF00', '#FBFF02'])(np.linspace(0, 1, 256))
+    interp = mcolors.LinearSegmentedColormap.from_list('interp', ['#1100FF', '#00FFF2'])(np.linspace(0, 1, 256))
+    dest = mcolors.LinearSegmentedColormap.from_list('dest', ['#FFAE00', '#FF0000'])(np.linspace(0, 1, 256))
+    combined = np.vstack((syn, interp, dest))
+    return mcolors.LinearSegmentedColormap.from_list('GeneticLandscape', combined)
+
 def generate_diagnostic_report(df: pd.DataFrame, out_path: Path):
     total = len(df)
-    
     accepted = df[df['Mutation_Accepted'] == True]
     rejected = df[df['Mutation_Accepted'] == False]
     
@@ -87,8 +94,8 @@ def generate_diagnostic_report(df: pd.DataFrame, out_path: Path):
     m_des = df[df['Final_RPI'] > 1]
 
     report = [
-        "PHASE D & E: HIGH-INTENSITY LAMARCKIAN ACCEPTANCE DIAGNOSTIC",
-        "============================================================\n",
+        "PHASE D & E: HIGH-INTENSITY LAMARCKIAN DIAGNOSTIC",
+        "=================================================\n",
         "1. LOCAL SEARCH SURVIVAL METRICS",
         f"Total Proposals:                {total}",
         f"Accepted Mutations:             {len(accepted)} ({len(accepted)/total:.2%})",
@@ -104,6 +111,31 @@ def generate_diagnostic_report(df: pd.DataFrame, out_path: Path):
         f"Net Efficiency Gain:            {df['Raw_Cost'].mean() - df['Final_Cost'].mean():.6f}"
     ]
     out_path.write_text("\n".join(report))
+
+def plot_continuous_heatmaps(df: pd.DataFrame, out_dir: Path, target_col: str, prefix: str):
+    custom_map = create_genetic_colormap()
+    for res in [40, 80]:
+        statistic, x_edges, y_edges, _ = binned_statistic_2d(
+            df["Best_Parent_Cost"], df["Parental_Gap"], df[target_col].clip(-1, 2), 
+            statistic='mean', bins=res
+        )
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(
+            statistic.T, origin='lower', extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+            aspect='auto', cmap=custom_map, vmin=-1, vmax=2
+        )
+        ax.set_xlabel("Best Parent Cost")
+        ax.set_ylabel("Parental Gap")
+        ax.set_title(f"Continuous Performance Heatmap: {prefix} ({res}x{res})")
+        
+        cbar = plt.colorbar(im)
+        cbar.set_ticks([-0.5, 0.5, 1.5])
+        cbar.set_ticklabels(['Synergy', 'Interpolation', 'Destructive'])
+        
+        filename = f"{prefix.lower().replace(' ', '_')}_heatmap_{res}x{res}.png"
+        plt.savefig(out_dir / filename, dpi=300)
+        plt.close()
 
 def plot_smooth_partition_map(df: pd.DataFrame, out_dir: Path, target_col: str, prefix: str, grid_res=250):
     syn = df[df[target_col] < 0]
@@ -147,7 +179,8 @@ def plot_smooth_partition_map(df: pd.DataFrame, out_dir: Path, target_col: str, 
         mpatches.Patch(color='#FF0000', alpha=0.4, label='Destructive Zone')
     ], loc='upper right')
     
-    plt.savefig(out_dir / f"{prefix.lower().replace(' ', '_')}_partition_map.png", dpi=300)
+    filename = f"{prefix.lower().replace(' ', '_')}_partition_map.png"
+    plt.savefig(out_dir / filename, dpi=300)
     plt.close()
 
 def plot_cost_parity(df: pd.DataFrame, out_dir: Path):
@@ -217,12 +250,22 @@ def run_analysis(iterations=1000):
         })
 
     df = pd.DataFrame(records)
-    df.to_csv(out_dir / "lamarckian_gated_data.csv", index=False)
+    
+    # Export 1: All proposals
+    df.to_csv(out_dir / "lamarckian_all_proposals.csv", index=False)
+    
+    # Export 2: Strictly accepted mutations
+    df[df['Mutation_Accepted']].to_csv(out_dir / "lamarckian_accepted_mutations.csv", index=False)
     
     generate_diagnostic_report(df, out_dir / "gate_diagnostic_report.txt")
+    
+    plot_continuous_heatmaps(df, out_dir, "Child_RPI", "Raw Child")
+    plot_continuous_heatmaps(df, out_dir, "Final_RPI", "Final Child")
+    
     plot_smooth_partition_map(df, out_dir, "Child_RPI", "Raw Child")
     plot_smooth_partition_map(df, out_dir, "Final_RPI", "Final Child")
+    
     plot_cost_parity(df, out_dir)
 
 if __name__ == "__main__":
-    run_analysis(iterations=1000)
+    run_analysis(iterations=20000)
