@@ -1,0 +1,26 @@
+TIER 1: PRE-MUTATION DIAGNOSTIC (RAW CHILD)
+===========================================
+Total Instances:                50000
+Synergy Rate (< 0.0):           49.96%
+Interpolation Rate (0-1):       42.88%
+Destructive Rate (> 1.0):       7.15%
+Mean Raw Cost:                  438.545905
+
+TIER 2: POST-MUTATION DIAGNOSTIC (ACCEPTED ONLY)
+================================================
+Total Instances:                12920
+Synergy Rate (< 0.0):           61.68%
+Interpolation Rate (0-1):       34.71%
+Destructive Rate (> 1.0):       3.61%
+Mean Final Cost:                402.226291
+
+TIER 3: MUTATION TRANSITION EFFECTS (ALL PROPOSALS)
+===================================================
+Mean Impact Delta (Accepted):   37.007168
+Synergy -> Rejected (Worse):    18786 (37.57%)
+Synergy -> Synergy (Improved):  6195 (12.39%)
+Interp. -> Rejected (Worse):    15658 (31.32%)
+Interp. -> Interp. (Improved):  4127 (8.25%)
+Interp. -> Synergy:             1657 (3.31%)
+Destruct. -> Rejected (Worse):  2636 (5.27%)
+Destruct. -> Interpolation:     358 (0.72%)

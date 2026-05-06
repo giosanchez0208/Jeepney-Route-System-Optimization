@@ -1,0 +1,8 @@
+TIER 1: PRE-MUTATION
+Synergy Rate: 49.96% | Mean Cost: 438.5459
+
+TIER 2: POST-MUTATION
+Synergy Rate: 61.68% | Mean Cost: 402.2263
+
+TIER 3: TRANSITIONS
+Acceptance: 25.84% | Gain: 36.319614
