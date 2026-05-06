@@ -1,0 +1,18 @@
+PHASE D: TOPOLOGICAL HUB EXCHANGE DIAGNOSTIC REPORT
+===================================================
+
+1. MACRO STATISTICAL SUMMARY
+Total Iterations:               1000
+Synergy Rate (< 0.0):           50.80%
+Interpolation Rate (0.0 - 1.0): 42.70%
+Destructive Rate (> 1.0):       6.50%
+System Mean RPI:                -2.120183
+
+2. GENETIC GRADIENT CORRELATIONS
+Best Parent Cost vs Child RPI:  -0.062469
+Parental Gap vs Child RPI:      0.101716
+
+3. DISTRIBUTION ANALYSIS
+Synergy Events:                 508
+Interpolation Events:           427
+Destructive Events:             65

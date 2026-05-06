@@ -1,15 +1,19 @@
-"""analyze_crossover.py
-
-Executes a 1,000-iteration batch simulation of Topological Hub Exchange.
-Quantifies Bivariate RPI, Spatial Coverage Shift, and Demand Capture.
+"""
+Phase D: True Lamarckian Memetic Diagnostic
+Executes crossover events using correct epigenetic inheritance and symmetrical evaluation.
+Exports raw data, text diagnostics, continuous heatmaps, and a KDE Partition Map.
 """
 
 import yaml
 import random
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+from scipy.stats import binned_statistic_2d
 from pathlib import Path
+from tqdm import tqdm
 from utils.simulation import SimulationSetup
 from utils.pheromone import PheromoneMatrix
 from utils.jeep_system import FleetAllocator
@@ -20,137 +24,182 @@ from utils.route import Route
 def load_config(path: str = "utils/configs/configs.yaml") -> dict:
     with open(path, 'r') as f: return yaml.safe_load(f)
 
-def construct_matured_chromosome(cg, routes, target_fleet):
+def construct_parent_chromosome(cg, routes, target_fleet):
     phero = PheromoneMatrix(all_edges=cg.graph)
-    alloc = FleetAllocator.allocate_by_mohring(target_fleet, routes, phero, cg)
+    alloc = FleetAllocator.allocate_by_mohring(
+        total_fleet=target_fleet, 
+        routes=routes, 
+        pheromones=phero, 
+        cg=cg, 
+        route_baseline_tau=100.0
+    )
     chrom = Chromosome(routes=routes, allocation=alloc, pheromones=phero)
-    
-    for r in routes:
-        for edge in r.path:
-            chrom.pheromones.tau[edge] = chrom.pheromones.tau.get(edge, 0) + 100.0
-            
     report = FleetAllocator.evaluate_allocation(alloc, chrom.pheromones)
-    
-    chrom.headway_cost = sum(m["headway"] for m in report.values() if m["headway"] != float('inf')) / len(report)
-    chrom.load_cost = sum(m["load_factor"] for m in report.values() if m["load_factor"] != float('inf')) / len(report)
-    chrom.total_length = sum(m["length"] for m in report.values())
-    chrom.total_demand = sum(m["demand"] for m in report.values())
-    
+    chrom.cost = (sum(m["headway"] for m in report.values()) + sum(m["load_factor"] for m in report.values())) / (2.0 * len(report))
     return chrom
 
 def generate_independent_routes(cg, count, min_edges=30):
     routes = []
-    valid_nodes = cg.nodes
     while len(routes) < count:
-        start = random.choice(valid_nodes)
-        end = random.choice(valid_nodes)
+        start, end = random.sample(cg.nodes, 2)
         path = cg.findShortestPath(start, end)
         if path and len(path) >= min_edges:
             routes.append(Route(path=path, city_graph=cg))
     return routes
 
-def calculate_rpi(val_a, val_b, val_child):
-    best = min(val_a, val_b)
-    worst = max(val_a, val_b)
-    val_range = worst - best
-    if val_range == 0:
-        return 0.0 if val_child <= best else 1.0
-    return (val_child - best) / val_range
+def calculate_rpi(best, worst, child):
+    delta = worst - best
+    return (child - best) / delta if delta != 0 else 0.0
 
-def run_batch_analysis(iterations=1000):
-    CITY = "Iligan City, Philippines"
-    TOTAL_FLEET = 100
-    ROUTE_SUBSET_SIZE = 5
+def create_genetic_colormap():
+    syn = mcolors.LinearSegmentedColormap.from_list('syn', ['#00FF00', '#FBFF02'])(np.linspace(0, 1, 256))
+    interp = mcolors.LinearSegmentedColormap.from_list('interp', ['#1100FF', '#00FFF2'])(np.linspace(0, 1, 256))
+    dest = mcolors.LinearSegmentedColormap.from_list('dest', ['#FFAE00', '#FF0000'])(np.linspace(0, 1, 256))
+    combined = np.vstack((syn, interp, dest))
+    return mcolors.LinearSegmentedColormap.from_list('GeneticLandscape', combined)
 
-    out_dir = Path("results/phase_d_analysis")
+def generate_diagnostic_report(df: pd.DataFrame, out_path: Path):
+    total = len(df)
+    synergy = df[df['Child_RPI'] < 0]
+    interpolation = df[(df['Child_RPI'] >= 0) & (df['Child_RPI'] <= 1)]
+    destructive = df[df['Child_RPI'] > 1]
+    
+    corr_bp = df['Best_Parent_Cost'].corr(df['Child_RPI'])
+    corr_pg = df['Parental_Gap'].corr(df['Child_RPI'])
+    mean_rpi = df['Child_RPI'].mean()
+
+    report = [
+        "PHASE D: TOPOLOGICAL HUB EXCHANGE DIAGNOSTIC REPORT",
+        "===================================================\n",
+        "1. MACRO STATISTICAL SUMMARY",
+        f"Total Iterations:               {total}",
+        f"Synergy Rate (< 0.0):           {(len(synergy)/total)*100:.2f}%",
+        f"Interpolation Rate (0.0 - 1.0): {(len(interpolation)/total)*100:.2f}%",
+        f"Destructive Rate (> 1.0):       {(len(destructive)/total)*100:.2f}%",
+        f"System Mean RPI:                {mean_rpi:.6f}\n",
+        "2. GENETIC GRADIENT CORRELATIONS",
+        f"Best Parent Cost vs Child RPI:  {corr_bp:.6f}",
+        f"Parental Gap vs Child RPI:      {corr_pg:.6f}\n",
+        "3. DISTRIBUTION ANALYSIS",
+        f"Synergy Events:                 {len(synergy)}",
+        f"Interpolation Events:           {len(interpolation)}",
+        f"Destructive Events:             {len(destructive)}\n"
+    ]
+    out_path.write_text("\n".join(report))
+
+def plot_smooth_partition_map(df: pd.DataFrame, out_dir: Path, grid_res=250):
+    from scipy.stats import gaussian_kde
+    
+    syn = df[df['Child_RPI'] < 0]
+    interp = df[(df['Child_RPI'] >= 0) & (df['Child_RPI'] <= 1)]
+    dest = df[df['Child_RPI'] > 1]
+    
+    x_min, x_max = df['Best_Parent_Cost'].min(), df['Best_Parent_Cost'].max()
+    y_min, y_max = df['Parental_Gap'].min(), df['Parental_Gap'].max()
+    
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, grid_res), np.linspace(y_min, y_max, grid_res))
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    
+    kde_syn = gaussian_kde(np.vstack([syn['Best_Parent_Cost'], syn['Parental_Gap']]))
+    kde_int = gaussian_kde(np.vstack([interp['Best_Parent_Cost'], interp['Parental_Gap']]))
+    kde_dest = gaussian_kde(np.vstack([dest['Best_Parent_Cost'], dest['Parental_Gap']]))
+    
+    n_total = len(df)
+    z_syn = kde_syn(positions) * (len(syn) / n_total)
+    z_int = kde_int(positions) * (len(interp) / n_total)
+    z_dest = kde_dest(positions) * (len(dest) / n_total)
+    
+    Z_stack = np.vstack([z_syn, z_int, z_dest])
+    Z = np.argmax(Z_stack, axis=0).reshape(xx.shape)
+    
+    threshold = 1e-8 
+    mask = np.max(Z_stack, axis=0).reshape(xx.shape) < threshold
+    Z = np.ma.masked_where(mask, Z)
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    colors = ['#00FF00', '#1100FF', '#FF0000']
+    ax.contourf(xx, yy, Z, levels=[-0.5, 0.5, 1.5, 2.5], colors=colors, alpha=0.4)
+    
+    ax.set_xlabel("Best Parent Cost (Base Topology)")
+    ax.set_ylabel("Parental Gap (Genetic Variance)")
+    ax.set_title("Smoothed Bayesian Partition Map (KDE Decision Boundaries)")
+    
+    ax.legend(handles=[
+        mpatches.Patch(color='#00FF00', alpha=0.4, label='Synergy Zone'),
+        mpatches.Patch(color='#1100FF', alpha=0.4, label='Interpolation Zone'),
+        mpatches.Patch(color='#FF0000', alpha=0.4, label='Destructive Zone')
+    ], loc='upper right')
+    
+    plt.savefig(out_dir / "smooth_partition_map.png", dpi=300)
+    plt.close()
+
+def run_analysis(iterations=1000):
+    out_dir = Path("test/parent-child_relationship")
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    print("="*60)
-    print(f" BOOTING PHASE D: ADVANCED BATCH ANALYSIS ({iterations} ITERATIONS)")
-    print("="*60)
     
     config = load_config()
-    setup = SimulationSetup(city_query=CITY, config=config)
+    setup = SimulationSetup(city_query="Iligan City, Philippines", config=config)
     sim = setup.build(visualizer=False)
     cg = sim.jeep_system.routes[0].cg
-    
-    local_search = ACOLocalSearch(cg, p_local=1.0, base_window_size=15)
-    memetic_algo = MemeticAlgorithm(cg, local_search, target_route_count=ROUTE_SUBSET_SIZE)
+    memetic = MemeticAlgorithm(cg, ACOLocalSearch(cg), 5)
     
     records = []
-    
-    for i in range(iterations):
-        if i % 10 == 0:
-            print(f"[*] Processing Iteration {i}/{iterations}...", end="\r")
-            
-        parent_a_routes = [Route(path=r.path[:], city_graph=cg) for r in sim.jeep_system.routes[:ROUTE_SUBSET_SIZE]]
-        if i % 2 == 0:
-            parent_a_routes = generate_independent_routes(cg, ROUTE_SUBSET_SIZE)
-            
-        parent_a = construct_matured_chromosome(cg, parent_a_routes, TOTAL_FLEET)
+    for _ in tqdm(range(iterations), desc="Simulating Generations", unit="gen"):
+        p_a = construct_parent_chromosome(cg, generate_independent_routes(cg, 5), 100)
+        p_b = construct_parent_chromosome(cg, generate_independent_routes(cg, 5), 100)
         
-        parent_b_routes = generate_independent_routes(cg, ROUTE_SUBSET_SIZE)
-        parent_b = construct_matured_chromosome(cg, parent_b_routes, TOTAL_FLEET)
+        best_p, worst_p = (p_a, p_b) if p_a.cost < p_b.cost else (p_b, p_a)
         
-        divergence = memetic_algo.calculate_system_divergence(parent_a, parent_b)
+        c_routes = memetic.crossover_topological_hub(p_a, p_b)
+        c_phero = memetic.inherit_pheromones(p_a, p_b)
         
-        child_routes = memetic_algo.crossover_topological_hub(parent_a, parent_b)
-        child_phero = memetic_algo.inherit_pheromones(parent_a, parent_b)
-        child_alloc = FleetAllocator.allocate_by_mohring(TOTAL_FLEET, child_routes, child_phero, cg)
-        child = construct_matured_chromosome(cg, child_routes, TOTAL_FLEET)
+        # Child allocation requires 0.0 baseline to prevent inflating inherited demand
+        c_alloc = FleetAllocator.allocate_by_mohring(
+            total_fleet=100, 
+            routes=c_routes, 
+            pheromones=c_phero, 
+            cg=cg, 
+            route_baseline_tau=0.0
+        )
         
-        rpi_headway = calculate_rpi(parent_a.headway_cost, parent_b.headway_cost, child.headway_cost)
-        rpi_load = calculate_rpi(parent_a.load_cost, parent_b.load_cost, child.load_cost)
+        child = Chromosome(routes=c_routes, allocation=c_alloc, pheromones=c_phero)
+        report = FleetAllocator.evaluate_allocation(c_alloc, child.pheromones)
+        child.cost = (sum(m["headway"] for m in report.values()) + sum(m["load_factor"] for m in report.values())) / (2.0 * len(report))
         
-        avg_parent_length = (parent_a.total_length + parent_b.total_length) / 2.0
-        coverage_shift = child.total_length / avg_parent_length if avg_parent_length > 0 else 1.0
-
-        avg_parent_demand = (parent_a.total_demand + parent_b.total_demand) / 2.0
-        demand_capture = child.total_demand / avg_parent_demand if avg_parent_demand > 0 else 1.0
-        
+        rpi = calculate_rpi(best_p.cost, worst_p.cost, child.cost)
         records.append({
-            "Iteration": i,
-            "RPI_WaitTime": rpi_headway,
-            "RPI_Operator": rpi_load,
-            "Coverage_Shift": coverage_shift,
-            "Demand_Capture": demand_capture,
-            "Frechet_Div": divergence["frechet_divergence"],
-            "MSE_Div": divergence["pheromone_mse"],
-            "Synergy": rpi_headway < 0.0 and rpi_load < 0.0
+            "Best_Parent_Cost": best_p.cost,
+            "Parental_Gap": worst_p.cost - best_p.cost,
+            "Child_RPI": rpi
         })
-        
-    print(f"\n[*] Batch processing complete. Generating 2x2 analysis matrix...")
+
     df = pd.DataFrame(records)
-    df.to_csv(out_dir / "advanced_crossover_metrics.csv", index=False)
-    
-    sns.set_theme(style="darkgrid")
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
-    # Top Left: Utility vs Efficiency Pareto
-    sns.scatterplot(data=df, x="RPI_WaitTime", y="RPI_Operator", hue="Synergy", palette={True: "green", False: "gray"}, alpha=0.6, ax=axes[0, 0])
-    axes[0, 0].axhline(0, color="black", linestyle="--")
-    axes[0, 0].axvline(0, color="black", linestyle="--")
-    axes[0, 0].set_title("Pareto Front: Passenger vs. Operator RPI")
-    
-    # Top Right: Spatial Coverage Distribution
-    sns.histplot(df["Coverage_Shift"], bins=30, kde=True, color="blue", ax=axes[0, 1])
-    axes[0, 1].axvline(1.0, color="red", linestyle="--")
-    axes[0, 1].set_title("Spatial Coverage Shift (Child Length / Avg Parent Length)")
-    
-    # Bottom Left: Geometric Divergence vs Passenger Utility
-    sns.scatterplot(data=df, x="Frechet_Div", y="RPI_WaitTime", hue="Synergy", palette={True: "green", False: "gray"}, alpha=0.6, ax=axes[1, 0])
-    axes[1, 0].axhline(0, color="black", linestyle="--")
-    axes[1, 0].set_title("Geometric Frechet Divergence vs Wait Time RPI")
-    
-    # Bottom Right: Demand Capture ratio
-    sns.histplot(df["Demand_Capture"], bins=30, kde=True, color="purple", ax=axes[1, 1])
-    axes[1, 1].axvline(1.0, color="red", linestyle="--")
-    axes[1, 1].set_title("Demand Capture Efficiency (Child Phero / Avg Parent Phero)")
-    
-    plt.tight_layout()
-    plot_path = out_dir / "advanced_crossover_analysis.png"
-    plt.savefig(plot_path, dpi=300)
-    print(f"[*] Exported advanced statistical matrix to: {plot_path}")
+    df.to_csv(out_dir / "genetic_raw_data.csv", index=False)
+    generate_diagnostic_report(df, out_dir / "diagnostic_report.txt")
+    plot_smooth_partition_map(df, out_dir, grid_res=250)
+
+    custom_map = create_genetic_colormap()
+    for res in [40, 80]:
+        statistic, x_edges, y_edges, _ = binned_statistic_2d(
+            df["Best_Parent_Cost"], df["Parental_Gap"], df["Child_RPI"].clip(-1, 2), 
+            statistic='mean', bins=res
+        )
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(
+            statistic.T, origin='lower', extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+            aspect='auto', cmap=custom_map, vmin=-1, vmax=2
+        )
+        ax.set_xlabel("Best Parent Cost")
+        ax.set_ylabel("Parental Gap")
+        ax.set_title(f"Continuous Performance Heatmap ({res}x{res})")
+        
+        cbar = plt.colorbar(im)
+        cbar.set_ticks([-0.5, 0.5, 1.5])
+        cbar.set_ticklabels(['Synergy', 'Interpolation', 'Destructive'])
+        
+        plt.savefig(out_dir / f"continuous_heatmap_{res}x{res}.png", dpi=300)
+        plt.close()
 
 if __name__ == "__main__":
-    run_batch_analysis(iterations=1000)
+    run_analysis(iterations=1000)

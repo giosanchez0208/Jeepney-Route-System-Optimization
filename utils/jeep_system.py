@@ -26,12 +26,19 @@ class FleetAllocator:
         routes: list[Route], 
         pheromones: Any, 
         cg: Any, 
-        gen0_sample_size: int = 2000
+        gen0_sample_size: int = 2000,
+        route_baseline_tau: float = 100.0
     ) -> dict[Route, int]:
         if not routes or total_fleet <= 0: return {}
 
+        # 1. Enforce mathematical baseline directly within the allocator
+        if route_baseline_tau > 0.0:
+            for r in routes:
+                for edge in r.path:
+                    pheromones.tau[edge] = pheromones.tau.get(edge, 0) + route_baseline_tau
+
+        # 2. Execute stochastic Gen-0 sampling if the matrix is still empty
         total_existing_tau = sum(pheromones.tau.values()) if pheromones.tau else 0.0
-        
         if total_existing_tau < 1.0:
             valid_nodes = cg.nodes
             for _ in range(gen0_sample_size):
@@ -42,6 +49,7 @@ class FleetAllocator:
                     for edge in path:
                         pheromones.tau[edge] = pheromones.tau.get(edge, 0) + 1.0
 
+        # 3. Calculate Mohring fractions based on the secured demand state
         route_tau = {}
         for r in routes:
             tau_sum = sum(pheromones.tau.get(e, 0) for e in r.path)
@@ -62,7 +70,6 @@ class FleetAllocator:
 
     @staticmethod
     def evaluate_allocation(allocation: dict[Route, int], pheromones: Any) -> dict[Route, dict]:
-        """Calculates operator efficiency and passenger wait time metrics."""
         total_fleet = sum(allocation.values())
         if total_fleet == 0: return {}
         
@@ -80,7 +87,6 @@ class FleetAllocator:
             route_demand_share = tau_sum / total_tau
             route_fleet_share = count / total_fleet
             
-            # Handle routes with 0 demand to prevent division by zero in parity
             if route_demand_share > 0:
                 parity = route_fleet_share / route_demand_share
             else:
