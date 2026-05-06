@@ -1,7 +1,12 @@
-"""local_search.py
+"""Flow: routes + pheromones + demand gaps -> local edits -> improved route layout.
 
-Executes Phase C: ACO-Biased Local Search.
-Integrates intensity-scaled heuristics and Fréchet distance evaluation.
+ACOLocalSearch(cg: Any, p_local: float = 0.5, base_window_size: int = 15) -> None owns the Phase C route refinement logic.
+calculate_route_similarity(self, route_a: Route, route_b: Route) -> float compares route shapes.
+strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> Optional[Route], strategy_redundancy_repulsion(self, routes: list[Route], gaps: dict, intensity: float = 1.0) -> Optional[Route], strategy_tortuosity_pruning(self, routes: list[Route], intensity: float = 1.0) -> tuple[int, Optional[Route]], and optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> dict are the public search methods.
+
+Inputs: CityGraph access, routes, pheromone matrix, demand gaps, and intensity.
+Outputs: optional route replacements plus an action summary from optimize_system().
+Imported modules used: Route and PheromoneMatrix, plus math and random helpers.
 """
 
 import math

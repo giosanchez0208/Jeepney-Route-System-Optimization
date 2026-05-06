@@ -1,7 +1,12 @@
-"""pheromone.py
+"""Flow: passenger paths + route supply -> evaporated pheromone matrix -> demand-service gap.
 
-Manages the global pheromone matrix, encoding latent and realized passenger demand.
-Calculates the Demand-Service Gap to guide ACO-biased local search.
+PheromoneMatrix(all_edges: Iterable[Any], initial_tau: float = 1.0, rho: float = 0.1, q: float = 1000.0) -> None stores edge pheromone levels in tau.
+update_pheromones(self, passenger_records: list[tuple[list[Any], float]]) -> None applies evaporation and deposits.
+calculate_demand_service_gaps(self, routes: list[Any], default_jeep_weight: float = 1.0) -> dict[Any, float] calculates route supply mismatch.
+
+Inputs: all network edges, passenger records, and route lists.
+Outputs: updated tau values and a gap dictionary keyed by edge.
+Imported modules used: Iterable and Any.
 """
 
 from typing import Iterable, Any

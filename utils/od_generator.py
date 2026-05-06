@@ -1,15 +1,12 @@
-"""od_generator.py
+"""Flow: traffic CSV + CityGraph nodes -> KDTree match -> pedestrian demand -> weighted origin sampling.
 
-Public API:
-- TrafficAwareODGenerator(cg, traffic_csv_path, betas=None) binds traffic data
-  to a CityGraph and computes pedestrian demand weights.
-- DEFAULT_BETAS defines the default regression coefficients.
-- generate_origins(n_points) samples CityGraph nodes using the computed demand
-  distribution.
+TrafficAwareODGenerator(cg: CityGraph, traffic_csv_path: str | Path, betas: Optional[dict[str, float]] = None) -> None binds traffic data to graph nodes and calculates per-node pedestrian volume.
+generate_origins(self, n_points: int = 10000) -> list[Node] samples nodes using the demand weights.
+DEFAULT_BETAS stores the regression coefficients used in the demand model.
 
-Internal API:
-- _bind_data() performs the KD-tree matching and v_ped calculation.
-- df_traffic, node_vped, and the bound betas are the internal data stores.
+Inputs: a CityGraph, a traffic CSV path, and optional beta coefficients.
+Outputs: node_vped values and sampled Node origin lists.
+Imported modules used: numpy, pandas, cKDTree, Path, CityGraph, and Node.
 """
 
 import numpy as np

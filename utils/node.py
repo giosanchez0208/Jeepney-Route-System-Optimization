@@ -1,11 +1,12 @@
-"""node.py
+"""Flow: lon/lat -> Node -> identity, layer, and cached coordinate math.
 
-Public API:
-- Node(lon: float, lat: float) -> None creates a geospatial node with
-  lon, lat, layer, id, is_drivable, and cached radian coordinates.
+Node(lon: float, lat: float) -> None creates a geospatial point with a
+generated id, optional layer, drivability flag, and cached radian values for
+distance calculations.
 
-Internal API:
-- _NODE_ID_COUNTER: module-local id sequence used to assign stable node ids.
+Inputs: longitude and latitude.
+Outputs: a Node object with stable identity and coordinate fields.
+Imported modules used: math.radians and Optional.
 """
 
 from math import radians

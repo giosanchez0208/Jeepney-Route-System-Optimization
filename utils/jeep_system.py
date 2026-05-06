@@ -1,15 +1,13 @@
-"""jeep_system.py
+"""Flow: routes + jeeps + pheromones -> fleet allocation -> passenger boarding -> system update loop.
 
-Public API:
-- JeepSystem(jeeps, routes, weight_tolerance=50.0, equidistant_spawn=True)
-  coordinates jeep movement and passenger boarding logic.
-- add_passenger() injects a passenger into the system.
-- update() advances passengers and jeeps, then resolves boarding and alighting.
-- FleetAllocator calculates theoretical fleet distributions and evaluates them.
+FleetAllocator.allocate_by_mohring(total_fleet: int, routes: list, pheromones: Any, cg: Any, gen0_sample_size: int = 2000, route_baseline_tau: float = 100.0) -> dict estimates route-level jeep counts.
+FleetAllocator.evaluate_allocation(allocation: dict, pheromones: Any) -> dict reports demand/service balance.
+JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float = 50.0, equidistant_spawn: bool = True) -> None owns the active passenger list and system state.
+add_passenger(self, passenger: Passenger) -> None and update(self) -> None are the public system methods.
 
-Internal API:
-- _space_jeeps_equidistantly() distributes jeeps across each route at startup.
-- passengers is the system-owned passenger list.
+Inputs: jeeps, routes, weight tolerance, pheromones, and the city graph.
+Outputs: fleet allocations, allocation reports, and a live system state.
+Imported modules used: Jeep, Passenger, Route, plus math and random helpers.
 """
 
 import math

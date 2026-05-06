@@ -1,17 +1,12 @@
-"""travel_graph.py
+"""Flow: CityGraph + routes + config weights -> layered travel network -> shortest journey queries.
 
-Public API:
-- WALK_WT, RIDE_WT, WAIT_WT, TRANSFER_WT, DIRECT_WT, and ALIGHT_WT are the
-  travel-cost constants loaded from configs/configs.yaml.
-- StaticTravelGraph(cg) precomputes the layer-1 and layer-3 base graph.
-- TravelGraph(stg, routes) adds route, wait, alight, and transfer layers.
-- findShortestJourney(), calculateJourneyDistance(), and
-  calculateJourneyWeight() are the main query methods.
+StaticTravelGraph(cg: CityGraph) -> None builds the base layer-1 and layer-3 walking network.
+TravelGraph(stg: StaticTravelGraph, routes: list[Route]) -> None adds layer-2 ride, wait, alight, and transfer edges.
+findShortestJourney(self, start: Node, end: Node) -> list[DirEdge], calculateJourneyDistance(self, start: Node, end: Node) -> float, and calculateJourneyWeight(self, start: Node, end: Node) -> float are the query methods.
 
-Internal API:
-- _CONSTS_PATH and _CONSTS hold the loaded configuration.
-- _construct() and _reconstruct_path() build and recover layered paths.
-- _l1_lookup, _l3_lookup, base_outgoing, and base_edges are internal caches.
+Inputs: a CityGraph and route list.
+Outputs: layered DirEdge paths, journey distances, and journey weights.
+Imported modules used: yaml, Path, Node, DirEdge, _getDistance, CityGraph, and Route.
 """
 
 from collections import defaultdict

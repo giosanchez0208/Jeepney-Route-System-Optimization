@@ -1,16 +1,14 @@
-"""visualizer.py
+"""Flow: map bounds + nodes/edges/routes/jeeps/passengers -> rendered image, GIF, or live window.
 
-Public API:
-- WINDOW_SIZE and MapMode define the shared render size and map-style modes.
-- Passenger(curr_lon, curr_lat) is a lightweight plotting-only passenger model.
-- StaticVisualizer(bounds, ...) renders a single static map image.
-- DynamicVisualizer(static_visualizers, ...) assembles multiple frames into a GIF.
-- LiveVisualizer(bounds, ...) runs the interactive simulation view.
+Passenger(curr_lon: float, curr_lat: float) -> None is the plotting-only passenger model.
+StaticVisualizer(bounds: tuple[float, float, float, float], title: Optional[str] = None, nodes: Optional[list[Node]] = None, edges: Optional[list[DirEdge]] = None, routes: Optional[list[Route]] = None, jeeps: Optional[list[Jeep]] = None, passengers: Optional[list[Any]] = None, pheromones: Optional[dict[tuple[float, float, float, float], float]] = None, system_manager: Optional[Any] = None, mode: MapMode = "light_nolabels") -> None renders one static image with draw(self, mode: Optional[MapMode] = None) -> Image.Image, display(self, mode: Optional[MapMode] = None) -> None, and export(self, filename: str, mode: Optional[MapMode] = None, scale_up: int = 1) -> None.
+DynamicVisualizer(StaticVisualizers: list[StaticVisualizer], title: Optional[str] = None) -> None builds GIFs with draw(self, mode: MapMode = "light_nolabels", fps: int = 2) -> Image.Image, display(self, mode: MapMode = "light_nolabels", fps: int = 2) -> None, and export(self, filename: str, mode: MapMode = "light_nolabels", fps: int = 2, scale_up: int = 1) -> None.
+LiveVisualizer(bounds: tuple[float, float, float, float], title: Optional[str] = None, nodes: Optional[list[Node]] = None, edges: Optional[list[DirEdge]] = None, routes: Optional[list[Route]] = None, jeeps: Optional[list[Jeep]] = None, passengers: Optional[list[Any]] = None, system_manager: Optional[Any] = None, mode: MapMode = "light_nolabels", sim_tick_rate: float = 0.05, render_fps: int = 30) -> None runs the interactive view with display(self) -> None.
 
-Internal API:
-- _RENDER_SCALE, the color palettes, and _PROVIDERS are module configuration.
-- _force_square_bounds() ensures the bounding box is a perfect 1:1 square.
-- Rendering functions gracefully abort if their respective element lists are empty.
+Inputs: bounds, map mode, and optional network objects.
+Outputs: PIL images, exported files, or a Tkinter display window.
+Imported modules used: contextily, matplotlib, tkinter, numpy, requests, PIL,
+Node, DirEdge, Route, and Jeep.
 """
 
 import io
