@@ -5,11 +5,11 @@ Executes the generational logic (Phases A-D) using the underlying utils.
 """
 
 import random
-from utils.genetic import Chromosome, MemeticAlgorithm
-from utils.pheromone import PheromoneMatrix
-from utils.local_search import ACOLocalSearch
-from utils.route import Route
-from utils.city_graph import CityGraph
+from .genetic import Chromosome, MemeticAlgorithm
+from .pheromone import PheromoneMatrix
+from .local_search import ACOLocalSearch
+from .route import Route
+from .city_graph import CityGraph
 from .optimizer_config import ExperimentConfig, OptimizationState
 
 class MemeticEngine:

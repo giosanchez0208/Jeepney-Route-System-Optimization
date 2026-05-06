@@ -9,16 +9,22 @@ Outputs: updated chromosomes, costs, history samples, and saved checkpoints.
 Imported modules used: Route, PheromoneMatrix, ACOLocalSearch, and FleetAllocator.
 """
 
+"""genetic.py
+
+Implements the Lamarckian Memetic Algorithm for Phase D.
+Handles Chromosome data structures, Topological Hub Exchange crossover, 
+fitness-weighted pheromone inheritance, tiered local search, and the main execution loop.
+"""
+
 import math
 import random
 import pickle
-import time
 from pathlib import Path
 from typing import Any
 from .route import Route
 from .pheromone import PheromoneMatrix
 from .local_search import ACOLocalSearch
-from .allocator import FleetAllocator 
+from .jeep_system import FleetAllocator 
 
 class Chromosome:
     def __init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix):
@@ -138,7 +144,7 @@ class MemeticAlgorithm:
         target_route_idx = random.randint(0, len(child.routes) - 1)
         original_route = child.routes[target_route_idx]
 
-        # Tier 1: Soft-Body Mutation (O(1) Prune)
+        # Tier 1: Soft-Body Mutation
         soft_route = self._execute_soft_prune(original_route)
         child.routes[target_route_idx] = soft_route
         soft_cost = self.evaluate_chromosome(child, total_fleet)
@@ -146,48 +152,20 @@ class MemeticAlgorithm:
         if soft_cost < target_cost:
             return True
 
-        # Tier 2: Hard-Body Mutation (O(N^2) Topological Overhaul)
-        hard_route = self.local_search.mutate_route(original_route)
-        child.routes[target_route_idx] = hard_route
+        # Revert soft mutation
+        child.routes[target_route_idx] = original_route
+
+        # Tier 2: Hard-Body ACO System Optimization
+        original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
+        gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        
+        self.local_search.optimize_system(child.routes, child.pheromones, gaps)
         hard_cost = self.evaluate_chromosome(child, total_fleet)
 
         if hard_cost < target_cost:
             return True
 
         # Rejection: Restore original state
-        child.routes[target_route_idx] = original_route
+        child.routes = original_routes_backup
         self.evaluate_chromosome(child, total_fleet)
         return False
-
-    def run_evolution(self, population: list[Chromosome], generations: int, total_fleet: int, out_dir: Path):
-        out_dir.mkdir(parents=True, exist_ok=True)
-        history = []
-
-        for gen in range(1, generations + 1):
-            population.sort(key=lambda c: c.cost)
-            
-            parent_a = population[0] 
-            parent_b = random.choice(population[1:max(2, len(population)//4)])
-            
-            child_routes = self.crossover_topological_hub(parent_a, parent_b)
-            child_phero = self.inherit_pheromones(parent_a, parent_b)
-            child = Chromosome(child_routes, {}, child_phero)
-            
-            raw_cost = self.evaluate_chromosome(child, total_fleet)
-            gate_target = parent_a.cost
-
-            self.apply_lamarckian_mutation(child, gate_target, total_fleet)
-            
-            population[-1] = child
-
-            if gen % 100 == 0:
-                best_cost = population[0].cost
-                worst_cost = population[-1].cost
-                history.append((gen, best_cost, worst_cost))
-
-            if gen % 1000 == 0:
-                checkpoint_path = out_dir / f"checkpoint_gen_{gen}.pkl"
-                with open(checkpoint_path, 'wb') as f:
-                    pickle.dump(population, f)
-                    
-        return population, history
