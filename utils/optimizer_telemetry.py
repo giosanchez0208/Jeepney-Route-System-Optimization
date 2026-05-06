@@ -41,44 +41,36 @@ class TelemetryEngine:
                 p_b = chrom.parents[1] if len(chrom.parents) > 1 else "NONE"
                 writer.writerow([chrom.uid, chrom.generation, round(chrom.cost, 4), p_a, p_b])
 
-    def export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, best_chrom: Any):
-        """Exports a decoupled topological JSON for the interactive dashboard."""
+    def export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, population: list):
+        best_chrom = population[0]
         
-        # 1. Routes Layer
-        routes_data = []
-        for route in best_chrom.routes:
-            path_coords = [{"lat": e.start.lat, "lon": e.start.lon} for e in route.path]
-            if route.path:
-                path_coords.append({"lat": route.path[-1].end.lat, "lon": route.path[-1].end.lon})
-            routes_data.append(path_coords)
+        routes_data = [[{"lat": e.start.lat, "lon": e.start.lon} for e in route.path] + 
+                       ([{"lat": route.path[-1].end.lat, "lon": route.path[-1].end.lon}] if route.path else []) 
+                       for route in best_chrom.routes]
 
-        # 2. Pheromone Layer (Filter out baseline 1.0 to compress file size)
-        pheromones_data = []
-        for edge, tau in best_chrom.pheromones.tau.items():
-            if tau > 1.1: 
-                pheromones_data.append({
-                    "edge": [{"lat": edge.start.lat, "lon": edge.start.lon}, {"lat": edge.end.lat, "lon": edge.end.lon}],
-                    "intensity": round(tau, 2)
-                })
+        pheromones_data = [{"edge": [{"lat": edge.start.lat, "lon": edge.start.lon}, {"lat": edge.end.lat, "lon": edge.end.lon}], "intensity": round(tau, 2)} 
+                           for edge, tau in best_chrom.pheromones.tau.items() if tau > 1.1]
 
-        # 3. Chokepoint Layer (Filter for positive demand-service gaps > threshold)
+        # Aggregate edge gaps into node chokepoints
         gaps = best_chrom.pheromones.calculate_demand_service_gaps(best_chrom.routes)
-        chokepoints_data = []
+        node_gaps = {}
         for edge, gap in gaps.items():
-            if gap > 5.0: 
-                chokepoints_data.append({
-                    "edge": [{"lat": edge.start.lat, "lon": edge.start.lon}, {"lat": edge.end.lat, "lon": edge.end.lon}],
-                    "gap_value": round(gap, 2)
-                })
+            if gap > 0:
+                node_gaps[edge.start] = node_gaps.get(edge.start, 0) + gap
+                node_gaps[edge.end] = node_gaps.get(edge.end, 0) + gap
 
-        # 4. Extract Topological Hub
+        chokepoints_data = [{"lat": node.lat, "lon": node.lon, "gap_value": round(gap, 2)} 
+                            for node, gap in node_gaps.items() if gap > 5.0]
+
         node_demand = {}
         for edge, tau in best_chrom.pheromones.tau.items():
             node_demand[edge.start] = node_demand.get(edge.start, 0) + tau
             node_demand[edge.end] = node_demand.get(edge.end, 0) + tau
-        
         hub_node = max(node_demand, key=node_demand.get) if node_demand else None
         hub_coords = {"lat": hub_node.lat, "lon": hub_node.lon} if hub_node else None
+
+        pop_fitness = [round(c.cost, 2) for c in population]
+        pop_gaps = [round(sum(c.pheromones.calculate_demand_service_gaps(c.routes).values()), 2) for c in population]
 
         payload = {
             "generation": generation,
@@ -86,6 +78,10 @@ class TelemetryEngine:
                 "best_cost": round(best_cost, 4),
                 "mean_cost": round(mean_cost, 4),
                 "topological_hub": hub_coords
+            },
+            "distributions": {
+                "fitness": pop_fitness,
+                "unserved_proxy": pop_gaps
             },
             "layers": {
                 "routes": routes_data,
