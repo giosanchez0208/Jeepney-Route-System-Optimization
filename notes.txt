@@ -242,3 +242,13 @@ The soft-body operator is strictly bounded. Shifting one node guarantees the new
 
 Using low-intensity standard mutations forces the system to use a macroscopic search tool for microscopic refinement. The soft-body operator physically separates these tasks. It executes cheap, low-risk topological smoothing before the Lamarckian gate authorizes expensive, high-risk graph traversals.
 
+Execute the following directives for the Optimization Phase.
+
+1. Global Memoization Layer
+Cache edge lengths globally. Modify FleetAllocator to fetch static dictionary values instead of executing repeated method calls. Implement route geometry caching to bypass recalculations on unmutated segments.
+
+2. Soft-Body Operator Implementation
+The current mutation logic is too aggressive, causing the 74% rejection rate. Implement low-intensity nodal nudging. Program the operator to attempt safe topological pruning before executing high-risk demand capture.
+
+3. Memetic Loop Construction
+Wire the optimized Lamarckian gate directly into the Chromosome class. Construct the 100,000-generation main loop. Implement state serialization to write population checkpoints to disk every 1,000 generations.

@@ -2,15 +2,19 @@
 
 Implements the Lamarckian Memetic Algorithm for Phase D.
 Handles Chromosome data structures, Topological Hub Exchange crossover, 
-fitness-weighted pheromone inheritance, and genetic divergence metrics.
+fitness-weighted pheromone inheritance, tiered local search, and the main execution loop.
 """
 
 import math
 import random
+import pickle
+import time
+from pathlib import Path
 from typing import Any
 from .route import Route
 from .pheromone import PheromoneMatrix
 from .local_search import ACOLocalSearch
+from .allocator import FleetAllocator 
 
 class Chromosome:
     def __init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix):
@@ -46,7 +50,6 @@ class MemeticAlgorithm:
             if busiest_node in nodes:
                 touching_routes.append(r)
                 
-        # Restrict hub inheritance to 50% of the target fleet to guarantee Parent B integration
         max_hub_size = math.ceil(self.target_route_count / 2.0)
         
         if len(touching_routes) > max_hub_size:
@@ -79,7 +82,6 @@ class MemeticAlgorithm:
         for _, r in candidates:
             if len(child_routes) >= self.target_route_count: 
                 break
-            
             existing_paths = [cr.path for cr in child_routes]
             if r.path not in existing_paths:
                 child_routes.append(Route(path=r.path[:], city_graph=self.cg))
@@ -92,7 +94,6 @@ class MemeticAlgorithm:
 
     def inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix:
         child_phero = PheromoneMatrix(all_edges=self.cg.graph)
-        
         total_cost = parent_a.cost + parent_b.cost
         if total_cost == 0: 
             total_cost = 1.0
@@ -110,25 +111,79 @@ class MemeticAlgorithm:
                 
         return child_phero
 
-    def calculate_system_divergence(self, chrom_a: Chromosome, chrom_b: Chromosome) -> dict:
-        total_frechet = 0.0
-        for r_a in chrom_a.routes:
-            min_frechet = float('inf')
-            for r_b in chrom_b.routes:
-                dist = self.local_search.calculate_route_similarity(r_a, r_b)
-                if dist < min_frechet:
-                    min_frechet = dist
-            total_frechet += min_frechet
-        avg_frechet = total_frechet / len(chrom_a.routes) if chrom_a.routes else 0.0
+    def _execute_soft_prune(self, route: Route) -> Route:
+        if len(route.path) <= 2:
+            return route
+        return Route(path=route.path[:-1], city_graph=self.cg)
 
-        all_edges = set(chrom_a.pheromones.tau.keys()).union(chrom_b.pheromones.tau.keys())
-        sq_error_sum = 0.0
-        for e in all_edges:
-            diff = chrom_a.pheromones.tau.get(e, 0) - chrom_b.pheromones.tau.get(e, 0)
-            sq_error_sum += diff ** 2
-        mse = sq_error_sum / len(all_edges) if all_edges else 0.0
+    def evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float:
+        allocation = FleetAllocator.allocate_by_mohring(total_fleet, chrom.routes, chrom.pheromones, self.cg)
+        report = FleetAllocator.evaluate_allocation(allocation, chrom.pheromones)
+        
+        system_cost = 0.0
+        for r_data in report.values():
+            if r_data["jeeps"] > 0:
+                system_cost += (r_data["headway"] * 0.4) + (r_data["length"] * 0.6)
+            else:
+                system_cost += 10000.0 
+        chrom.allocation = allocation
+        chrom.cost = system_cost
+        return system_cost
 
-        return {
-            "frechet_divergence": avg_frechet,
-            "pheromone_mse": mse
-        }
+    def apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool:
+        target_route_idx = random.randint(0, len(child.routes) - 1)
+        original_route = child.routes[target_route_idx]
+
+        # Tier 1: Soft-Body Mutation (O(1) Prune)
+        soft_route = self._execute_soft_prune(original_route)
+        child.routes[target_route_idx] = soft_route
+        soft_cost = self.evaluate_chromosome(child, total_fleet)
+        
+        if soft_cost < target_cost:
+            return True
+
+        # Tier 2: Hard-Body Mutation (O(N^2) Topological Overhaul)
+        hard_route = self.local_search.mutate_route(original_route)
+        child.routes[target_route_idx] = hard_route
+        hard_cost = self.evaluate_chromosome(child, total_fleet)
+
+        if hard_cost < target_cost:
+            return True
+
+        # Rejection: Restore original state
+        child.routes[target_route_idx] = original_route
+        self.evaluate_chromosome(child, total_fleet)
+        return False
+
+    def run_evolution(self, population: list[Chromosome], generations: int, total_fleet: int, out_dir: Path):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        history = []
+
+        for gen in range(1, generations + 1):
+            population.sort(key=lambda c: c.cost)
+            
+            parent_a = population[0] 
+            parent_b = random.choice(population[1:max(2, len(population)//4)])
+            
+            child_routes = self.crossover_topological_hub(parent_a, parent_b)
+            child_phero = self.inherit_pheromones(parent_a, parent_b)
+            child = Chromosome(child_routes, {}, child_phero)
+            
+            raw_cost = self.evaluate_chromosome(child, total_fleet)
+            gate_target = parent_a.cost
+
+            self.apply_lamarckian_mutation(child, gate_target, total_fleet)
+            
+            population[-1] = child
+
+            if gen % 100 == 0:
+                best_cost = population[0].cost
+                worst_cost = population[-1].cost
+                history.append((gen, best_cost, worst_cost))
+
+            if gen % 1000 == 0:
+                checkpoint_path = out_dir / f"checkpoint_gen_{gen}.pkl"
+                with open(checkpoint_path, 'wb') as f:
+                    pickle.dump(population, f)
+                    
+        return population, history
