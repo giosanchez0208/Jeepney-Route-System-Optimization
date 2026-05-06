@@ -1,17 +1,13 @@
-"""passenger_generator.py
+"""Flow: OD demand + travel graph + spawn schedule -> new passengers -> archived journeys.
 
-Public API:
-- PassengerGenerator(tg, od_gen, rate_per_100, stdev, speed=5.0) manages
-  stochastic passenger spawning and lifecycle updates.
-- update() advances the spawn schedule, updates all passengers, and archives
-  completed ones.
-- get_all_generated_journeys() returns the journeys for all active and archived
-  passengers.
+PassengerGenerator(tg: TravelGraph, od_gen: TrafficAwareODGenerator, rate_per_100: float, stdev: float, speed: float = 5.0) -> None manages stochastic spawning, passenger updates, and archive handoff.
+update(self) -> None advances the schedule and lifecycle.
+get_all_generated_journeys(self) -> list[list[DirEdge]] exposes every planned path for pheromone use.
 
-Internal API:
-- _generate_schedule() produces the randomized 100-tick spawn plan.
-- passengers, new_passengers_this_tick, archived_passengers, tick_counter, and
-  spawn_schedule are the generator's internal state.
+Inputs: a TravelGraph, TrafficAwareODGenerator, spawn rate, deviation, and speed.
+Outputs: active passengers, archived passengers, and generated journey lists.
+Imported modules used: DirEdge, Passenger, TravelGraph, TrafficAwareODGenerator,
+and random.
 """
 
 import random

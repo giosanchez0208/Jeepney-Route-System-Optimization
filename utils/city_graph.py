@@ -1,17 +1,13 @@
-"""city_graph.py
+"""Flow: place query -> OSM drive graph -> Node/DirEdge objects -> stitched graph -> cached shortest paths.
 
-Public API:
-- CityGraph(query) loads a drivable OpenStreetMap road network for the query.
-- stitch_graph(), info(), and findShortestPath() are the public graph methods.
-- nodes and graph expose the derived node and edge collections.
+CityGraph(query: str) -> None builds the road network, exposes nodes and graph
+edges, and answers info(self) -> str and findShortestPath(self, start: Node, end: Node) -> list[DirEdge].
+Initialization also calls stitch_graph(self) -> None.
 
-Internal API:
-- _DRIVABLE_HIGHWAY_TYPES filters road tags considered traversable.
-- _road_graph, _node_lookup, _node_set, _outgoing_edges, and _fast_edges are
-  internal caches.
-- _path_cache memoizes shortest path computations.
-- _build_nodes(), _build_graph(), _load_road_graph(), _build_outgoing_edges(),
-  and _reconstruct_path() are implementation helpers.
+Inputs: query string.
+Outputs: a CityGraph with nodes, graph, info(), and shortest-path edge lists.
+Imported modules used: networkx, osmnx, InsufficientResponseError, Node,
+DirEdge, _getDistance, and _stitch.
 """
 
 from collections import defaultdict

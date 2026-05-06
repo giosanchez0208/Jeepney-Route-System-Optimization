@@ -1,17 +1,12 @@
-"""passenger.py
+"""Flow: start position + journey -> passenger state machine -> walking, waiting, riding, done.
 
-Public API:
-- Passenger(start_pos, journey, speed, spawn_tick=0) models a traveler moving
-  through walking, waiting, riding, and done states.
-- curr_lat and curr_lon expose the passenger's live position.
-- update(), get_target_route_idx(), get_target_alight_node(),
-  get_planned_ride_weight(), complete_ride(), and get_remaining_time() make up
-  the external control/query surface.
+Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None tracks live coordinates, state transitions, ride planning, and remaining travel time.
+update(self) -> None advances the passenger state.
+get_target_route_idx(self) -> Optional[int], get_target_alight_node(self) -> Optional[Node], get_planned_ride_weight(self) -> float, complete_ride(self) -> None, and get_remaining_time(self) -> float are the query/control methods.
 
-Internal API:
-- _walk() advances the walking state across walk edges.
-- _edge_idx, _edge_progress, current_jeep, and the state-machine fields track
-  private journey progress.
+Inputs: a start position, a DirEdge journey, movement speed, and spawn tick.
+Outputs: updated passenger state plus route and timing queries.
+Imported modules used: Node, DirEdge, Jeep, and Optional.
 """
 
 from typing import Optional

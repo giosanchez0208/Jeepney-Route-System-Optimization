@@ -1,16 +1,12 @@
-"""jeep.py
+"""Flow: route + start position + speed -> moving jeep state -> passenger and node queries.
 
-Public API:
-- Jeep(route, currPos, speed) models a moving vehicle on a circular route.
-- update() advances the jeep and tracks nodes crossed in the current frame.
-- nodes_passed_this_frame(), modifyPassenger(), returnPathFrom(), and
-  getWeightIf() are the external behavior/query methods.
-- route, currPos, heading, passenger_max, and curr_passenger_count are the
-  primary public attributes.
+Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None initializes the vehicle, snaps it to the nearest route edge, and keeps heading plus passenger counts in sync with movement.
+update(self) -> None advances the jeep.
+nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]], modifyPassenger(self, amt: int) -> None, returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge], and getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float] are the main query methods.
 
-Internal API:
-- _snap_to_route() and _update_heading() keep the jeep aligned to its path.
-- _edge_idx, _edge_progress, and currNodesPassed store private movement state.
+Inputs: a Route, a starting coordinate pair, and speed.
+Outputs: updated position, heading, and per-frame node crossings.
+Imported modules used: Node, Route, DirEdge, and _getDistance.
 """
 
 import math

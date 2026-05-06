@@ -1,8 +1,17 @@
-"""simulation.py
+"""Flow: setup -> graphs, routes, jeeps, passengers -> simulation ticks -> result export.
 
-SimulationSetup(...) -> None encapsulates the initialization boilerplate.
-Simulation(...) -> None orchestrates Phase A.
-SimulationResult(...) -> None extracts and serializes data for Phase D (GA).
+SimulationSetup(city_query: str, config: dict, routes: Optional[list[Route]] = None) -> None wraps initialization.
+build(self, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None) -> Simulation assembles the runtime stack.
+SimulationResult(fitness_score: float, metrics: dict[str, Any], recorded_paths: list[tuple[Any, float]], jeep_system: Optional[JeepSystem] = None, pheromones: Optional[PheromoneMatrix] = None, sim_id: Optional[str] = None) -> None stores metrics and export helpers.
+export_map(self, area_query: str, out_dir: str, draw_pheromones: bool = True, draw_routes: bool = True) -> None, export_report(self, out_dir: str) -> None, and from_file(cls, filepath: str) -> SimulationResult handle saved outputs.
+Simulation(city_query: str, bounds: tuple[float, float, float, float], jeep_system: JeepSystem, passenger_generator: PassengerGenerator, max_ticks: int, beta_penalty: float = 2.0, alpha_std_penalty: float = 0.5, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None, config: Optional[dict] = None) -> None runs the simulation.
+update(self) -> None, run(self) -> SimulationResult, and export_snapshot(self, filename: str, draw_routes: bool = True, draw_jeeps: bool = True, draw_passengers: bool = True) -> None are the main runtime methods.
+
+Inputs: city query, configuration, routes, and runtime components.
+Outputs: live simulation state plus serialized results, maps, and reports.
+Imported modules used: CityGraph, StaticTravelGraph, TravelGraph,
+TrafficAwareODGenerator, PassengerGenerator, JeepSystem, Route, Jeep,
+LiveVisualizer, StaticVisualizer, Passenger, PheromoneMatrix, and threading.
 """
 
 import math

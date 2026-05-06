@@ -1,8 +1,12 @@
-"""genetic.py
+"""Flow: parent routes + pheromones -> crossover -> mutation -> scored child population.
 
-Implements the Lamarckian Memetic Algorithm for Phase D.
-Handles Chromosome data structures, Topological Hub Exchange crossover, 
-fitness-weighted pheromone inheritance, tiered local search, and the main execution loop.
+Chromosome(routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix) -> None stores routes, allocation, pheromones, and cost.
+MemeticAlgorithm(cg: Any, local_search: ACOLocalSearch, target_route_count: int) -> None drives the Phase D search.
+crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route], inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix, evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float, apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool, and run_evolution(self, population: list[Chromosome], generations: int, total_fleet: int, out_dir: Path) -> tuple[list[Chromosome], list[tuple[int, float, float]]] are the main behaviors.
+
+Inputs: CityGraph-like data, local search, parent chromosomes, generations, and fleet size.
+Outputs: updated chromosomes, costs, history samples, and saved checkpoints.
+Imported modules used: Route, PheromoneMatrix, ACOLocalSearch, and FleetAllocator.
 """
 
 import math

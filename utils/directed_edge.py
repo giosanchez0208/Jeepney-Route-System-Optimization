@@ -1,14 +1,11 @@
-"""directed_edge.py
+"""Flow: Node pair -> DirEdge -> length, connectivity, and type checks -> stitched route links.
 
-Public API:
-- DirEdge(start, end, is_drivable, weight=1, id=None, next_edges=None, type=None)
-  models a directed road segment.
-- getLength(), isConnectedTo(), and getType() are the public behaviors on the
-  edge object.
+DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None, type: Optional[str] = None) -> None stores the edge endpoints, metadata, and next-edge links.
+getLength(self) -> float, isConnectedTo(self, other: DirEdge) -> bool, and getType(self) -> str are the public behaviors.
 
-Internal API:
-- _nodes_match(), _getDistance(), _connect(), and _stitch() are module helpers
-  used by graph construction and path stitching.
+Inputs: two Node objects plus edge metadata.
+Outputs: length in meters, connectivity boolean, and a layer-based edge type.
+Imported modules used: Node and math trig helpers.
 """
 
 from math import radians, sin, cos, sqrt, asin

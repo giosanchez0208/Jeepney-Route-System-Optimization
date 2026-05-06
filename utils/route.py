@@ -1,13 +1,12 @@
-"""route.py
+"""Flow: CityGraph + optional OD sample or saved coordinates -> DirEdge path -> Route.
 
-Public API:
-- Route(city_graph, path=None, od_gen=None) stores a route on a CityGraph.
-- route_from_coords(city_graph, coords_json) reconstructs a Route from saved
-  coordinate pairs by snapping them back to the current graph.
+Route(city_graph: CityGraph, path: Optional[list[DirEdge]] = None, od_gen: Optional[TrafficAwareODGenerator] = None) -> None stores a graph-backed path on a CityGraph.
+route_from_coords(city_graph: CityGraph, coords_json: str) -> Route snaps saved coordinates to the current graph and rebuilds the contiguous path.
 
-Internal API:
-- _generate_route_path(city_graph, od_gen=None) builds the default closed path
-  when no explicit path is supplied.
+Inputs: a CityGraph, optional path data, OD generator output, or coordinate JSON.
+Outputs: a Route object containing a list of DirEdge segments.
+Imported modules used: json, sample, cKDTree, numpy, Node, DirEdge, CityGraph,
+and TrafficAwareODGenerator.
 """
 
 import json
