@@ -32,7 +32,10 @@ class Optimizer:
         self.cg.stitch_graph()
         self.engine = MemeticEngine(self.config, self.cg)
         self.preservation = StatePreservationEngine(self.run_dir)
-        self.telemetry = TelemetryEngine(self.run_dir)
+        
+        # Inject city bounds from configuration into telemetry
+        self.telemetry = TelemetryEngine(self.run_dir, self.config.city_bounds)
+        
         self.adaptive = AdaptiveController(self.config.p_mutation, self.config.n_stagnation)
 
     def start(self):
