@@ -1,0 +1,23 @@
+PHASE D & E: CROSSOVER AND TARGETED MUTATION DIAGNOSTIC
+=======================================================
+
+1. MACRO STATISTICAL SUMMARY (PARENTS vs RAW CHILD)
+Total Iterations:               1000
+Synergy Rate (< 0.0):           49.50%
+Interpolation Rate (0.0 - 1.0): 42.50%
+Destructive Rate (> 1.0):       8.00%
+Raw Child Mean RPI:             -2.442675
+
+2. MACRO STATISTICAL SUMMARY (PARENTS vs MUTATED CHILD)
+Synergy Rate (< 0.0):           37.40%
+Interpolation Rate (0.0 - 1.0): 41.70%
+Destructive Rate (> 1.0):       20.90%
+Mutated Child Mean RPI:         0.809945
+
+3. LOCAL SEARCH EFFICACY (RAW vs MUTATED)
+Beneficial Mutations:           27.90%
+Mean Cost Delta:                48.954375 (Negative is better)
+
+4. GENETIC GRADIENT CORRELATIONS
+Parental Gap vs Child RPI:      0.053837
+Parental Gap vs Mutated RPI:    -0.009290
