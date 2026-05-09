@@ -1,7 +1,7 @@
 """Flow: import utils -> access the jeepney routing toolkit.
 
 Main modules exposed by this package:
-- node.py -> Node(lon: float, lat: float) -> None
+- node.py -> Node(lon: float, lat: float, layer: Optional[int] = None) -> None
 - directed_edge.py -> DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None, type: Optional[str] = None) -> None
 - city_graph.py -> CityGraph(query: str) -> None
 - route.py -> Route(city_graph: CityGraph, path: Optional[list[DirEdge]] = None, od_gen: Optional[TrafficAwareODGenerator] = None) -> None
