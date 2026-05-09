@@ -1,5 +1,6 @@
 from math import radians, sin, cos, sqrt, asin
 from typing import Optional
+from PIL import Image, ImageDraw
 
 from .node import Node
 
@@ -73,6 +74,29 @@ class DirEdge:
                 return None
             case _:
                 raise ValueError(f"[DIR EDGE] Invalid layer combination: {self.start.layer} to {self.end.layer}")
+            
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#CDB6FF") -> Image.Image:
+        if image.width != image.height:
+            raise ValueError("[DIR EDGE] Image must be square.")
+
+        tl_lon, tl_lat = context[0]
+        br_lon, br_lat = context[1]
+
+        lon_range = br_lon - tl_lon
+        lat_range = tl_lat - br_lat
+
+        if lon_range == 0 or lat_range == 0:
+            return image
+
+        x1 = (self.start.lon - tl_lon) / lon_range * image.width
+        y1 = (tl_lat - self.start.lat) / lat_range * image.height
+        x2 = (self.end.lon - tl_lon) / lon_range * image.width
+        y2 = (tl_lat - self.end.lat) / lat_range * image.height
+
+        draw = ImageDraw.Draw(image)
+        draw.line([x1, y1, x2, y2], fill=color, width=2)
+
+        return image
         
 
 ### HELPER FUNCTIONS FOR DIR EDGE METHODS ###
