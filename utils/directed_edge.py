@@ -75,7 +75,8 @@ class DirEdge:
             case _:
                 raise ValueError(f"[DIR EDGE] Invalid layer combination: {self.start.layer} to {self.end.layer}")
             
-    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#CDB6FF") -> Image.Image:
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#CDB6FF", width: int = 1) -> Image.Image:
+        
         if image.width != image.height:
             raise ValueError("[DIR EDGE] Image must be square.")
 
@@ -94,7 +95,7 @@ class DirEdge:
         y2 = (tl_lat - self.end.lat) / lat_range * image.height
 
         draw = ImageDraw.Draw(image)
-        draw.line([x1, y1, x2, y2], fill=color, width=2)
+        draw.line([x1, y1, x2, y2], fill=color, width=width)
 
         return image
         
