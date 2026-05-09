@@ -27,6 +27,15 @@ class DirEdge:
             raise ValueError("[DIR EDGE] No end node provided.")
         if _nodes_match(start, end):
             raise ValueError("[DIR EDGE] Start and end nodes cannot be identical.")
+        
+        # a few more safeguards that are very specific to this project
+        # 1. if same layer, must have different coordinates
+        if start.layer == end.layer and start.lon == end.lon and start.lat == end.lat:
+            raise ValueError("[DIR EDGE] Start and end nodes cannot have same coordinates on same layer.")
+        #2. if different layers, must have same coordinates
+        if start.layer != end.layer and (start.lon != end.lon or start.lat != end.lat):
+            raise ValueError("[DIR EDGE] Start and end nodes on different layers must have same coordinates.")
+        
         self.start = start
         self.end = end
         self.is_drivable = is_drivable

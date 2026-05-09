@@ -1,15 +1,3 @@
-"""Flow: place query -> OSM drive graph -> Node/DirEdge objects -> stitched graph -> cached shortest paths.
-
-CityGraph(query: str) -> None builds the road network, exposes nodes and graph
-edges, and answers info(self) -> str and findShortestPath(self, start: Node, end: Node) -> list[DirEdge].
-Initialization also calls stitch_graph(self) -> None.
-
-Inputs: query string.
-Outputs: a CityGraph with nodes, graph, info(), and shortest-path edge lists.
-Imported modules used: networkx, osmnx, InsufficientResponseError, Node,
-DirEdge, _getDistance, and _stitch.
-"""
-
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count
