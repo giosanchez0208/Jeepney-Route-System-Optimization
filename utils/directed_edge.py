@@ -1,32 +1,32 @@
-"""Flow: Node pair -> DirEdge -> length, connectivity, and type checks -> stitched route links.
-
-DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None, type: Optional[str] = None) -> None stores the edge endpoints, metadata, and next-edge links.
-getLength(self) -> float, isConnectedTo(self, other: DirEdge) -> bool, and getType(self) -> str are the public behaviors.
-
-Inputs: two Node objects plus edge metadata.
-Outputs: length in meters, connectivity boolean, and a layer-based edge type.
-Imported modules used: Node and math trig helpers.
-"""
-
 from math import radians, sin, cos, sqrt, asin
 from typing import Optional
 
 from .node import Node
 
+### HELPER FUNCTIONS FOR DIR EDGE INITIALIZATION ###
+def _nodes_match(node1: Node, node2: Node) -> bool:
+    return node1.lon == node2.lon and node1.lat == node2.lat and node1.layer == node2.layer
+
+### DIR EDGE CLASS ###
 class DirEdge:
     def __init__(
         self,
         start: Node,
         end: Node,
-        is_drivable: bool,
-        weight: int = 1,
+        is_drivable: bool = False,
+        weight: Optional[int] = None,
         id: Optional[str] = None,
         next_edges: Optional[list[str]] = None,
         type: Optional[str] = None
     ) -> None:
-        if start is None or end is None:
-            raise ValueError("DirEdge requires both start and end nodes.")
-
+        if start is None and end is None:
+            raise ValueError("[DIR EDGE] No start and end node provided.")
+        if start is None:
+            raise ValueError("[DIR EDGE] No start node provided.")
+        if end is None:
+            raise ValueError("[DIR EDGE] No end node provided.")
+        if _nodes_match(start, end):
+            raise ValueError("[DIR EDGE] Start and end nodes cannot be identical.")
         self.start = start
         self.end = end
         self.is_drivable = is_drivable
@@ -35,6 +35,9 @@ class DirEdge:
         self.next_edges = next_edges if next_edges is not None else []
         self.type = type if type is not None else self.getType()
 
+    def __str__(self) -> str:
+        return f"DirEdge({self.id}): {self.start.id} -> {self.end.id}, type={self.type}, weight={self.weight}, drivable={self.is_drivable}"
+    
     def getLength(self) -> float:
         return _getDistance(self.start, self.end)
 
@@ -60,11 +63,10 @@ class DirEdge:
             case (0, 0) | (None, None):
                 return None
             case _:
-                raise ValueError(f"Invalid layer combination: {self.start.layer} to {self.end.layer}")
+                raise ValueError(f"[DIR EDGE] Invalid layer combination: {self.start.layer} to {self.end.layer}")
+        
 
-def _nodes_match(node1: Node, node2: Node) -> bool:
-    return node1.lon == node2.lon and node1.lat == node2.lat and node1.layer == node2.layer
-
+### HELPER FUNCTIONS FOR DIR EDGE METHODS ###
 def _getDistance(node1: Node, node2: Node) -> float:
     lat1, lon1 = radians(node1.lat), radians(node1.lon)
     lat2, lon2 = radians(node2.lat), radians(node2.lon)
@@ -75,53 +77,23 @@ def _getDistance(node1: Node, node2: Node) -> float:
     c = 2 * asin(sqrt(a))
     return 6371000.0 * c
 
-def _connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1) -> bool:
+### EXTERNAL HELPER FUNCTIONS FOR DIR EDGE CONNECTIVITY, used by CityGraph and TravelGraph ###
+def _connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1, verbose: bool = False) -> None:
     if dir_edge_s.isConnectedTo(dir_edge_e):
         dir_edge_s.next_edges.append(dir_edge_e.id)
         dir_edge_s.weight = weight
-        return True
-    return False
+        if verbose:
+            print(f"[DIR EDGE] Connected {dir_edge_s.id} -> {dir_edge_e.id} with weight {weight}")
+    else:
+        if verbose:
+            print(f"[DIR EDGE] Cannot connect {dir_edge_s.id} -> {dir_edge_e.id} (not connected)")
+    return
 
-
-def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1) -> int:
+def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1, verbose: bool = False) -> None:
     stitched = 0
     for dir_edge_s in dir_edges_s:
         for dir_edge_e in dir_edges_e:
-            if _connect(dir_edge_s, dir_edge_e, weight):
-                stitched += 1
-    return stitched
-
-"""
-### SANITY CHECK ###
-
-if __name__ == "__main__":
-    a = Node(120.0, 14.0)
-    b = Node(120.0001, 14.0002)
-    c = Node(120.0002, 14.0001)
-
-    ab = DirEdge(a, b, True)
-    bc = DirEdge(b, c, True)
-    ca = DirEdge(c, a, True)
-    
-    print("AB ID:", ab.id)
-    print("BC ID:", bc.id)
-    print("CA ID:", ca.id)
-    
-    print("AB Length: {:.2f} meters".format(ab.getLength()))
-    print("BC Length: {:.2f} meters".format(bc.getLength()))
-    print("CA Length: {:.2f} meters".format(ca.getLength()))
-
-    print("AB connected to BC (should be true):", ab.isConnectedTo(bc))
-    print("AB connected to CA (should be false):", ab.isConnectedTo(ca))
-
-    DirEdgeArr = [ab, bc, ca]
-    print("Before stitching:")
-    for edge in DirEdgeArr:
-        print(f"  {edge.id}: {edge.next_edges}")
-    
-    _stitch(DirEdgeArr, DirEdgeArr)
-    print("After stitching:")
-    for edge in DirEdgeArr:
-        print(f"  {edge.id}: {edge.next_edges}")
-        
-"""
+            _connect(dir_edge_s, dir_edge_e, weight, verbose)
+            stitched += 1
+    if verbose:
+        print(f"Stitched {stitched} edges between sets of size {len(dir_edges_s)} and {len(dir_edges_e)}")
