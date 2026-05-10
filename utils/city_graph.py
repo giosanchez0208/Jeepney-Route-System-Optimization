@@ -1,10 +1,26 @@
+"""
+Topological Pruning Justification
+
+Reference: 
+Iliopoulou, C., Kepaptsoglou, K., & Vlahogianni, E. I. (2019). 
+Metaheuristics for the transit network design problem: a review and comparative analysis. 
+Public Transport, 11(3), 487-521. https://doi.org/10.1007/s12469-019-00211-2
+
+Rationale: 
+Deploying agent-based routing heuristics on an unpruned network graph causes immediate 
+combinatorial explosion. By evaluating the 'highway' tag to isolate the arterial skeleton, 
+we artificially restrict the search space. This forces the metaheuristic to converge on 
+viable transit corridors rather than wasting iterations evaluating residential dead-ends.
+"""
+
 import hashlib
 import os
+import pickle
 import urllib.request
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count
-from typing import Optional
+from typing import Optional, Union
 
 import networkx as nx
 import osmnx as ox
@@ -14,16 +30,6 @@ from tqdm import tqdm
 
 from .directed_edge import DirEdge, _getDistance, _stitch
 from .node import Node
-
-_DRIVABLE_HIGHWAY_TYPES = {
-    "motorway", "motorway_link",
-    "trunk", "trunk_link",
-    "primary", "primary_link",
-    "secondary", "secondary_link",
-    "tertiary", "tertiary_link",
-    "unclassified", "residential",
-    "living_street", "service", "road",
-}
 
 def _validate_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """
@@ -35,12 +41,12 @@ def _validate_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, floa
 
 def _get_cache_path(name: str, bbox: tuple[float, float, float, float]) -> str:
     """
-    Generates a unique MD5 hash for the graph cache based on spatial limits.
+    Generates a unique MD5 hash for the binary graph cache based on spatial limits.
     """
-    os.makedirs("utils/.cache", exist_ok=True)
-    base_str = f"{name}_{bbox}"
+    os.makedirs(".cache", exist_ok=True)
+    base_str = f"{name}_{bbox}_pruned"
     file_hash = hashlib.md5(base_str.encode()).hexdigest()
-    return f"utils/.cache/{file_hash}_graph.graphml"
+    return f".cache/{file_hash}_graph.pkl"
 
 class CityGraph:
     def __init__(
@@ -76,7 +82,8 @@ class CityGraph:
         """
         Returns a formatted string representing the network composition.
         """
-        return f"CityGraph({self.name}) | Nodes: {len(self.nodes)} | Edges: {len(self.graph)} | Landmarks: {len(self.landmarks)}"
+        drivable_count = sum(1 for e in self.graph if e.is_drivable)
+        return f"CityGraph({self.name}) | Nodes: {len(self.nodes)} | Edges: {len(self.graph)} (Drivable: {drivable_count}) | Landmarks: {len(self.landmarks)}"
 
     def stitch_graph(self) -> None:
         """
@@ -138,12 +145,13 @@ class CityGraph:
 
     def _load_road_graph(self) -> nx.MultiDiGraph:
         """
-        Retrieves spatial data via cache, local PBF file, or Overpass API fallback.
+        Retrieves spatial data via binary pickle cache, local PBF file, or Overpass API fallback.
         """
         if os.path.exists(self._graph_cache_path):
             if self.verbose:
-                print("[CITY GRAPH] Loading graph from cache.")
-            return ox.load_graphml(self._graph_cache_path)
+                print("[CITY GRAPH] Loading graph from binary cache.")
+            with open(self._graph_cache_path, "rb") as f:
+                return pickle.load(f)
 
         if not os.path.exists(self.pbf_path):
             print(f"[CITY GRAPH] PBF file not found at '{self.pbf_path}'.")
@@ -163,7 +171,10 @@ class CityGraph:
         osm = OSM(self.pbf_path, bounding_box=[min_lon, min_lat, max_lon, max_lat])
         nodes, edges = osm.get_network(network_type="driving", nodes=True)
         graph = osm.to_graph(nodes, edges, graph_type="networkx")
-        ox.save_graphml(graph, self._graph_cache_path)
+        
+        with open(self._graph_cache_path, "wb") as f:
+            pickle.dump(graph, f)
+            
         return graph
 
     def _extract_from_api(self) -> nx.MultiDiGraph:
@@ -174,7 +185,10 @@ class CityGraph:
             print("[CITY GRAPH] Extracting via Overpass API. Latency expected.")
         min_lat, max_lat, min_lon, max_lon = self.bbox
         graph = ox.graph_from_bbox(bbox=(max_lat, min_lat, max_lon, min_lon), network_type="drive", simplify=True)
-        ox.save_graphml(graph, self._graph_cache_path)
+        
+        with open(self._graph_cache_path, "wb") as f:
+            pickle.dump(graph, f)
+            
         return graph
 
     def _download_pbf(self) -> None:
@@ -207,18 +221,32 @@ class CityGraph:
             self._node_lookup[osm_id] = node
             self.nodes.append(node)
 
+    def _is_arterial(self, highway_tag: Union[str, list[str]]) -> bool:
+        """
+        Evaluates OSM highway tags against valid jeepney routing corridors.
+        """
+        arterials = {
+            "primary", "primary_link", 
+            "secondary", "secondary_link", 
+            "tertiary", "tertiary_link", 
+            "trunk", "trunk_link"
+        }
+        if isinstance(highway_tag, list):
+            return any(h in arterials for h in highway_tag)
+        return highway_tag in arterials
+
     def _build_graph(self) -> None:
         """
-        Instantiates bidirectional DirEdge objects from NetworkX edge data.
+        Instantiates bidirectional DirEdge objects, defining drivability based on topology.
         """
         seen_pairs: set[tuple[int, int]] = set()
-        edges = list(self._road_graph.edges(keys=True))
+        edges = list(self._road_graph.edges(keys=True, data=True))
         
         iterable = edges
         if self.verbose:
             iterable = tqdm(iterable, desc="Building graph edges")
 
-        for start_osm_id, end_osm_id, _ in iterable:
+        for start_osm_id, end_osm_id, _, data in iterable:
             if start_osm_id not in self._node_lookup or end_osm_id not in self._node_lookup:
                 continue
             if start_osm_id == end_osm_id:
@@ -232,9 +260,11 @@ class CityGraph:
             start = self._node_lookup[start_osm_id]
             end = self._node_lookup[end_osm_id]
             
+            is_drivable = self._is_arterial(data.get("highway"))
+            
             try:
-                self.graph.append(DirEdge(start, end, True))
-                self.graph.append(DirEdge(end, start, True))
+                self.graph.append(DirEdge(start, end, is_drivable))
+                self.graph.append(DirEdge(end, start, is_drivable))
             except ValueError:
                 continue
 
@@ -306,15 +336,24 @@ class CityGraph:
             (center_lon + half_span, center_lat - half_span)
         )
 
-    def draw(self, size: int = 800) -> tuple[Image.Image, tuple[tuple[float, float], tuple[float, float]]]:
+    def draw(self, size: int = 800, only_drivable: bool = False) -> tuple[Image.Image, tuple[tuple[float, float], tuple[float, float]]]:
         """
         Renders the base network grid onto a standardized Image object.
+        Applies functional contrast to differentiate arterials from dead-ends.
         """
         context = self.get_context()
         image = Image.new("RGB", (size, size), "white")
         
         for edge in self.graph:
-            edge.draw(context, image)
+            if only_drivable and not edge.is_drivable:
+                continue
+            
+            line_color = "#8C8C8C" if edge.is_drivable else "#B5B5B5"
+            
+            try:
+                edge.draw(context, image, color=line_color)
+            except TypeError:
+                edge.draw(context, image)
             
         return image, context
 
