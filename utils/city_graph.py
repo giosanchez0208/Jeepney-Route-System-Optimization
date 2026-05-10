@@ -1,3 +1,6 @@
+import hashlib
+import os
+import urllib.request
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count
@@ -5,7 +8,10 @@ from typing import Optional
 
 import networkx as nx
 import osmnx as ox
-from osmnx._errors import InsufficientResponseError
+from PIL import Image, ImageDraw
+from pyrosm import OSM
+from tqdm import tqdm
+
 from .directed_edge import DirEdge, _getDistance, _stitch
 from .node import Node
 
@@ -19,162 +25,250 @@ _DRIVABLE_HIGHWAY_TYPES = {
     "living_street", "service", "road",
 }
 
+def _validate_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """
+    Validates that the bounding box contains exactly four float coordinates.
+    """
+    if not isinstance(bbox, tuple) or len(bbox) != 4:
+        raise ValueError("[CITY GRAPH] Invalid bbox. Must be a tuple of 4 floats: (min_lat, max_lat, min_lon, max_lon).")
+    return bbox
+
+def _get_cache_path(name: str, bbox: tuple[float, float, float, float]) -> str:
+    """
+    Generates a unique MD5 hash for the graph cache based on spatial limits.
+    """
+    os.makedirs("utils/.cache", exist_ok=True)
+    base_str = f"{name}_{bbox}"
+    file_hash = hashlib.md5(base_str.encode()).hexdigest()
+    return f"utils/.cache/{file_hash}_graph.graphml"
+
 class CityGraph:
-    def __init__(self, query: str) -> None:
-        self.query = query
+    def __init__(
+        self, 
+        bbox: tuple[float, float, float, float], 
+        name: str = "UrbanNetwork", 
+        landmarks: Optional[dict[str, tuple[float, float]]] = None, 
+        pbf_path: str = "utils/data/philippines-latest.osm.pbf",
+        verbose: bool = False
+    ) -> None:
+        self.bbox: tuple[float, float, float, float] = _validate_bbox(bbox)
+        self.name: str = name
+        self.pbf_path: str = pbf_path
+        self.verbose: bool = verbose
+        
         self.nodes: list[Node] = []
         self.graph: list[DirEdge] = []
+        self.landmarks: dict[str, Node] = {}
 
-        self._road_graph: nx.MultiDiGraph = self._load_road_graph(query)
+        self._graph_cache_path: str = _get_cache_path(self.name, self.bbox)
+        self._road_graph: nx.MultiDiGraph = self._load_road_graph()
         self._node_lookup: dict[int, Node] = {}
-        self._node_set: set[Node] = set()
         self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
-        
-        # O(1) lookup structure specifically built to accelerate A* search
-        self._fast_edges: dict[Node, list[tuple[DirEdge, Node, float]]] = defaultdict(list)
-        
-        # O(1) memoization for previously computed shortest paths
-        self._path_cache: dict[tuple[Node, Node], list[DirEdge]] = {}
 
         self._build_nodes()
         self._build_graph()
         self.stitch_graph()
 
-    def stitch_graph(self) -> None:
-        for edge in self.graph:
-            edge.next_edges.clear()
+        if landmarks:
+            self._build_landmarks(landmarks)
 
+    def __str__(self) -> str:
+        """
+        Returns a formatted string representing the network composition.
+        """
+        return f"CityGraph({self.name}) | Nodes: {len(self.nodes)} | Edges: {len(self.graph)} | Landmarks: {len(self.landmarks)}"
+
+    def stitch_graph(self) -> None:
+        """
+        Clears existing edge links and rebuilds the connectivity matrix.
+        """
+        for edge in self.graph:
+            edge.next_edges = []
         _stitch(self.graph, self.graph)
         self._build_outgoing_edges()
 
     def info(self) -> str:
+        """
+        Returns standard integer metrics for nodes and edges.
+        """
         return f"Nodes: {len(self.nodes)}\nEdges: {len(self.graph)}"
 
     def findShortestPath(self, start: Node, end: Node) -> list[DirEdge]:
-        if start not in self._node_set:
-            raise ValueError("start must belong to this CityGraph.")
-        if end not in self._node_set:
-            raise ValueError("end must belong to this CityGraph.")
+        """
+        Calculates the optimal sequence of DirEdges using the A* algorithm.
+        """
+        if start not in self.nodes:
+            raise ValueError("[CITY GRAPH] start node must belong to this CityGraph.")
+        if end not in self.nodes:
+            raise ValueError("[CITY GRAPH] end node must belong to this CityGraph.")
         if start is end:
             return []
 
-        cache_key = (start, end)
-        if cache_key in self._path_cache:
-            return self._path_cache[cache_key]
-
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
-        
-        # OPTIMIZATION: Memoize heuristic calculations to avoid redundant trig functions
-        h_cache = {}
-        def get_h(n: Node) -> float:
-            if n not in h_cache:
-                h_cache[n] = _getDistance(n, end)
-            return h_cache[n]
-
-        heappush(frontier, (get_h(start), 0.0, next(sequence), start))
+        heappush(frontier, (_getDistance(start, end), 0.0, next(sequence), start))
 
         came_from: dict[Node, tuple[Node, DirEdge]] = {}
         cost_so_far: dict[Node, float] = {start: 0.0}
-        fast_edges = self._fast_edges
 
         while frontier:
             _, current_cost, _, current = heappop(frontier)
 
             if current is end:
-                path = self._reconstruct_path(came_from, start, end)
-                self._path_cache[cache_key] = path
-                return path
+                return self._reconstruct_path(came_from, start, end)
 
             if current_cost > cost_so_far.get(current, float("inf")):
                 continue
 
-            # OPTIMIZATION: Unpack precalculated lengths, bypassing object methods entirely
-            for edge, next_node, edge_length in fast_edges.get(current, []):
-                new_cost = current_cost + edge_length
-                
+            for edge in self._outgoing_edges.get(current, []):
+                if not edge.is_drivable:
+                    continue
+
+                next_node = edge.end
+                new_cost = current_cost + _getDistance(edge.start, edge.end)
                 if new_cost >= cost_so_far.get(next_node, float("inf")):
                     continue
 
                 cost_so_far[next_node] = new_cost
                 came_from[next_node] = (current, edge)
-                priority = new_cost + get_h(next_node)
+                priority = new_cost + _getDistance(next_node, end)
                 heappush(frontier, (priority, new_cost, next(sequence), next_node))
 
-        raise ValueError("No path found between the provided nodes.")
+        raise ValueError("[CITY GRAPH] No path found between the provided nodes.")
+
+    def _load_road_graph(self) -> nx.MultiDiGraph:
+        """
+        Retrieves spatial data via cache, local PBF file, or Overpass API fallback.
+        """
+        if os.path.exists(self._graph_cache_path):
+            if self.verbose:
+                print("[CITY GRAPH] Loading graph from cache.")
+            return ox.load_graphml(self._graph_cache_path)
+
+        if not os.path.exists(self.pbf_path):
+            print(f"[CITY GRAPH] PBF file not found at '{self.pbf_path}'.")
+            user_choice = input("Enter 'download' to fetch PBF, 'api' to use Overpass API, or 'abort': ").strip().lower()
+            
+            if user_choice == "download":
+                self._download_pbf()
+            elif user_choice == "api":
+                return self._extract_from_api()
+            else:
+                raise FileNotFoundError("[CITY GRAPH] Graph extraction aborted by user.")
+
+        if self.verbose:
+            print("[CITY GRAPH] Extracting graph offline from PBF file.")
+            
+        min_lat, max_lat, min_lon, max_lon = self.bbox
+        osm = OSM(self.pbf_path, bounding_box=[min_lon, min_lat, max_lon, max_lat])
+        nodes, edges = osm.get_network(network_type="driving", nodes=True)
+        graph = osm.to_graph(nodes, edges, graph_type="networkx")
+        ox.save_graphml(graph, self._graph_cache_path)
+        return graph
+
+    def _extract_from_api(self) -> nx.MultiDiGraph:
+        """
+        Pulls road data directly from the Overpass API using the bounding box.
+        """
+        if self.verbose:
+            print("[CITY GRAPH] Extracting via Overpass API. Latency expected.")
+        min_lat, max_lat, min_lon, max_lon = self.bbox
+        graph = ox.graph_from_bbox(bbox=(max_lat, min_lat, max_lon, min_lon), network_type="drive", simplify=True)
+        ox.save_graphml(graph, self._graph_cache_path)
+        return graph
+
+    def _download_pbf(self) -> None:
+        """
+        Downloads the standard Geofabrik PBF dataset for the Philippines.
+        """
+        url = "https://download.geofabrik.de/asia/philippines-latest.osm.pbf"
+        if self.verbose:
+            print(f"[CITY GRAPH] Downloading {url}...")
+        os.makedirs(os.path.dirname(self.pbf_path), exist_ok=True)
+        urllib.request.urlretrieve(url, self.pbf_path)
+        if self.verbose:
+            print("[CITY GRAPH] Download complete.")
 
     def _build_nodes(self) -> None:
-        for osm_id, data in self._road_graph.nodes(data=True):
-            lon = data.get("x")
-            lat = data.get("y")
+        """
+        Instantiates Node objects from NetworkX node data.
+        """
+        iterable = self._road_graph.nodes(data=True)
+        if self.verbose:
+            iterable = tqdm(iterable, desc="Building nodes")
+
+        for osm_id, data in iterable:
+            lon = data.get("x") if data.get("x") is not None else data.get("lon")
+            lat = data.get("y") if data.get("y") is not None else data.get("lat")
             if lon is None or lat is None:
                 continue
 
             node = Node(lon, lat)
             self._node_lookup[osm_id] = node
-            self._node_set.add(node)
             self.nodes.append(node)
 
     def _build_graph(self) -> None:
+        """
+        Instantiates bidirectional DirEdge objects from NetworkX edge data.
+        """
         seen_pairs: set[tuple[int, int]] = set()
-        node_lookup = self._node_lookup
+        edges = list(self._road_graph.edges(keys=True))
         
-        for start_osm_id, end_osm_id, _, data in self._road_graph.edges(keys=True, data=True):
-            start = node_lookup.get(start_osm_id)
-            end = node_lookup.get(end_osm_id)
-            if start is None or end is None:
+        iterable = edges
+        if self.verbose:
+            iterable = tqdm(iterable, desc="Building graph edges")
+
+        for start_osm_id, end_osm_id, _ in iterable:
+            if start_osm_id not in self._node_lookup or end_osm_id not in self._node_lookup:
+                continue
+            if start_osm_id == end_osm_id:
                 continue
 
-            if start_osm_id <= end_osm_id:
-                pair = (start_osm_id, end_osm_id)
-            else:
-                pair = (end_osm_id, start_osm_id)
+            pair = tuple(sorted((start_osm_id, end_osm_id)))
             if pair in seen_pairs:
                 continue
             seen_pairs.add(pair)
 
-            highway = data.get("highway", "")
-            if isinstance(highway, list):
-                highway_types = set(highway)
-            else:
-                highway_types = {highway}
-            is_drivable = bool(highway_types & _DRIVABLE_HIGHWAY_TYPES)
-
-            self.graph.append(DirEdge(start, end, is_drivable))
-            self.graph.append(DirEdge(end, start, is_drivable))
-
-    def _load_road_graph(self, query: str) -> nx.MultiDiGraph:
-        try:
-            return ox.graph_from_place(query, network_type="drive", simplify=True)
-        except (ValueError, TypeError, IndexError, AttributeError, InsufficientResponseError):
+            start = self._node_lookup[start_osm_id]
+            end = self._node_lookup[end_osm_id]
+            
             try:
-                place = ox.geocode_to_gdf(query)
-            except (ValueError, TypeError, IndexError, AttributeError, InsufficientResponseError):
-                lat, lon = ox.geocode(query)
-                return ox.graph_from_point((lat, lon), dist=5000, network_type="drive", simplify=True)
-
-            geometry = place.iloc[0].geometry
-            centroid = geometry.centroid
-            bounds = geometry.bounds
-
-            lat_span = max(bounds[3] - bounds[1], 0.0)
-            lon_span = max(bounds[2] - bounds[0], 0.0)
-            dist = max(5000, int(max(lat_span, lon_span) * 111000 * 1.25))
-
-            return ox.graph_from_point((centroid.y, centroid.x), dist=dist, network_type="drive", simplify=True)
+                self.graph.append(DirEdge(start, end, True))
+                self.graph.append(DirEdge(end, start, True))
+            except ValueError:
+                continue
 
     def _build_outgoing_edges(self) -> None:
+        """
+        Maps outgoing valid connections to their origin nodes for pathfinding.
+        """
         self._outgoing_edges = defaultdict(list)
-        self._fast_edges = defaultdict(list)
-        
-        for edge in self.graph:
+        iterable = self.graph
+        if self.verbose:
+            iterable = tqdm(iterable, desc="Mapping outgoing edges")
+
+        for edge in iterable:
             self._outgoing_edges[edge.start].append(edge)
+
+    def _build_landmarks(self, landmarks: dict[str, tuple[float, float]]) -> None:
+        """
+        Snaps provided coordinates to the nearest physical road Node.
+        """
+        if self.verbose:
+            print("[CITY GRAPH] Snapping explicit coordinates to network.")
             
-            # OPTIMIZATION: Pre-filter out non-drivable edges and precalculate distances
-            if edge.is_drivable:
-                self._fast_edges[edge.start].append((edge, edge.end, edge.getLength()))
+        for name, coords in landmarks.items():
+            lat, lon = coords
+            temp_node = Node(lon, lat)
+            if not self.nodes:
+                continue
+            nearest_node = min(self.nodes, key=lambda n: _getDistance(n, temp_node))
+            self.landmarks[name] = nearest_node
 
     def _reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge]:
+        """
+        Backtracks calculated route to return chronological DirEdge sequence.
+        """
         path: list[DirEdge] = []
         current = end
 
@@ -185,3 +279,60 @@ class CityGraph:
 
         path.reverse()
         return path
+
+    def get_context(self, margin: float = 0.05) -> tuple[tuple[float, float], tuple[float, float]]:
+        """
+        Calculates a square spatial bounding box for visualization mapping.
+        """
+        if not self.nodes:
+            return ((0.0, 0.0), (0.0, 0.0))
+            
+        min_lon = min(n.lon for n in self.nodes)
+        max_lon = max(n.lon for n in self.nodes)
+        min_lat = min(n.lat for n in self.nodes)
+        max_lat = max(n.lat for n in self.nodes)
+        
+        lon_span = max_lon - min_lon
+        lat_span = max_lat - min_lat
+        max_span = max(lon_span, lat_span)
+        
+        center_lon = (min_lon + max_lon) / 2.0
+        center_lat = (min_lat + max_lat) / 2.0
+        
+        half_span = (max_span / 2.0) * (1.0 + margin)
+        
+        return (
+            (center_lon - half_span, center_lat + half_span), 
+            (center_lon + half_span, center_lat - half_span)
+        )
+
+    def draw(self, size: int = 800) -> tuple[Image.Image, tuple[tuple[float, float], tuple[float, float]]]:
+        """
+        Renders the base network grid onto a standardized Image object.
+        """
+        context = self.get_context()
+        image = Image.new("RGB", (size, size), "white")
+        
+        for edge in self.graph:
+            edge.draw(context, image)
+            
+        return image, context
+
+    def draw_landmarks(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image) -> None:
+        """
+        Overlays landmark names as text onto the base network Image.
+        """
+        draw = ImageDraw.Draw(image)
+        tl_lon, tl_lat = context[0]
+        br_lon, br_lat = context[1]
+        
+        lon_range = br_lon - tl_lon
+        lat_range = tl_lat - br_lat
+
+        if lon_range == 0 or lat_range == 0:
+            return
+
+        for name, node in self.landmarks.items():
+            x = (node.lon - tl_lon) / lon_range * image.width
+            y = (tl_lat - node.lat) / lat_range * image.height
+            draw.text((x, y), name, fill="black")
