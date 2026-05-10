@@ -1,3 +1,5 @@
+from __future__ import annotations
+from collections import defaultdict
 from math import radians, sin, cos, sqrt, asin
 from typing import Optional
 from PIL import Image, ImageDraw
@@ -124,9 +126,16 @@ def _connect(dir_edge_s: DirEdge, dir_edge_e: DirEdge, weight: int = 1, verbose:
     return
 
 def _stitch(dir_edges_s: list[DirEdge], dir_edges_e: list[DirEdge], weight: int = 1, verbose: bool = False) -> None:
+    # Build a lookup: (lon, lat, layer) → edges that START at that coordinate
+    start_index: dict[tuple, list[DirEdge]] = defaultdict(list)
+    for edge in dir_edges_e:
+        key = (edge.start.lon, edge.start.lat, edge.start.layer)
+        start_index[key].append(edge)
     stitched = 0
     for dir_edge_s in dir_edges_s:
-        for dir_edge_e in dir_edges_e:
+        # Only check edges whose start matches this edge's end — O(1) lookup
+        key = (dir_edge_s.end.lon, dir_edge_s.end.lat, dir_edge_s.end.layer)
+        for dir_edge_e in start_index.get(key, []):
             _connect(dir_edge_s, dir_edge_e, weight, verbose)
             stitched += 1
     if verbose:

@@ -41,6 +41,7 @@ htmlcov/
 # Virtual environments
 # -------------------------------------------------
 .venv/
+.venv311/
 venv/
 env/
 pip-wheel-metadata/
