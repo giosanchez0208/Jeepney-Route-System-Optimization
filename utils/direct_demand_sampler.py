@@ -3,6 +3,7 @@ import json
 import math
 import random
 import hashlib
+import pickle
 import requests
 import networkx as nx
 from typing import Optional, Protocol, Any
@@ -42,6 +43,36 @@ class DDMConfig:
     proportion: float = 0.5      # Maximum Variance
     margin_error: float = 0.05   # 5% Margin of Error
     api_limit_override: Optional[int] = None
+
+DDM_MODEL_CACHE_VERSION = 1
+
+def _node_cache_key(node: Node) -> tuple[float, float, Optional[int]]:
+    return (round(node.lon, 10), round(node.lat, 10), getattr(node, "layer", None))
+
+def _city_cache_signature(city: NetworkGraph) -> str:
+    graph_cache_path = getattr(city, "_graph_cache_path", "")
+    if graph_cache_path:
+        base = graph_cache_path
+    else:
+        node_bits = "|".join(
+            f"{round(node.lon, 10)}:{round(node.lat, 10)}:{getattr(node, 'layer', None)}"
+            for node in sorted(city.nodes, key=_node_cache_key)
+        )
+        base = f"{len(city.nodes)}|{len(city.graph)}|{node_bits}"
+    return hashlib.md5(base.encode()).hexdigest()
+
+def _config_signature(config: DDMConfig, only_drivable: bool) -> str:
+    payload = {
+        "alpha": config.alpha,
+        "beta": config.beta,
+        "idw_power": config.idw_power,
+        "z_score": config.z_score,
+        "proportion": config.proportion,
+        "margin_error": config.margin_error,
+        "api_limit_override": config.api_limit_override,
+        "cache_dir": config.cache_dir,
+    }
+    return hashlib.md5(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 class TrafficClient:
     """
@@ -119,13 +150,36 @@ class DirectDemandSampler:
         self.city = city
         self.config = config
         self.verbose = verbose
+        self.only_drivable = only_drivable
         
         self.target_nodes = self._filter_nodes(only_drivable)
-        self.node_list = list(self.target_nodes)
+        self.node_list = sorted(self.target_nodes, key=_node_cache_key)
         self.n = len(self.node_list)
         
         if self.n == 0:
             raise ValueError("[DIRECT DEMAND] No valid nodes available for sampling.")
+
+        self._node_lookup = {_node_cache_key(node): node for node in self.node_list}
+        self._cache_dir = os.path.join(self.config.cache_dir, "direct_demand")
+        os.makedirs(self._cache_dir, exist_ok=True)
+        self._cache_path = os.path.join(self._cache_dir, f"{self._build_cache_key()}.pkl")
+
+        self.api_sample_limit = 0
+        self.prob = [0.0] * self.n
+        self.alias = [0] * self.n
+        self.node_probabilities = {}
+        self.max_prob = 0.0
+        self.centrality_scores: dict[Node, float] = {}
+        self.target_centroids: list[Node] = []
+        self.empirical_traffic: dict[Node, float] = {}
+        self.traffic_weights: dict[Node, float] = {}
+        self.raw_probabilities: list[float] = []
+        self.traffic_client: Optional[TrafficClient] = None
+
+        if self._load_cache():
+            if self.verbose:
+                print(f"[DIRECT DEMAND] Loaded sampler cache from {self._cache_path}.")
+            return
 
         self.api_sample_limit = self._calculate_optimal_sample_size()
 
@@ -133,20 +187,16 @@ class DirectDemandSampler:
             print(f"[STATISTICS] Population Size (N): {self.n}")
             print(f"[STATISTICS] Computed Sample Size (n): {self.api_sample_limit}")
 
-        self.prob = [0.0] * self.n
-        self.alias = [0] * self.n
-        self.node_probabilities = {}
-        self.max_prob = 0.0
-        
         self.traffic_client = TrafficClient(TOMTOM_API_KEY, self.config.cache_dir, self.verbose)
         
-        centrality_scores = self._compute_centrality()
-        target_centroids = self._select_query_centroids()
-        empirical_traffic = self.traffic_client.gather_empirical_traffic(target_centroids)
-        traffic_weights = self._impute_traffic(empirical_traffic)
+        self.centrality_scores = self._compute_centrality()
+        self.target_centroids = self._select_query_centroids()
+        self.empirical_traffic = self.traffic_client.gather_empirical_traffic(self.target_centroids)
+        self.traffic_weights = self._impute_traffic(self.empirical_traffic)
         
-        ddm_probabilities = self._apply_ddm(traffic_weights, centrality_scores)
-        self._build_alias_tables(ddm_probabilities)
+        self.raw_probabilities = self._apply_ddm(self.traffic_weights, self.centrality_scores)
+        self._build_alias_tables(self.raw_probabilities)
+        self._save_cache()
 
     def _calculate_optimal_sample_size(self) -> int:
         if self.config.api_limit_override is not None:
@@ -161,6 +211,84 @@ class DirectDemandSampler:
         n_0 = ((Z ** 2) * p * q) / (e ** 2)
         optimal_size = math.ceil(n_0 / (1 + ((n_0 - 1) / N)))
         return optimal_size
+
+    def _build_cache_key(self) -> str:
+        signature = {
+            "city": _city_cache_signature(self.city),
+            "config": _config_signature(self.config, self.only_drivable),
+            "nodes": self.n,
+        }
+        return hashlib.md5(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def _resolve_node(self, key: tuple[float, float, Optional[int]]) -> Node:
+        node = self._node_lookup.get(key)
+        if node is None:
+            raise ValueError("[DIRECT DEMAND] Cached sampler refers to nodes not present in the current CityGraph.")
+        return node
+
+    def _load_cache(self) -> bool:
+        if not os.path.exists(self._cache_path):
+            return False
+
+        with open(self._cache_path, "rb") as f:
+            payload = pickle.load(f)
+
+        if not isinstance(payload, dict):
+            raise ValueError("[DIRECT DEMAND] Invalid sampler cache payload.")
+
+        if payload.get("version") != DDM_MODEL_CACHE_VERSION:
+            return False
+
+        if payload.get("cache_key") != self._build_cache_key():
+            return False
+
+        self.api_sample_limit = payload["api_sample_limit"]
+        self.node_list = [self._resolve_node(tuple(key)) for key in payload["node_list_keys"]]
+        self.prob = list(payload["prob"])
+        self.alias = list(payload["alias"])
+        self.node_probabilities = {
+            self._resolve_node(tuple(key)): value
+            for key, value in payload["node_probabilities"].items()
+        }
+        self.max_prob = payload["max_prob"]
+        self.centrality_scores = {
+            self._resolve_node(tuple(key)): value
+            for key, value in payload.get("centrality_scores", {}).items()
+        }
+        self.target_centroids = [
+            self._resolve_node(tuple(key))
+            for key in payload.get("target_centroid_keys", [])
+        ]
+        self.empirical_traffic = {
+            self._resolve_node(tuple(key)): value
+            for key, value in payload.get("empirical_traffic", {}).items()
+        }
+        self.traffic_weights = {
+            self._resolve_node(tuple(key)): value
+            for key, value in payload.get("traffic_weights", {}).items()
+        }
+        self.raw_probabilities = list(payload.get("raw_probabilities", []))
+        return True
+
+    def _save_cache(self) -> None:
+        payload = {
+            "version": DDM_MODEL_CACHE_VERSION,
+            "cache_key": self._build_cache_key(),
+            "api_sample_limit": self.api_sample_limit,
+            "node_list_keys": [_node_cache_key(node) for node in self.node_list],
+            "prob": self.prob,
+            "alias": self.alias,
+            "node_probabilities": {_node_cache_key(node): value for node, value in self.node_probabilities.items()},
+            "max_prob": self.max_prob,
+            "centrality_scores": {_node_cache_key(node): value for node, value in self.centrality_scores.items()},
+            "target_centroid_keys": [_node_cache_key(node) for node in self.target_centroids],
+            "empirical_traffic": {_node_cache_key(node): value for node, value in self.empirical_traffic.items()},
+            "traffic_weights": {_node_cache_key(node): value for node, value in self.traffic_weights.items()},
+            "raw_probabilities": self.raw_probabilities,
+        }
+
+        with open(self._cache_path, "wb") as f:
+            pickle.dump(payload, f)
 
     def _filter_nodes(self, only_drivable: bool) -> set[Node]:
         if not only_drivable:

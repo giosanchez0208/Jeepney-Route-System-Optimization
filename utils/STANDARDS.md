@@ -38,9 +38,10 @@
 # STANDARDS_NOTEBOOK.md
 
 #### 1. Zero-Footprint Validation
-* **Exclusive Authority:** All status reporting, success/failure messaging, and logic verification must be handled strictly by the `validate_call` function.
-* **No Manual Logging:** Do not use `rich.print` or standard `print` for verification logic within the test cells. If an operation is being tested, it must be passed through `validate_call`.
-* **Architectural Lean:** Use of wrapper functions within cells is strictly prohibited to prevent architectural bloat.
+* **Verdict Routing:** Route all pass/fail reporting through `validate_call`.
+* **Notebook Narration:** Use markdown or comments for section labels and setup notes; avoid ad-hoc `print` calls for diagnostic narration.
+* **Focused Helpers:** Small local helpers are allowed when they reduce repeated setup, assertions, or fixture mutation.
+* **Data-Driven Cases:** Prefer case tables and loops over repeated one-off test cells.
 
 #### 2. Caching and Directory Hygiene
 * **Isolated Cache Path:** All persistent data, including API responses and binary graph states, must be stored in `utils/.cache/`. Storage in the project root is strictly prohibited.
