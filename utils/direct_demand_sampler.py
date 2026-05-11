@@ -36,6 +36,12 @@ class DDMConfig:
     beta: float = 0.4
     idw_power: float = 2.0
     cache_dir: str = "utils/.cache"
+    
+    # Cochran's Formula Parameters
+    z_score: float = 1.96        # 95% Confidence Level
+    proportion: float = 0.5      # Maximum Variance
+    margin_error: float = 0.05   # 5% Margin of Error
+    api_limit_override: Optional[int] = None
 
 class TrafficClient:
     """
@@ -107,14 +113,12 @@ class DirectDemandSampler:
         self, 
         city: NetworkGraph, 
         config: DDMConfig = DDMConfig(),
-        api_sample_limit: Optional[int] = 50,
         only_drivable: bool = False,
         verbose: bool = False
     ):
         self.city = city
         self.config = config
         self.verbose = verbose
-        self.api_sample_limit = api_sample_limit
         
         self.target_nodes = self._filter_nodes(only_drivable)
         self.node_list = list(self.target_nodes)
@@ -122,6 +126,12 @@ class DirectDemandSampler:
         
         if self.n == 0:
             raise ValueError("[DIRECT DEMAND] No valid nodes available for sampling.")
+
+        self.api_sample_limit = self._calculate_optimal_sample_size()
+
+        if self.verbose:
+            print(f"[STATISTICS] Population Size (N): {self.n}")
+            print(f"[STATISTICS] Computed Sample Size (n): {self.api_sample_limit}")
 
         self.prob = [0.0] * self.n
         self.alias = [0] * self.n
@@ -137,6 +147,20 @@ class DirectDemandSampler:
         
         ddm_probabilities = self._apply_ddm(traffic_weights, centrality_scores)
         self._build_alias_tables(ddm_probabilities)
+
+    def _calculate_optimal_sample_size(self) -> int:
+        if self.config.api_limit_override is not None:
+            return self.config.api_limit_override
+
+        N = self.n
+        Z = self.config.z_score
+        p = self.config.proportion
+        e = self.config.margin_error
+        q = 1.0 - p
+        
+        n_0 = ((Z ** 2) * p * q) / (e ** 2)
+        optimal_size = math.ceil(n_0 / (1 + ((n_0 - 1) / N)))
+        return optimal_size
 
     def _filter_nodes(self, only_drivable: bool) -> set[Node]:
         if not only_drivable:
@@ -169,13 +193,13 @@ class DirectDemandSampler:
         return centrality_map
 
     def _select_query_centroids(self) -> list[Node]:
-        if self.api_sample_limit is None or self.api_sample_limit >= self.n:
+        if self.api_sample_limit >= self.n:
             if self.verbose:
-                print(f"[DIRECT DEMAND] API limit bypassed. Querying all {self.n} target nodes.")
+                print(f"[DIRECT DEMAND] API limit covers population. Querying all {self.n} target nodes.")
             return self.node_list
             
         if self.verbose:
-            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} target nodes for API queries.")
+            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} evenly spaced target nodes for API queries.")
             
         sorted_nodes = sorted(self.node_list, key=lambda n: (n.lon, n.lat))
         step = max(1, self.n // self.api_sample_limit)
@@ -274,10 +298,6 @@ class DirectDemandSampler:
         return self.node_list[self.alias[i]]
 
     def draw_density(self, img_map: Image.Image, context: tuple[tuple[float, float], tuple[float, float]], num_points: int = 5000) -> None:
-        """
-        Samples points and overlays them on the base map using a continuous color spectrum.
-        Blue indicates low probability. Yellow indicates moderate probability. Red indicates high probability.
-        """
         print("\n[bold]Traffic Density Spectrum Legend:[/bold]")
         print("[blue]██[/blue] Low Traffic")
         print("[yellow]██[/yellow] Moderate Traffic")

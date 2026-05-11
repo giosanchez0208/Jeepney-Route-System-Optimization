@@ -1,0 +1,22 @@
+############ DIRECT DEMAND MODEL ######################
+# The coordinates (8.1500, 8.3300, 124.1500, 124.4000) define the exact operational footprint of the current Iligan City jeepney network. Evaluating a proposed transit system requires a direct comparison against the existing baseline. The bounding box was selected strictly to enclose all currently active routes and terminal nodes. This ensures the memetic algorithm operates within the identical spatial constraints as the current system. This geographic parity is required to validate any simulated reductions in passenger commute time. 
+
+city_graph:
+  name: "Iligan Full Sector"
+  bbox: [8.1500, 8.3300, 124.1500, 124.4000]
+  pbf_path: "utils/data/iligan-city.pbf"
+  landmarks:
+    MSU-IIT: [8.2415, 124.2435]
+    Robinsons Place: [8.2175, 124.2380]
+
+############ DIRECT DEMAND MODEL ######################
+
+# Since standard formal rules and operating data do not apply, spatial heuristics and sensitivity testing are the only mathematically sound approaches for initial model convergence. Global Network for Popular Transportation & UNDP. (2024). A Closer Look at Informal (Popular) Transportation: An Emerging Portrait. United Nations Development Programme.
+# Jeepneys are treated as semi-flexible agents. This paper explicitly links Southeast Asian paratransit (including Philippine jeepneys) to DRT algorithms. This justifies using jeepney routes as demand-responsive agents reacting to spatial probability distributions (DDM) rather than fixed historical origin-destination matrices. Vongpraseuth, T., et al. (2025). Acceptance and Demand Estimation of Demand Responsive Transit (DRT) in a Least Developed Country: The Case of Paratransit. International Journal of Connected Transportation.
+# Ramos-Santiago demonstrates that while structural network topology (centrality) is important, local activity indicators fundamentally amplify ridership generation. This is the reasoning behind higher coefficient of 0.6 and structural proxy lower coefficient 0.4 split. It grounds the assumption that raw local activity (TomTom flow) exerts a statistically heavier pull on passenger generation than pure geometric network location (Betweenness Centrality).
+
+ddm:
+  alpha: 0.6
+  beta: 0.4
+  idw_power: 2.0
+  cache_dir: "utils/.cache/1PM_traffic"
