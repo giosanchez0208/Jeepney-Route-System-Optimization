@@ -11,6 +11,11 @@ Deploying agent-based routing heuristics on an unpruned network graph causes imm
 combinatorial explosion. By evaluating the 'highway' tag to isolate the arterial skeleton, 
 we artificially restrict the search space. This forces the metaheuristic to converge on 
 viable transit corridors rather than wasting iterations evaluating residential dead-ends.
+
+Jeepneys operate under fixed route franchises regulated by the Land Transportation Franchising and Regulatory Board (LTFRB). They function as arterial transit corridors, not point-to-point taxi services. Last-mile residential transport is formally delegated to tricycles and pedicabs.
+
+Guillen, M. D., Ishida, H., & Okamoto, N. (2013). Is the use of informal public transport modes in developing countries habitual? An empirical study in Davao City, Philippines. Transport Policy, 26, 31-42. https://doi.org/10.1016/j.tranpol.2012.12.008
+
 """
 
 import hashlib
