@@ -9,8 +9,8 @@ Outputs: updated position, heading, and per-frame node crossings.
 Imported modules used: Node, Route, DirEdge, and _getDistance.
 """
 
-# To test run - "python testing_jeep.py"
-# To validate/diagnostic run - diagnostic.ipynb
+# To test run - "python jeep_testing.py"
+# To validate/diagnostic run - jeep_diagnostic.ipynb
 
 from __future__ import annotations
 import math
@@ -20,6 +20,7 @@ from typing import Optional
 from .node import Node
 from .route import Route
 from .directed_edge import DirEdge, _getDistance
+from PIL import Image, ImageDraw
 
 class Jeep:
     def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float) -> None:
@@ -36,7 +37,8 @@ class Jeep:
         
         self.id: str = f"J{uuid4().hex}"
         self.route: Route = route
-        self.speed: float = float(speed)
+        self.speed_kmph: float = float(speed)
+        self.speed: float = self.speed_kmph
         self.curr_pos: tuple[float, float] = curr_pos
         self.designated_color: str = route.designated_color
         self.curr_nodes_passed: Optional[list[tuple[Node, Route]]] = None
@@ -80,8 +82,8 @@ class Jeep:
             return
         edge: DirEdge = self.route.path[self._edge_idx]
         dy: float = edge.end.lat - edge.start.lat
-        self.heading = math.degrees(math.atan2(dy, dx)) - 90.0
         dx: float = edge.end.lon - edge.start.lon
+        self.heading = math.degrees(math.atan2(dy, dx)) - 90.0
 
     def update(self) -> None:
         self.curr_nodes_passed = []
@@ -161,3 +163,50 @@ class Jeep:
         if not path:
             return None
         return sum(e.weight for e in path)
+
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, radius: int = 12) -> Image.Image:
+
+        if image.width != image.height:
+            raise ValueError("[JEEP] Visualization requires a square image.")
+
+        draw = ImageDraw.Draw(image)
+
+        tl_lon, tl_lat = context[0]
+        br_lon, br_lat = context[1]
+
+        lon_range = br_lon - tl_lon
+        lat_range = tl_lat - br_lat
+
+        if lon_range == 0 or lat_range == 0:
+            return image
+
+        x = image.width * (self.curr_pos[1] - tl_lon) / lon_range
+        y = image.height * (tl_lat - self.curr_pos[0]) / lat_range
+
+        x = max(0, min(image.width - 1, int(x)))
+        y = max(0, min(image.height - 1, int(y)))
+
+        angle = math.radians(self.heading)
+
+        front = (x + radius * math.cos(angle), y + radius * math.sin(angle))
+        left = (x + radius * math.cos(angle + 2.5), y + radius * math.sin(angle + 2.5))
+        right = (x + radius * math.cos(angle - 2.5), y + radius * math.sin(angle - 2.5))
+
+        draw.polygon([front, left, right], fill=self.designated_color, outline="white")
+
+        ratio = self.curr_passenger_count / self.passenger_max
+        bar_w = radius * 2
+        bar_h = 6
+
+        bx1 = x - bar_w // 2
+        by1 = y + radius + 8
+        bx2 = bx1 + bar_w
+        by2 = by1 + bar_h
+
+        draw.rectangle([bx1, by1, bx2, by2], fill="gray")
+        draw.rectangle([bx1, by1, bx1 + int(bar_w * ratio), by2], fill=self.designated_color)
+
+        text = f"{self.curr_passenger_count}/{self.passenger_max}"
+        draw.text((x - radius, y + radius + 18), text, fill="black")
+
+        return image
