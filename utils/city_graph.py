@@ -51,34 +51,48 @@ def _get_cache_path(name: str, bbox: tuple[float, float, float, float]) -> str:
 class CityGraph:
     def __init__(
         self, 
-        bbox: tuple[float, float, float, float], 
+        bbox: Optional[tuple[float, float, float, float]] = None, 
         name: str = "UrbanNetwork", 
         landmarks: Optional[dict[str, tuple[float, float]]] = None, 
         pbf_path: str = "utils/data/philippines-latest.osm.pbf",
         use_api: bool = False,
         verbose: bool = False
     ) -> None:
-        self.bbox: tuple[float, float, float, float] = _validate_bbox(bbox)
         self.name: str = name
-        self.pbf_path: str = pbf_path
         self.verbose: bool = verbose
-        self.use_api: bool = use_api
+        self.landmarks: dict[str, Node] = {}
         
         self.nodes: list[Node] = []
         self.graph: list[DirEdge] = []
-        self.landmarks: dict[str, Node] = {}
-
-        self._graph_cache_path: str = _get_cache_path(self.name, self.bbox)
-        self._road_graph: nx.MultiDiGraph = self._load_road_graph()
-        self._node_lookup: dict[int, Node] = {}
         self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
 
-        self._build_nodes()
-        self._build_graph()
+        if bbox is not None:
+            self.bbox = _validate_bbox(bbox)
+            self.pbf_path = pbf_path
+            self.use_api = use_api
+            
+            self._graph_cache_path = _get_cache_path(self.name, self.bbox)
+            self._road_graph = self._load_road_graph()
+            self._node_lookup: dict[int, Node] = {}
+            
+            self._build_nodes()
+            self._build_graph()
+        else:
+            self.bbox = (0.0, 0.0, 0.0, 0.0)
+
         self.stitch_graph()
 
         if landmarks:
             self._build_landmarks(landmarks)
+
+    def inject_toy_data(self, nodes: list['Node'], edges: list['DirEdge']) -> None:
+        """Loads custom topologies into an empty graph and recalculates network adjacencies."""
+        if self.bbox != (0.0, 0.0, 0.0, 0.0):
+            raise RuntimeError("[CITY GRAPH] Cannot inject toy data into a populated OSM graph.")
+            
+        self.nodes.extend(nodes)
+        self.graph.extend(edges)
+        self.stitch_graph()
 
     def __str__(self) -> str:
         drivable_count = sum(1 for e in self.graph if e.is_drivable)
