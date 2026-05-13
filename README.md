@@ -46,6 +46,8 @@ The point of the class is strict state control. The graph code depends on coordi
 
 This file is the topology guardrail. If a route violates its layer logic here, every downstream module inherits garbage.
 
+`_stitch()` deserves an explicit note: it builds adjacency links by matching an edge's terminal node to the next edge's starting node on the same coordinate-layer tuple. That is the fast, deterministic bridge between raw edge lists and a traversable graph.
+
 ### `city_graph.py`
 
 `CityGraph` builds the street network and shortest-path layer.
@@ -132,16 +134,21 @@ flowchart LR
     K --> P[DDM weighting]
     I --> P
     P --> A[Walker alias table]
-    A --> R[O(1) sampling]
+    A --> R["O(1) sampling"]
 ```
 
 ### `route.py`
 
 `Route` is the final closed transit loop.
 
+This file is functionally complete, but it is still being refactored into cleaner validation and construction boundaries. The current behavior is already stable enough to use.
+
 - Rejects empty paths.
 - Requires all path edges to stay on layer 2.
 - Requires exactly one outgoing layer-2 edge per edge in the path.
+- Rejects broken contiguity before the route is accepted.
+- Requires closed loops for generated and coordinate-snapped routes.
+- Deduplicates consecutive snapped nodes before path construction.
 - Auto-generates a route color.
 
 `RouteGenerator`:
@@ -150,6 +157,7 @@ flowchart LR
 - Uses `CityGraph.find_shortest_path()` between successive sampled nodes.
 - Closes the loop back to the first node.
 - Promotes the resulting path into a layer-2 route.
+- Treats shortest-path output as the demo route backbone, not as a free-form path.
 
 `route_from_coords()`:
 
@@ -160,14 +168,31 @@ flowchart LR
 `RouteSystem` is only a drawing container for multiple routes.
 
 ```mermaid
-sequenceDiagram
-    participant CG as CityGraph
-    participant DDM as DirectDemandSampler
-    participant RG as RouteGenerator
-    DDM->>CG: get_point() candidates
-    RG->>CG: find_shortest_path(start, end)
-    RG->>RG: promote path to layer 2
-    RG->>RG: close loop and build Route
+flowchart TD
+    A[DirectDemandSampler] --> B[Sampled nodes]
+    B --> C[CityGraph.find_shortest_path]
+    C --> D[Base path segments]
+    D --> E[Promote to layer 2]
+    E --> F[Validate route safeguards]
+    F --> G[Closed Route]
+    H[route_from_coords] --> I[Snap coords to nodes]
+    I --> J[Drop duplicate consecutive nodes]
+    J --> K[Shortest-path reconstruction]
+    K --> F
+
+    subgraph Safeguards
+        S1[Reject empty paths]
+        S2[Require layer 2 only]
+        S3[Require contiguous edges]
+        S4[Require one outgoing layer-2 edge per edge]
+        S5[Require closed loops]
+    end
+
+    F --> S1
+    F --> S2
+    F --> S3
+    F --> S4
+    F --> S5
 ```
 
 ### `diagnostic.ipynb`
