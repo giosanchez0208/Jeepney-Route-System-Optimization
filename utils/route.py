@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 from uuid import uuid4
-from typing import Optional, Any
+from typing import Optional
 from scipy.spatial import cKDTree
 import numpy as np
 from PIL import ImageDraw, Image
@@ -64,7 +64,7 @@ class Route:
             if len(layer_2_out) != 1:
                 raise ValueError(f"[ROUTE] Branching violation. Edge {edge.id} must have exactly one outgoing Layer 2 edge. Found {len(layer_2_out)}.")
 
-    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#FF0000", width: int = 3) -> Image.Image:
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = None, width: int = 3) -> Image.Image:
         if image.width != image.height:
             raise ValueError("[ROUTE] Visualization requires a square image.")
 
@@ -83,7 +83,7 @@ class Route:
             x2 = (edge.end.lon - tl_lon) / lon_range * image.width
             y2 = (tl_lat - edge.end.lat) / lat_range * image.height
             
-            draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
+            draw.line([(x1, y1), (x2, y2)], fill=color or self.designated_color, width=width)
             
         return image
 
