@@ -19,7 +19,7 @@ import yaml
 from .node import Node
 from .directed_edge import DirEdge, _getDistance
 from .city_graph import CityGraph
-from .route import Route
+from .route import Route, RouteGenerator
 
 _CONSTS_PATH = Path(__file__).with_name("configs").joinpath("configs.yaml")
 with _CONSTS_PATH.open("r", encoding="utf-8") as f:
@@ -31,6 +31,9 @@ WAIT_WT = _CONSTS["WAIT_WT"]
 TRANSFER_WT = _CONSTS["TRANSFER_WT"]
 DIRECT_WT = _CONSTS["DIRECT_WT"]
 ALIGHT_WT = _CONSTS["ALIGHT_WT"]
+
+N_ROUTES = _CONSTS["N_ROUTES"]
+N_POINTS = _CONSTS["N_POINTS"]
 
 
 class StaticTravelGraph:
@@ -89,15 +92,27 @@ class StaticTravelGraph:
 
 
 class TravelGraph:
-    def __init__(self, stg: StaticTravelGraph, routes: list[Route]) -> None:
+    def __init__(self,stg: StaticTravelGraph,route_generator: RouteGenerator,n_routes: int = 5,n_points: int = 4,) -> None:
         self.stg = stg
-        self.routes = routes
-        
+        self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
+            
         self._outgoing_edges = defaultdict(list, {node: list(edges) for node, edges in stg.base_outgoing.items()})
         self.travel_graph: list[DirEdge] = list(stg.base_edges)
         
         self._construct()
-
+        
+    def _generate_routes(self, route_generator: RouteGenerator, n_routes: int, n_points: int) -> list[Route]:
+        routes = []
+        for i in range(n_routes):
+            try:
+                route = route_generator.generate(n_points=n_points)
+                routes.append(route)
+            except ValueError as e:
+                print(f"[TRAVEL GRAPH] Skipping route {i + 1}/{n_routes}: {e}")
+        if not routes:
+            raise ValueError("[TRAVEL GRAPH] No routes could be generated. Check RouteGenerator configuration.")
+        return routes
+    
     def _construct(self) -> None:
         l2_nodes_by_route: dict[int, dict[tuple[float, float], Node]] = defaultdict(dict)
 
