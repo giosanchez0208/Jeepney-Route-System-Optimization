@@ -11,6 +11,25 @@ from .directed_edge import DirEdge
 from .city_graph import CityGraph
 from .direct_demand_sampler import DirectDemandSampler
 
+import colorsys
+import random
+import math
+from collections import defaultdict
+
+def generate_color() -> str:
+    """
+    Generates high-saturation, mid-lightness colors suitable for transit maps.
+    Returns hex color string.
+    """
+    h = random.random()
+    s = 0.7 + random.random() * 0.3 
+    l = 0.4 + random.random() * 0.2 
+    r, g, b = [int(c * 255) for c in colorsys.hls_to_rgb(h, l, s)]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+# Modify your existing Route class __init__ to include:
+# self.designated_color: str = generate_mini_metro_color()
+
 class Route:
     def __init__(self, city_graph: CityGraph, path: list[DirEdge], id: Optional[str] = None) -> None:
         if not path:
@@ -21,7 +40,7 @@ class Route:
         self.cg: CityGraph = city_graph
         self.path: list[DirEdge] = path
         self.id: str = id if id is not None else f"R{uuid4().hex}"
-        
+        self.designated_color: str = generate_color()
         self._validate_loop()
         self._validate_layer()
         self._validate_branching()
@@ -162,3 +181,118 @@ def route_from_coords(city_graph: CityGraph, coords_json: str) -> Route:
         layer_2_path[i].next_edges.append(next_edge)
         
     return Route(city_graph, path=layer_2_path)
+
+import math
+from collections import defaultdict
+from typing import Optional
+from PIL import ImageDraw, Image
+
+def _get_vector(start: 'Node', end: 'Node') -> tuple[float, float]:
+    dx = end.lon - start.lon
+    dy = start.lat - end.lat 
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return 0.0, 0.0
+    return dx / length, dy / length
+
+def _get_relative_angle(v_base: tuple[float, float], v_target: tuple[float, float]) -> float:
+    angle = math.atan2(v_target[1], v_target[0]) - math.atan2(v_base[1], v_base[0])
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+class RouteSystem:
+    def __init__(self) -> None:
+        self.routes: list['Route'] = []
+
+    def add_route(self, route: 'Route') -> None:
+        self.routes.append(route)
+
+    def _get_screen_coords(self, node: 'Node', context: tuple[tuple[float, float], tuple[float, float]], width: int, height: int) -> tuple[float, float]:
+        tl_lon, tl_lat = context[0]
+        br_lon, br_lat = context[1]
+        lon_range = br_lon - tl_lon
+        lat_range = tl_lat - br_lat
+
+        x = (node.lon - tl_lon) / lon_range * width
+        y = (tl_lat - node.lat) / lat_range * height
+        return x, y
+
+    def _build_lane_registry(self) -> dict:
+        edge_registry = defaultdict(list)
+        for route in self.routes:
+            for i, edge in enumerate(route.path):
+                edge_key = frozenset([edge.start.id, edge.end.id])
+                
+                prev_edge = route.path[i - 1]
+                v_base = _get_vector(edge.start, edge.end)
+                v_entry = _get_vector(prev_edge.start, edge.start)
+                
+                if prev_edge.start.id == edge.end.id:
+                    angle = math.pi 
+                else:
+                    angle = _get_relative_angle(v_base, v_entry)
+                    
+                edge_registry[edge_key].append((angle, route.id))
+
+        for key in edge_registry:
+            edge_registry[key].sort(key=lambda x: x[0])
+            edge_registry[key] = [r_id for _, r_id in edge_registry[key]]
+            
+        return edge_registry
+
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, line_width: int = 4, spacing: int = 5) -> Image.Image:
+        if image.width != image.height:
+            raise ValueError("[ROUTE SYSTEM] Visualization requires a square image.")
+
+        draw = ImageDraw.Draw(image)
+        edge_registry = self._build_lane_registry()
+
+        for route in self.routes:
+            path_length = len(route.path)
+            segments = []
+            turnarounds = set()
+
+            for i in range(path_length):
+                edge = route.path[i]
+
+                key = frozenset([edge.start.id, edge.end.id])
+                lanes = edge_registry[key]
+                idx = lanes.index(route.id)
+                off_mult = idx - (len(lanes) - 1) / 2.0
+
+                x1, y1 = self._get_screen_coords(edge.start, context, image.width, image.height)
+                x2, y2 = self._get_screen_coords(edge.end, context, image.width, image.height)
+
+                v = _get_vector(edge.start, edge.end)
+                n = (-v[1], v[0])
+
+                ox1 = x1 + n[0] * off_mult * spacing
+                oy1 = y1 + n[1] * off_mult * spacing
+                ox2 = x2 + n[0] * off_mult * spacing
+                oy2 = y2 + n[1] * off_mult * spacing
+
+                segments.append(((ox1, oy1), (ox2, oy2), n))
+
+                next_edge = route.path[(i + 1) % path_length]
+                if edge.end.id == next_edge.start.id and edge.start.id == next_edge.end.id:
+                    turnarounds.add(i)
+
+            for i in range(path_length):
+                seg_curr = segments[i]
+                draw.line([seg_curr[0], seg_curr[1]], fill=route.designated_color, width=line_width)
+
+                if i in turnarounds:
+                    x, y = seg_curr[1]
+                    n = seg_curr[2]
+                    
+                    cap_extension = line_width * 2.5
+                    
+                    cap_x1 = x + n[0] * cap_extension
+                    cap_y1 = y + n[1] * cap_extension
+                    cap_x2 = x - n[0] * cap_extension
+                    cap_y2 = y - n[1] * cap_extension
+                    draw.line([(cap_x1, cap_y1), (cap_x2, cap_y2)], fill=route.designated_color, width=line_width)
+                else:
+                    seg_next = segments[(i + 1) % path_length]
+                    draw.line([seg_curr[1], seg_next[0]], fill=route.designated_color, width=line_width)
+
+        return image
