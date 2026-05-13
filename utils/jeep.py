@@ -9,7 +9,12 @@ Outputs: updated position, heading, and per-frame node crossings.
 Imported modules used: Node, Route, DirEdge, and _getDistance.
 """
 
+# To test run - "python testing_jeep.py"
+# To validate/diagnostic run - diagnostic.ipynb
+
+from __future__ import annotations
 import math
+from uuid import uuid4
 from typing import Optional
 
 from .node import Node
@@ -17,57 +22,79 @@ from .route import Route
 from .directed_edge import DirEdge, _getDistance
 
 class Jeep:
-    def __init__(self, route: Route, currPos: tuple[float, float], speed: float) -> None:
-        self.route = route
-        self.speed = speed
-        self.currPos = currPos
-        self.currNodesPassed: Optional[list[tuple[Node, Route]]] = None
+    def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float) -> None:
+        if not hasattr(route, 'path') or not hasattr(route, 'designated_color'):
+            raise TypeError("[JEEP] route must have 'path' and 'designated_color' attributes.")
+        if not isinstance(curr_pos, tuple) or len(curr_pos) != 2:
+            raise TypeError("[JEEP] curr_pos must be a tuple of exactly 2 elements (lat, lon).")
+        if not isinstance(speed, (int, float)) or isinstance(speed, bool):
+            raise TypeError("[JEEP] speed must be a numeric value.")
+        if speed < 0:
+            raise ValueError("[JEEP] speed cannot be negative.")
+        if not route.path:
+            raise ValueError("[JEEP] route.path cannot be empty.")
+        
+        self.id: str = f"J{uuid4().hex}"
+        self.route: Route = route
+        self.speed: float = float(speed)
+        self.curr_pos: tuple[float, float] = curr_pos
+        self.designated_color: str = route.designated_color
+        self.curr_nodes_passed: Optional[list[tuple[Node, Route]]] = None
         self.heading: float = 0.0
         
         self.passenger_max: int = 16
         self.curr_passenger_count: int = 0
-        
-        self._edge_idx = 0
-        self._edge_progress = 0.0
+
+        self._edge_idx: int = 0
+        self._edge_progress: float = 0.0
         
         self._snap_to_route()
         self._update_heading()
 
+    def __str__(self) -> str:
+        return (
+            f"Jeep({self.id}): route={self.route.id}, "
+            f"pos={self.curr_pos}, heading={self.heading:.2f}°, "
+            f"passengers={self.curr_passenger_count}/{self.passenger_max}, "
+            f"speed={self.speed} m/s, color={self.designated_color}"
+        )
+
     def _snap_to_route(self) -> None:
-        best_idx = 0
-        min_dist = float('inf')
-        
-        temp_node = Node(self.currPos[1], self.currPos[0])
+        best_idx: int = 0
+        min_dist: float = float('inf')
+        temp_node: Node = Node(self.curr_pos[0], self.curr_pos[1])
         
         for i, edge in enumerate(self.route.path):
-            dist = _getDistance(temp_node, edge.start)
+            dist: float = _getDistance(temp_node, edge.start)
             if dist < min_dist:
                 min_dist = dist
                 best_idx = i
                 
         self._edge_idx = best_idx
         self._edge_progress = 0.0
+        snapped_edge: DirEdge = self.route.path[self._edge_idx]
+        self.curr_pos = (snapped_edge.start.lat, snapped_edge.start.lon)
 
     def _update_heading(self) -> None:
         if not self.route.path:
             return
-        edge = self.route.path[self._edge_idx]
-        dy = edge.end.lat - edge.start.lat
-        dx = edge.end.lon - edge.start.lon
+        edge: DirEdge = self.route.path[self._edge_idx]
+        dy: float = edge.end.lat - edge.start.lat
         self.heading = math.degrees(math.atan2(dy, dx)) - 90.0
+        dx: float = edge.end.lon - edge.start.lon
 
     def update(self) -> None:
-        self.currNodesPassed = []
-        distance_to_move = self.speed
+        self.curr_nodes_passed = []
+        distance_to_move: float = self.speed
         
         while distance_to_move > 0:
-            current_edge = self.route.path[self._edge_idx]
-            edge_length = current_edge.getLength()
-            remaining_edge_dist = edge_length - self._edge_progress
+            current_edge: DirEdge = self.route.path[self._edge_idx]
+            edge_length: float = current_edge.getLength()
+            remaining_edge_dist: float = edge_length - self._edge_progress
             
             if distance_to_move >= remaining_edge_dist:
                 distance_to_move -= remaining_edge_dist
-                self.currNodesPassed.append((current_edge.end, self.route))
+                self.curr_nodes_passed.append((current_edge.end, self.route))
                 self._edge_progress = 0.0
                 self._edge_idx = (self._edge_idx + 1) % len(self.route.path)
                 self._update_heading()
@@ -79,28 +106,34 @@ class Jeep:
         edge_length = current_edge.getLength()
         
         if edge_length > 0:
-            ratio = self._edge_progress / edge_length
-            lat = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
-            lon = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
-            self.currPos = (lat, lon)
+            ratio: float = self._edge_progress / edge_length
+            lat: float = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
+            lon: float = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
+            self.curr_pos = (lat, lon)
         else:
-            self.currPos = (current_edge.start.lat, current_edge.start.lon)
+            self.curr_pos = (current_edge.start.lat, current_edge.start.lon)
             
-        if not self.currNodesPassed:
-            self.currNodesPassed = None
+        if not self.curr_nodes_passed:
+            self.curr_nodes_passed = None
 
     def nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]]:
-        return self.currNodesPassed
+        return self.curr_nodes_passed
 
-    def modifyPassenger(self, amt: int) -> None:
+    def modify_passenger(self, amt: int) -> None:
+        if not isinstance(amt, int) or isinstance(amt, bool):
+            raise TypeError("[JEEP] amt must be an integer.")
+        
         self.curr_passenger_count += amt
         if self.curr_passenger_count < 0:
             self.curr_passenger_count = 0
         elif self.curr_passenger_count > self.passenger_max:
             self.curr_passenger_count = self.passenger_max
 
-    def returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge]:
-        start_idx = -1
+    def return_path_from(self, start_node: Node, end_node: Node) -> list[DirEdge]:
+        if not isinstance(start_node, Node) or not isinstance(end_node, Node):
+            raise TypeError("[JEEP] Both start_node and end_node must be Node objects.")
+        
+        start_idx: int = -1
         for i, edge in enumerate(self.route.path):
             if edge.start == start_node:
                 start_idx = i
@@ -109,10 +142,10 @@ class Jeep:
         if start_idx == -1:
             return []
 
-        path = []
-        curr_idx = start_idx
+        path: list[DirEdge] = []
+        curr_idx: int = start_idx
         for _ in range(len(self.route.path)):
-            edge = self.route.path[curr_idx]
+            edge: DirEdge = self.route.path[curr_idx]
             path.append(edge)
             if edge.end == end_node:
                 return path
@@ -120,8 +153,11 @@ class Jeep:
 
         return []
 
-    def getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float]:
-        path = self.returnPathFrom(start_node, end_node)
+    def get_weight_if(self, start_node: Node, end_node: Node) -> Optional[float]:
+        if not isinstance(start_node, Node) or not isinstance(end_node, Node):
+            raise TypeError("[JEEP] Both start_node and end_node must be Node objects.")
+        
+        path: list[DirEdge] = self.return_path_from(start_node, end_node)
         if not path:
             return None
         return sum(e.weight for e in path)
