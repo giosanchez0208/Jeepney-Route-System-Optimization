@@ -81,7 +81,6 @@ logs/
 cache/
 data/raw/osm_cache/
 data/raw/osm/
-*.osm.pbf
 
 <<<<<<< HEAD
 =======
