@@ -182,23 +182,6 @@ def route_from_coords(city_graph: CityGraph, coords_json: str) -> Route:
         
     return Route(city_graph, path=layer_2_path)
 
-import math
-from collections import defaultdict
-from typing import Optional
-from PIL import ImageDraw, Image
-
-def _get_vector(start: 'Node', end: 'Node') -> tuple[float, float]:
-    dx = end.lon - start.lon
-    dy = start.lat - end.lat 
-    length = math.hypot(dx, dy)
-    if length == 0:
-        return 0.0, 0.0
-    return dx / length, dy / length
-
-def _get_relative_angle(v_base: tuple[float, float], v_target: tuple[float, float]) -> float:
-    angle = math.atan2(v_target[1], v_target[0]) - math.atan2(v_base[1], v_base[0])
-    return (angle + math.pi) % (2 * math.pi) - math.pi
-
 class RouteSystem:
     def __init__(self) -> None:
         self.routes: list['Route'] = []
@@ -216,83 +199,57 @@ class RouteSystem:
         y = (tl_lat - node.lat) / lat_range * height
         return x, y
 
-    def _build_lane_registry(self) -> dict:
-        edge_registry = defaultdict(list)
-        for route in self.routes:
-            for i, edge in enumerate(route.path):
-                edge_key = frozenset([edge.start.id, edge.end.id])
-                
-                prev_edge = route.path[i - 1]
-                v_base = _get_vector(edge.start, edge.end)
-                v_entry = _get_vector(prev_edge.start, edge.start)
-                
-                if prev_edge.start.id == edge.end.id:
-                    angle = math.pi 
-                else:
-                    angle = _get_relative_angle(v_base, v_entry)
-                    
-                edge_registry[edge_key].append((angle, route.id))
-
-        for key in edge_registry:
-            edge_registry[key].sort(key=lambda x: x[0])
-            edge_registry[key] = [r_id for _, r_id in edge_registry[key]]
-            
-        return edge_registry
-
-    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, line_width: int = 4, spacing: int = 5) -> Image.Image:
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, line_width: int = 6, dash_length: int = 15) -> Image.Image:
         if image.width != image.height:
             raise ValueError("[ROUTE SYSTEM] Visualization requires a square image.")
 
         draw = ImageDraw.Draw(image)
-        edge_registry = self._build_lane_registry()
+        
+        edge_colors = defaultdict(set)
+        edge_coords = {}
 
         for route in self.routes:
-            path_length = len(route.path)
-            segments = []
-            turnarounds = set()
-
-            for i in range(path_length):
-                edge = route.path[i]
-
+            for edge in route.path:
                 key = frozenset([edge.start.id, edge.end.id])
-                lanes = edge_registry[key]
-                idx = lanes.index(route.id)
-                off_mult = idx - (len(lanes) - 1) / 2.0
+                edge_colors[key].add(route.designated_color)
+                if key not in edge_coords:
+                    edge_coords[key] = (edge.start, edge.end)
 
-                x1, y1 = self._get_screen_coords(edge.start, context, image.width, image.height)
-                x2, y2 = self._get_screen_coords(edge.end, context, image.width, image.height)
-
-                v = _get_vector(edge.start, edge.end)
-                n = (-v[1], v[0])
-
-                ox1 = x1 + n[0] * off_mult * spacing
-                oy1 = y1 + n[1] * off_mult * spacing
-                ox2 = x2 + n[0] * off_mult * spacing
-                oy2 = y2 + n[1] * off_mult * spacing
-
-                segments.append(((ox1, oy1), (ox2, oy2), n))
-
-                next_edge = route.path[(i + 1) % path_length]
-                if edge.end.id == next_edge.start.id and edge.start.id == next_edge.end.id:
-                    turnarounds.add(i)
-
-            for i in range(path_length):
-                seg_curr = segments[i]
-                draw.line([seg_curr[0], seg_curr[1]], fill=route.designated_color, width=line_width)
-
-                if i in turnarounds:
-                    x, y = seg_curr[1]
-                    n = seg_curr[2]
-                    
-                    cap_extension = line_width * 2.5
-                    
-                    cap_x1 = x + n[0] * cap_extension
-                    cap_y1 = y + n[1] * cap_extension
-                    cap_x2 = x - n[0] * cap_extension
-                    cap_y2 = y - n[1] * cap_extension
-                    draw.line([(cap_x1, cap_y1), (cap_x2, cap_y2)], fill=route.designated_color, width=line_width)
-                else:
-                    seg_next = segments[(i + 1) % path_length]
-                    draw.line([seg_curr[1], seg_next[0]], fill=route.designated_color, width=line_width)
-
+        for key, start_end in edge_coords.items():
+            start_node, end_node = start_end
+            colors = sorted(list(edge_colors[key]))
+            
+            x1, y1 = self._get_screen_coords(start_node, context, image.width, image.height)
+            x2, y2 = self._get_screen_coords(end_node, context, image.width, image.height)
+            
+            if len(colors) == 1:
+                draw.line([(x1, y1), (x2, y2)], fill=colors[0], width=line_width)
+                continue
+            
+            dx = x2 - x1
+            dy = y2 - y1
+            length = math.hypot(dx, dy)
+            
+            if length == 0:
+                continue
+                
+            ux = dx / length
+            uy = dy / length
+            
+            current_dist = 0
+            color_idx = 0
+            
+            while current_dist < length:
+                next_dist = min(current_dist + dash_length, length)
+                
+                px1 = x1 + ux * current_dist
+                py1 = y1 + uy * current_dist
+                px2 = x1 + ux * next_dist
+                py2 = y1 + uy * next_dist
+                
+                draw.line([(px1, py1), (px2, py2)], fill=colors[color_idx], width=line_width)
+                
+                current_dist = next_dist
+                color_idx = (color_idx + 1) % len(colors)
+                
         return image
