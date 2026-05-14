@@ -29,3 +29,9 @@ travel_graph:
   transfer_wt: 14.2
   direct_wt: 0.0
   alight_wt: 0.0
+
+########## SIMULATION PARAMETERS ######################
+simulation:
+  mohring_sample_size: 2000
+  jeep_capacity: 16
+  num_ticks: 3600
