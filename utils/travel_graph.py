@@ -1,106 +1,41 @@
-"""Flow: CityGraph + routes + config weights -> layered travel network -> shortest journey queries.
-
-StaticTravelGraph(cg: CityGraph) -> None builds the base layer-1 and layer-3 walking network.
-TravelGraph(stg: StaticTravelGraph, routes: list[Route]) -> None adds layer-2 ride, wait, alight, and transfer edges.
-findShortestJourney(self, start: Node, end: Node) -> list[DirEdge], calculateJourneyDistance(self, start: Node, end: Node) -> float, and calculateJourneyWeight(self, start: Node, end: Node) -> float are the query methods.
-
-Inputs: a CityGraph and route list.
-Outputs: layered DirEdge paths, journey distances, and journey weights.
-Imported modules used: yaml, Path, Node, DirEdge, _getDistance, CityGraph, and Route.
-"""
-
 from collections import defaultdict
 from heapq import heappush, heappop
 from itertools import count
-from pathlib import Path
-
-import yaml
 
 from .node import Node
 from .directed_edge import DirEdge, _getDistance
 from .city_graph import CityGraph
 from .route import Route, RouteGenerator
 
-_CONSTS_PATH = Path(__file__).with_name("configs").joinpath("configs.yaml")
-with _CONSTS_PATH.open("r", encoding="utf-8") as f:
-    _CONSTS = yaml.safe_load(f)
-
-WALK_WT = _CONSTS["WALK_WT"]
-RIDE_WT = _CONSTS["RIDE_WT"]
-WAIT_WT = _CONSTS["WAIT_WT"]
-TRANSFER_WT = _CONSTS["TRANSFER_WT"]
-DIRECT_WT = _CONSTS["DIRECT_WT"]
-ALIGHT_WT = _CONSTS["ALIGHT_WT"]
-
-N_ROUTES = _CONSTS["N_ROUTES"]
-N_POINTS = _CONSTS["N_POINTS"]
-
-
-class StaticTravelGraph:
-    def __init__(self, cg: CityGraph) -> None:
+class TravelGraph:
+    def __init__(self, cg: CityGraph, route_generator: RouteGenerator, config: dict, n_routes: int = 5, n_points: int = 4) -> None:
+        if not cg:
+            raise ValueError("[TRAVEL GRAPH] CityGraph cannot be None.")
+        if not route_generator:
+            raise ValueError("[TRAVEL GRAPH] RouteGenerator cannot be None.")
+        if not config:
+            raise ValueError("[TRAVEL GRAPH] Configuration dictionary cannot be None.")
+            
         self.cg = cg
+        self.config = config
+        
+        self.walk_wt = config.get("WALK_WT", 1.0)
+        self.ride_wt = config.get("RIDE_WT", 1.0)
+        self.wait_wt = config.get("WAIT_WT", 5.0)
+        self.transfer_wt = config.get("TRANSFER_WT", 5.0)
+        self.direct_wt = config.get("DIRECT_WT", 0.0)
+        self.alight_wt = config.get("ALIGHT_WT", 0.0)
+
+        self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
+        
         self.l1_nodes: dict[tuple[float, float], Node] = {}
         self.l3_nodes: dict[tuple[float, float], Node] = {}
         
-        self._l1_lookup: dict[tuple[float, float], Node] = {}
-        self._l3_lookup: dict[tuple[float, float], Node] = {}
-        
-        self.base_outgoing: dict[Node, list[DirEdge]] = defaultdict(list)
-        self.base_edges: list[DirEdge] = []
+        self._outgoing_edges: dict[Node, list[DirEdge]] = defaultdict(list)
+        self.travel_graph: list[DirEdge] = []
         
         self._construct()
 
-    def _construct(self) -> None:
-        for n in self.cg.nodes:
-            coord = (n.lon, n.lat)
-            
-            n1 = Node(n.lon, n.lat)
-            n1.layer = 1
-            self.l1_nodes[coord] = n1
-            self._l1_lookup[coord] = n1
-
-            n3 = Node(n.lon, n.lat)
-            n3.layer = 3
-            self.l3_nodes[coord] = n3
-            self._l3_lookup[coord] = n3
-
-        sw_c = count(1)
-        ew_c = count(1)
-        di_c = count(1)
-
-        for e in self.cg.graph:
-            c_start = (e.start.lon, e.start.lat)
-            c_end = (e.end.lon, e.end.lat)
-
-            walk_weight = WALK_WT * e.getLength()
-
-            sw_edge = DirEdge(self.l1_nodes[c_start], self.l1_nodes[c_end], e.is_drivable, id=f"SW{next(sw_c):05d}")
-            sw_edge.weight = walk_weight
-            self.base_edges.append(sw_edge)
-            self.base_outgoing[sw_edge.start].append(sw_edge)
-
-            ew_edge = DirEdge(self.l3_nodes[c_start], self.l3_nodes[c_end], e.is_drivable, id=f"EW{next(ew_c):05d}")
-            ew_edge.weight = walk_weight
-            self.base_edges.append(ew_edge)
-            self.base_outgoing[ew_edge.start].append(ew_edge)
-
-        for coord, n1 in self.l1_nodes.items():
-            n3 = self.l3_nodes[coord]
-            di_edge = DirEdge(n1, n3, True, weight=DIRECT_WT, id=f"DI{next(di_c):05d}")
-            self.base_edges.append(di_edge)
-            self.base_outgoing[n1].append(di_edge)
-
-
-class TravelGraph:
-    def __init__(self,stg: StaticTravelGraph,route_generator: RouteGenerator,n_routes: int = 5,n_points: int = 4,) -> None:
-        self.stg = stg
-        self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
-            
-        self._outgoing_edges = defaultdict(list, {node: list(edges) for node, edges in stg.base_outgoing.items()})
-        self.travel_graph: list[DirEdge] = list(stg.base_edges)
-        
-        self._construct()
-        
     def _generate_routes(self, route_generator: RouteGenerator, n_routes: int, n_points: int) -> list[Route]:
         routes = []
         for i in range(n_routes):
@@ -112,8 +47,48 @@ class TravelGraph:
         if not routes:
             raise ValueError("[TRAVEL GRAPH] No routes could be generated. Check RouteGenerator configuration.")
         return routes
-    
+
     def _construct(self) -> None:
+        # Layer 1 and 3 nodes
+        for n in self.cg.nodes:
+            coord = (n.lon, n.lat)
+            n1 = Node(n.lon, n.lat)
+            n1.layer = 1
+            self.l1_nodes[coord] = n1
+
+            n3 = Node(n.lon, n.lat)
+            n3.layer = 3
+            self.l3_nodes[coord] = n3
+
+        sw_c = count(1)
+        ew_c = count(1)
+        di_c = count(1)
+
+        # Base edges for layer 1 and 3
+        for e in self.cg.graph:
+            c_start = (e.start.lon, e.start.lat)
+            c_end = (e.end.lon, e.end.lat)
+
+            walk_weight = self.walk_wt * e.getLength()
+
+            sw_edge = DirEdge(self.l1_nodes[c_start], self.l1_nodes[c_end], e.is_drivable, id=f"SW{next(sw_c):05d}")
+            sw_edge.weight = walk_weight
+            self.travel_graph.append(sw_edge)
+            self._outgoing_edges[sw_edge.start].append(sw_edge)
+
+            ew_edge = DirEdge(self.l3_nodes[c_start], self.l3_nodes[c_end], e.is_drivable, id=f"EW{next(ew_c):05d}")
+            ew_edge.weight = walk_weight
+            self.travel_graph.append(ew_edge)
+            self._outgoing_edges[ew_edge.start].append(ew_edge)
+
+        # Direct edges 1 -> 3
+        for coord, n1 in self.l1_nodes.items():
+            n3 = self.l3_nodes[coord]
+            di_edge = DirEdge(n1, n3, True, weight=self.direct_wt, id=f"DI{next(di_c):05d}")
+            self.travel_graph.append(di_edge)
+            self._outgoing_edges[n1].append(di_edge)
+
+        # Layer 2 nodes and edges
         l2_nodes_by_route: dict[int, dict[tuple[float, float], Node]] = defaultdict(dict)
 
         for r_idx, r in enumerate(self.routes):
@@ -136,43 +111,99 @@ class TravelGraph:
                 c_start = (e.start.lon, e.start.lat)
                 c_end = (e.end.lon, e.end.lat)
                 
-                # ENCODED ROUTE INDEX IN EDGE ID
                 ri_edge = DirEdge(l2_nodes[c_start], l2_nodes[c_end], True, id=f"RI_R{r_idx}_{next(ri_c):05d}")
-                ri_edge.weight = RIDE_WT * ri_edge.getLength()
+                ri_edge.weight = self.ride_wt * ri_edge.getLength()
                 
                 self.travel_graph.append(ri_edge)
                 self._outgoing_edges[ri_edge.start].append(ri_edge)
 
+        # Connecting edges (WA, AL, TR)
         for r_idx in range(len(self.routes)):
             for coord, n2 in l2_nodes_by_route[r_idx].items():
-                n1 = self.stg._l1_lookup.get(coord)
-                n3 = self.stg._l3_lookup.get(coord)
+                n1 = self.l1_nodes.get(coord)
+                n3 = self.l3_nodes.get(coord)
                 
                 if n1 and n3:
-                    wa_edge = DirEdge(n1, n2, True, weight=WAIT_WT, id=f"WA{next(wa_c):05d}")
+                    wa_edge = DirEdge(n1, n2, True, weight=self.wait_wt, id=f"WA{next(wa_c):05d}")
                     self.travel_graph.append(wa_edge)
                     self._outgoing_edges[n1].append(wa_edge)
 
-                    al_edge = DirEdge(n2, n3, True, weight=ALIGHT_WT, id=f"AL{next(al_c):05d}")
+                    al_edge = DirEdge(n2, n3, True, weight=self.alight_wt, id=f"AL{next(al_c):05d}")
                     self.travel_graph.append(al_edge)
                     self._outgoing_edges[n2].append(al_edge)
 
-                    tr_edge = DirEdge(n3, n2, True, weight=TRANSFER_WT, id=f"TR{next(tr_c):05d}")
+                    tr_edge = DirEdge(n3, n2, True, weight=self.transfer_wt, id=f"TR{next(tr_c):05d}")
                     self.travel_graph.append(tr_edge)
                     self._outgoing_edges[n3].append(tr_edge)
 
+        # ── Stitch Graph ──────────────────────────────────────────────────
+        from .directed_edge import _stitch
+        
+        # Save intrinsic weights since _connect mutates weights
+        saved_weights = {e: e.weight for e in self.travel_graph}
+        
+        sw_edges = [e for e in self.travel_graph if e.id[:2] == "SW"]
+        ew_edges = [e for e in self.travel_graph if e.id[:2] == "EW"]
+        di_edges = [e for e in self.travel_graph if e.id[:2] == "DI"]
+        wa_edges = [e for e in self.travel_graph if e.id[:2] == "WA"]
+        al_edges = [e for e in self.travel_graph if e.id[:2] == "AL"]
+        tr_edges = [e for e in self.travel_graph if e.id[:2] == "TR"]
+        
+        # Base layer stitching
+        _stitch(sw_edges, sw_edges)
+        _stitch(sw_edges, di_edges)
+        _stitch(sw_edges, wa_edges)
+        
+        _stitch(di_edges, ew_edges)
+        _stitch(al_edges, ew_edges)
+        _stitch(al_edges, tr_edges)
+        _stitch(ew_edges, ew_edges)
+        
+        # Route-specific layer 2 stitching
+        # To avoid teleporting between routes, we must stitch L2 edges strictly per route.
+        for r_idx in range(len(self.routes)):
+            # Filter connecting edges that interact with this route's L2 nodes
+            l2_nodes_set = set(l2_nodes_by_route[r_idx].values())
+            
+            r_ri = [e for e in self.travel_graph if e.id.startswith(f"RI_R{r_idx}_")]
+            r_wa = [e for e in wa_edges if e.end in l2_nodes_set]
+            r_al = [e for e in al_edges if e.start in l2_nodes_set]
+            r_tr = [e for e in tr_edges if e.end in l2_nodes_set]
+            
+            _stitch(r_wa, r_ri)
+            _stitch(r_wa, r_al) # In case of direct alight
+            
+            _stitch(r_ri, r_ri)
+            _stitch(r_ri, r_al)
+            
+            _stitch(r_tr, r_ri)
+            _stitch(r_tr, r_al)
+            
+        # Restore weights
+        for e in self.travel_graph:
+            e.weight = saved_weights[e]
+
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
-        l1_start = self.stg._l1_lookup.get((start.lon, start.lat))
-        l3_end = self.stg._l3_lookup.get((end.lon, end.lat))
+        if start is None or end is None:
+            raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
+            
+        l1_start = self.l1_nodes.get((start.lon, start.lat))
+        
+        # User said: "journey's don't always necessarily end in end_walk edge, a ride node can take the person directly to their node."
+        # This means the destination node can be reached at layer 2 OR layer 3. Wait, AL (Alight) is 2->3. So if they get to the destination node at layer 3, that covers it.
+        # But wait! If they are at a layer 2 node at the destination coordinate, they can just alight (2->3) and they are at layer 3.
+        # If the destination could just be "any node at the destination coordinates", we can just target the l3_node.
+        # Let's ensure the end node check works robustly.
+        l3_end = self.l3_nodes.get((end.lon, end.lat))
 
         if not l1_start or not l3_end:
-            return []
+            raise ValueError("[TRAVEL GRAPH] Start or end node not found in TravelGraph.")
 
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
         
         h_cache = {}
-        min_wt = min(WALK_WT, RIDE_WT)
+        min_wt = min(self.walk_wt, self.ride_wt)
         def get_h(n: Node) -> float:
             if n not in h_cache:
                 h_cache[n] = _getDistance(n, l3_end) * min_wt
@@ -218,8 +249,8 @@ class TravelGraph:
         return sum(e.getLength() for e in path if e.id[:2] in {"SW", "RI", "EW"})
 
     def calculateJourneyWeight(self, start: Node, end: Node) -> float:
-        l1_start = self.stg._l1_lookup.get((start.lon, start.lat))
-        l3_end = self.stg._l3_lookup.get((end.lon, end.lat))
+        l1_start = self.l1_nodes.get((start.lon, start.lat))
+        l3_end = self.l3_nodes.get((end.lon, end.lat))
 
         if not l1_start or not l3_end:
             return 0.0
@@ -228,7 +259,7 @@ class TravelGraph:
         sequence = count()
         
         h_cache = {}
-        min_wt = min(WALK_WT, RIDE_WT)
+        min_wt = min(self.walk_wt, self.ride_wt)
         def get_h(n: Node) -> float:
             if n not in h_cache:
                 h_cache[n] = _getDistance(n, l3_end) * min_wt
@@ -256,3 +287,28 @@ class TravelGraph:
                     heappush(frontier, (priority, new_cost, next(sequence), next_node))
 
         return 0.0
+
+    def draw(
+        self, 
+        context: tuple[tuple[float, float], tuple[float, float]], 
+        image: 'Image.Image', 
+        highlight_edges: Optional[list[DirEdge]] = None,
+        color: str = "#FF0000",
+        width: int = 4
+    ) -> 'Image.Image':
+        if image.width != image.height:
+            raise ValueError("[TRAVEL GRAPH] Image must be square.")
+        
+        img = image.copy()
+        
+        ROUTE_PALETTE = ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#C77DFF"]
+        for r_idx, route in enumerate(self.routes):
+            route_color = ROUTE_PALETTE[r_idx % len(ROUTE_PALETTE)]
+            for edge in route.path:
+                img = edge.draw(context, img, color=route_color, width=2)
+                
+        if highlight_edges:
+            for edge in highlight_edges:
+                img = edge.draw(context, img, color=color, width=width)
+                
+        return img
