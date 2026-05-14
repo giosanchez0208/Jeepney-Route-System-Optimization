@@ -53,6 +53,7 @@ def draw_all(
     context: tuple[tuple[float, float], tuple[float, float]], 
     base_image: Optional[Image.Image] = None, 
     resolution: int = 1000, 
+    text: Optional[str] = None,
     verbose: bool = False
 ) -> Image.Image:
     """
@@ -81,6 +82,20 @@ def draw_all(
         
         if not isinstance(img, Image.Image):
             raise TypeError(f"[VISUALIZATION] Object at index {idx} failed to return an Image.Image object from draw().")
+
+    if text:
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("arial.ttf", int(img.height * 0.05))
+        except IOError:
+            font = ImageFont.load_default()
+        
+        # padding 2% of height
+        pad = int(img.height * 0.02)
+        # We can draw outline or shadow to make it visible
+        draw.text((pad, pad), text, fill="black", font=font)
+        draw.text((pad-1, pad-1), text, fill="white", font=font)
 
     if verbose:
         print(f"Rendered {len(drawable_objects)} objects into the composite image.")
