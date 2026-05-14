@@ -6,6 +6,7 @@ This README covers only:
 - `utils/directed_edge.py`
 - `utils/direct_demand_sampler.py`
 - `utils/route.py`
+- `utils/travel_graph.py`
 - `utils/city_graph.py`
 - `diagnostic.ipynb`
 - `configs/iligan_configs.yaml`
@@ -193,6 +194,55 @@ flowchart TD
     F --> S3
     F --> S4
     F --> S5
+```
+
+### `travel_graph.py`
+
+`TravelGraph` lifts `CityGraph` and candidate `Route` objects into a layered journey network for passenger-level trip search.
+
+- Requires a `CityGraph` and config, plus either prebuilt `routes` or a `RouteGenerator`.
+- Clones graph coordinates into layer 1 (start walk) and layer 3 (end walk) node sets.
+- Builds route-scoped layer-2 nodes so ride segments remain tied to their own route.
+- Constructs typed edge families:
+  - `SW`: start-walk edges on layer 1.
+  - `WA`: wait edges from layer 1 to route layer 2.
+  - `RI`: ride edges inside route layer 2.
+  - `AL`: alight edges from layer 2 to layer 3.
+  - `TR`: transfer edges from layer 3 back to layer 2.
+  - `EW`: end-walk edges on layer 3.
+  - `DI`: direct layer-1 to layer-3 links.
+- Applies generalized-cost weights from config (`walk_wt`, `ride_wt`, `wait_wt`, `transfer_wt`, `direct_wt`, `alight_wt`).
+- Runs A*-style search in `findShortestJourney()` from `(lon, lat, layer 1)` to `(lon, lat, layer 3)`.
+- Exposes both distance and weighted-cost summaries via `calculateJourneyDistance()` and `calculateJourneyWeight()`.
+- Supports 2D rendering through `draw()` and 3D journey rendering through `create_3d()`.
+
+The stitching logic is the critical safeguard: route layer-2 edges are stitched per route index so journeys cannot "teleport" between unrelated loops that happen to share coordinates.
+
+```mermaid
+flowchart TD
+    A[CityGraph nodes and edges] --> B[Clone nodes into L1 and L3]
+    C[Route list or RouteGenerator] --> D[Build route-scoped L2 nodes]
+
+    B --> E[Create SW and EW edges]
+    B --> F[Create DI edges]
+    D --> G[Create RI edges per route]
+    B --> H[Create WA edges L1->L2]
+    D --> I[Create AL edges L2->L3]
+    B --> J[Create TR edges L3->L2]
+
+    E --> K[Base stitching]
+    F --> K
+    H --> K
+    I --> K
+    J --> K
+
+    G --> L[Route-scoped L2 stitching]
+    L --> M[Prevent cross-route teleporting]
+
+    K --> N[Restore intrinsic edge weights]
+    M --> N
+    N --> O[findShortestJourney A-star]
+    O --> P[Journey edge sequence]
 ```
 
 ### `diagnostic.ipynb`
