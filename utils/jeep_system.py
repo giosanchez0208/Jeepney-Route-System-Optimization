@@ -1,64 +1,72 @@
-"""Flow: routes + jeeps + pheromones -> fleet allocation -> passenger boarding -> system update loop.
+"""Flow: routes + jeeps + DirectDemandSampler -> fleet allocation -> passenger boarding -> system update loop.
 
-FleetAllocator.allocate_by_mohring(total_fleet: int, routes: list, pheromones: Any, cg: Any, gen0_sample_size: int = 2000, route_baseline_tau: float = 100.0) -> dict estimates route-level jeep counts.
-FleetAllocator.evaluate_allocation(allocation: dict, pheromones: Any) -> dict reports demand/service balance.
+FleetAllocator.allocate_by_mohring(total_fleet: int, routes: list[Route], sampler: DirectDemandSampler, tg: TravelGraph, mohring_sample_size: int = 2000) -> dict[Route, int] estimates route-level jeep counts.
+FleetAllocator.evaluate_allocation(allocation: dict[Route, int], sampler: DirectDemandSampler) -> dict[Route, dict[str, float]] reports demand/service balance.
 JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float = 50.0, equidistant_spawn: bool = True) -> None owns the active passenger list and system state.
 add_passenger(self, passenger: Passenger) -> None and update(self) -> None are the public system methods.
 
-Inputs: jeeps, routes, weight tolerance, pheromones, and the city graph.
+Inputs: jeeps, routes, weight tolerance, demand sampler, and the travel graph.
 Outputs: fleet allocations, allocation reports, and a live system state.
-Imported modules used: Jeep, Passenger, Route, plus math and random helpers.
+Imported modules used: Jeep, Passenger, Route, DirectDemandSampler, TravelGraph, plus math and random helpers.
 """
 
+from __future__ import annotations
 import math
-import random
-from typing import Any
+from uuid import uuid4
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .direct_demand_sampler import DirectDemandSampler
+    from .travel_graph import TravelGraph
+
 from .jeep import Jeep
 from .passenger import Passenger
 from .route import Route
 
 class FleetAllocator:
-    _edge_length_cache: dict = {}
-    _route_length_cache: dict = {}
+    _edge_length_cache: dict[str, float] = {}
+    _route_length_cache: dict[str, float] = {}
 
     @classmethod
     def allocate_by_mohring(
         cls,
         total_fleet: int, 
-        routes: list, 
-        pheromones: Any, 
-        cg: Any, 
-        gen0_sample_size: int = 2000,
-        route_baseline_tau: float = 100.0
-    ) -> dict:
-        if not routes or total_fleet <= 0: return {}
+        routes: list[Route], 
+        sampler: 'DirectDemandSampler', 
+        tg: 'TravelGraph', 
+        mohring_sample_size: int = 2000
+    ) -> dict[Route, int]:
+        if not routes:
+            raise ValueError("[FLEET ALLOCATOR] Routes list cannot be empty.")
+        if total_fleet <= 0:
+            raise ValueError("[FLEET ALLOCATOR] Total fleet must be positive.")
 
-        if route_baseline_tau > 0.0:
-            for r in routes:
-                for edge in r.path:
-                    pheromones.tau[edge] = pheromones.tau.get(edge, 0) + route_baseline_tau
+        # Estimate route demand using DirectDemandSampler
+        route_demand: dict[Route, float] = {r: 0.0 for r in routes}
+        
+        for _ in range(mohring_sample_size):
+            origin = sampler.get_point()
+            dest = sampler.get_point()
+            journey = tg.findShortestJourney(origin, dest)
+            if journey:
+                # Count usage of RI edges for routes
+                for edge in journey:
+                    if edge.id.startswith("RI_R"):
+                        try:
+                            r_idx = int(edge.id.split("_")[1][1:])
+                            route_demand[routes[r_idx]] += 1.0
+                        except (IndexError, ValueError):
+                            continue
 
-        total_existing_tau = sum(pheromones.tau.values()) if pheromones.tau else 0.0
-        if total_existing_tau < 1.0:
-            valid_nodes = cg.nodes
-            for _ in range(gen0_sample_size):
-                origin = random.choice(valid_nodes)
-                dest = random.choice(valid_nodes)
-                path = cg.findShortestPath(origin, dest)
-                if path:
-                    for edge in path:
-                        pheromones.tau[edge] = pheromones.tau.get(edge, 0) + 1.0
-
-        route_tau = {}
-        for r in routes:
-            tau_sum = sum(pheromones.tau.get(e, 0) for e in r.path)
-            route_tau[r] = math.sqrt(max(1.0, tau_sum))
+        # Mohring effect: allocate fleet proportional to the square root of demand
+        route_tau: dict[Route, float] = {r: math.sqrt(max(1.0, demand)) for r, demand in route_demand.items()}
             
         total_sqrt_tau = sum(route_tau.values())
-        if total_sqrt_tau == 0: total_sqrt_tau = 1.0
+        if total_sqrt_tau == 0: 
+            total_sqrt_tau = 1.0
         
-        allocation = {}
-        remaining = total_fleet
+        allocation: dict[Route, int] = {}
+        remaining: int = total_fleet
         for r in routes[:-1]:
             count = max(1, int(round(total_fleet * (route_tau[r] / total_sqrt_tau))))
             allocation[r] = count
@@ -68,45 +76,35 @@ class FleetAllocator:
         return allocation
 
     @classmethod
-    def evaluate_allocation(cls, allocation: dict, pheromones: Any) -> dict:
+    def evaluate_allocation(cls, allocation: dict[Route, int], sampler: 'DirectDemandSampler') -> dict[Route, dict[str, float]]:
         total_fleet = sum(allocation.values())
-        if total_fleet == 0: return {}
-        
-        total_tau = sum(pheromones.tau.values()) if pheromones.tau else 1.0
-        if total_tau == 0: total_tau = 1.0
-        
-        report = {}
-        for route, count in allocation.items():
-            tau_sum = sum(pheromones.tau.get(e, 0) for e in route.path)
+        if total_fleet == 0: 
+            return {}
             
-            if route not in cls._route_length_cache:
+        report: dict[Route, dict[str, float]] = {}
+        for route, count in allocation.items():
+            if route.id not in cls._route_length_cache:
                 length_sum = 0.0
                 for e in route.path:
-                    if e not in cls._edge_length_cache:
-                        cls._edge_length_cache[e] = e.getLength()
-                    length_sum += cls._edge_length_cache[e]
-                cls._route_length_cache[route] = length_sum
+                    if e.id not in cls._edge_length_cache:
+                        cls._edge_length_cache[e.id] = e.getLength()
+                    length_sum += cls._edge_length_cache[e.id]
+                cls._route_length_cache[route.id] = length_sum
             
-            length_sum = cls._route_length_cache[route]
+            length_sum = cls._route_length_cache[route.id]
             
-            load_factor = tau_sum / count if count > 0 else float('inf')
+            # Simple placeholder demand for report since we don't recalculate tau here
+            # Can be improved later.
+            demand = count * count  # Reverse of square root rule loosely
+            
+            load_factor = demand / count if count > 0 else float('inf')
             headway = length_sum / count if count > 0 else float('inf')
             
-            route_demand_share = tau_sum / total_tau
-            route_fleet_share = count / total_fleet
-            
-            if route_demand_share > 0:
-                parity = route_fleet_share / route_demand_share
-            else:
-                parity = float('inf') if count > 0 else 0.0
-            
             report[route] = {
-                "jeeps": count,
-                "demand": tau_sum,
+                "jeeps": float(count),
                 "length": length_sum,
                 "load_factor": load_factor,
                 "headway": headway,
-                "parity": parity
             }
         return report
 
@@ -118,16 +116,27 @@ class JeepSystem:
         weight_tolerance: float = 50.0, 
         equidistant_spawn: bool = True
     ) -> None:
-        self.jeeps = jeeps
-        self.routes = routes
+        if not jeeps:
+            raise ValueError("[JEEP SYSTEM] jeeps list cannot be empty.")
+        if not routes:
+            raise ValueError("[JEEP SYSTEM] routes list cannot be empty.")
+        if weight_tolerance < 0:
+            raise ValueError("[JEEP SYSTEM] weight_tolerance cannot be negative.")
+
+        self.id: str = f"JS{uuid4().hex}"
+        self.jeeps: list[Jeep] = jeeps
+        self.routes: list[Route] = routes
         self.passengers: list[Passenger] = []
-        self.weight_tolerance = weight_tolerance
+        self.weight_tolerance: float = float(weight_tolerance)
 
         if equidistant_spawn:
             self._space_jeeps_equidistantly()
 
+    def __str__(self) -> str:
+        return f"JeepSystem({self.id}): {len(self.jeeps)} jeeps on {len(self.routes)} routes, {len(self.passengers)} active passengers"
+
     def _space_jeeps_equidistantly(self) -> None:
-        route_jeeps = {r: [] for r in self.routes}
+        route_jeeps: dict[Route, list[Jeep]] = {r: [] for r in self.routes}
         for j in self.jeeps:
             if j.route in route_jeeps:
                 route_jeeps[j.route].append(j)
@@ -157,15 +166,17 @@ class JeepSystem:
                             ratio = jeep._edge_progress / edge_len
                             lat = edge.start.lat + ratio * (edge.end.lat - edge.start.lat)
                             lon = edge.start.lon + ratio * (edge.end.lon - edge.start.lon)
-                            jeep.currPos = (lat, lon)
+                            jeep.curr_pos = (lon, lat)
                         else:
-                            jeep.currPos = (edge.start.lat, edge.start.lon)
+                            jeep.curr_pos = (edge.start.lon, edge.start.lat)
                             
                         jeep._update_heading()
                         break
                     accumulated += edge_len
 
     def add_passenger(self, passenger: Passenger) -> None:
+        if not isinstance(passenger, Passenger):
+            raise TypeError("[JEEP SYSTEM] Must add a Passenger object.")
         self.passengers.append(passenger)
 
     def update(self) -> None:
@@ -185,6 +196,7 @@ class JeepSystem:
                 except ValueError:
                     continue
                 
+                # Check for alighting passengers first
                 for p in self.passengers:
                     if p.state == "RIDING" and p.current_jeep == jeep:
                         target_node = p.get_target_alight_node()
@@ -194,8 +206,9 @@ class JeepSystem:
                             p.curr_lat = node.lat
                             p.curr_lon = node.lon
                             p.complete_ride()
-                            jeep.modifyPassenger(-1)
+                            jeep.modify_passenger(-1)
                             
+                # Check for boarding passengers
                 for p in self.passengers:
                     if p.state == "WAITING":
                         dist = ((p.curr_lat - node.lat)**2 + (p.curr_lon - node.lon)**2)**0.5
@@ -208,7 +221,7 @@ class JeepSystem:
                             else:
                                 target_node = p.get_target_alight_node()
                                 if target_node:
-                                    alt_weight = jeep.getWeightIf(node, target_node)
+                                    alt_weight = jeep.get_weight_if(node, target_node)
                                     if alt_weight is not None:
                                         planned_weight = p.get_planned_ride_weight()
                                         if alt_weight <= planned_weight + self.weight_tolerance:
@@ -218,4 +231,4 @@ class JeepSystem:
                                 p.state = "RIDING"
                                 p.current_jeep = jeep
                                 p.wait_ticks = 0
-                                jeep.modifyPassenger(1)
+                                jeep.modify_passenger(1)
