@@ -7,6 +7,9 @@ from .directed_edge import DirEdge, _getDistance
 from .city_graph import CityGraph
 from .route import Route, RouteGenerator
 
+from PIL import Image
+from typing import Optional
+
 class TravelGraph:
     def __init__(self, cg: CityGraph, route_generator: RouteGenerator, config: dict, n_routes: int = 5, n_points: int = 4) -> None:
         if not cg:
@@ -18,13 +21,15 @@ class TravelGraph:
             
         self.cg = cg
         self.config = config
-        
-        self.walk_wt = config.get("WALK_WT", 1.0)
-        self.ride_wt = config.get("RIDE_WT", 1.0)
-        self.wait_wt = config.get("WAIT_WT", 5.0)
-        self.transfer_wt = config.get("TRANSFER_WT", 5.0)
-        self.direct_wt = config.get("DIRECT_WT", 0.0)
-        self.alight_wt = config.get("ALIGHT_WT", 0.0)
+        if config == {}:
+            print("[TRAVEL GRAPH] Warning: Empty config provided, using default weights.")
+            
+        self.walk_wt = config.get("walk_wt", 1.0)
+        self.ride_wt = config.get("ride_wt", 1.0)
+        self.wait_wt = config.get("wait_wt", 5.0)
+        self.transfer_wt = config.get("transfer_wt", 5.0)
+        self.direct_wt = config.get("direct_wt", 0.0)
+        self.alight_wt = config.get("alight_wt", 0.0)
 
         self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
         
@@ -188,12 +193,6 @@ class TravelGraph:
             raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
             
         l1_start = self.l1_nodes.get((start.lon, start.lat))
-        
-        # User said: "journey's don't always necessarily end in end_walk edge, a ride node can take the person directly to their node."
-        # This means the destination node can be reached at layer 2 OR layer 3. Wait, AL (Alight) is 2->3. So if they get to the destination node at layer 3, that covers it.
-        # But wait! If they are at a layer 2 node at the destination coordinate, they can just alight (2->3) and they are at layer 3.
-        # If the destination could just be "any node at the destination coordinates", we can just target the l3_node.
-        # Let's ensure the end node check works robustly.
         l3_end = self.l3_nodes.get((end.lon, end.lat))
 
         if not l1_start or not l3_end:
@@ -289,26 +288,99 @@ class TravelGraph:
         return 0.0
 
     def draw(
-        self, 
-        context: tuple[tuple[float, float], tuple[float, float]], 
-        image: 'Image.Image', 
-        highlight_edges: Optional[list[DirEdge]] = None,
-        color: str = "#FF0000",
-        width: int = 4
+        self,
+        context: tuple[tuple[float, float], tuple[float, float]],
+        image: 'Image.Image',
+        display_walk: bool = False,
+        display_wait: bool = False,
+        display_ride: bool = False,
+        display_alight: bool = False,
+        display_end_walk: bool = False,
+        display_transfer: bool = False,
+        display_direct: bool = False,
+        journey: Optional[list[DirEdge]] = None,
     ) -> 'Image.Image':
         if image.width != image.height:
             raise ValueError("[TRAVEL GRAPH] Image must be square.")
-        
+
         img = image.copy()
-        
+        BASE_EDGE_WIDTH = 2
+        RIDE_EDGE_WIDTH = 3
+        TRANSITION_NODE_RADIUS = 2
+        JOURNEY_EDGE_WIDTH = 5
+        JOURNEY_TRANSITION_RADIUS = 3
+
         ROUTE_PALETTE = ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#C77DFF"]
-        for r_idx, route in enumerate(self.routes):
-            route_color = ROUTE_PALETTE[r_idx % len(ROUTE_PALETTE)]
-            for edge in route.path:
-                img = edge.draw(context, img, color=route_color, width=2)
-                
-        if highlight_edges:
-            for edge in highlight_edges:
-                img = edge.draw(context, img, color=color, width=width)
-                
+        EDGE_COLORS = {
+            "SW": "#7EB8DA", "EW": "#7ECFC0",
+            "WA": "#FFB74D", "AL": "#81C784", "TR": "#E57373", "DI": "#CE93D8",
+        }
+
+        FLAG_MAP = {
+            "SW": display_walk, "WA": display_wait, "RI": display_ride,
+            "AL": display_alight, "EW": display_end_walk,
+            "TR": display_transfer, "DI": display_direct,
+        }
+
+        SAME_LAYER = {"SW", "RI", "EW"}
+
+        # ── Base layer rendering ──────────────────────────────────────
+        for e in self.travel_graph:
+            prefix = e.id[:2]
+            if not FLAG_MAP.get(prefix, False):
+                continue
+
+            if prefix in SAME_LAYER:
+                if prefix == "RI":
+                    r_idx = int(e.id.split("_")[1][1:])
+                    c = ROUTE_PALETTE[r_idx % len(ROUTE_PALETTE)]
+                    img = e.draw(context, img, color=c, width=RIDE_EDGE_WIDTH)
+                else:
+                    img = e.draw(context, img, color=EDGE_COLORS[prefix], width=BASE_EDGE_WIDTH)
+            else:
+                img = e.start.draw(context, img, color=EDGE_COLORS[prefix], radius=TRANSITION_NODE_RADIUS)
+
+        # ── Journey overlay ───────────────────────────────────────────
+        if journey:
+            for e in journey:
+                prefix = e.id[:2]
+                if not FLAG_MAP.get(prefix, False):
+                    continue
+
+                if prefix in SAME_LAYER:
+                    img = e.draw(context, img, color="#FF0000", width=JOURNEY_EDGE_WIDTH)
+                else:
+                    img = e.start.draw(context, img, color="#FF0000", radius=JOURNEY_TRANSITION_RADIUS)
+
         return img
+
+    def create_3d(
+        self,
+        journey: Optional[list[DirEdge]] = None,
+        display_walk: bool = True,
+        display_wait: bool = True,
+        display_ride: bool = True,
+        display_alight: bool = True,
+        display_end_walk: bool = True,
+        display_transfer: bool = True,
+        display_direct: bool = True,
+        labels_on: bool = False,
+        legend_on: bool = True,
+        nodes_on: bool = False,
+    ) -> 'Image.Image':
+        from .travel_graph_3d_vis import TravelGraph3DVisualizer
+
+        visualizer = TravelGraph3DVisualizer(self, journey=journey)
+        return visualizer.draw(
+            display_walk=display_walk,
+            display_wait=display_wait,
+            display_ride=display_ride,
+            display_alight=display_alight,
+            display_end_walk=display_end_walk,
+            display_transfer=display_transfer,
+            display_direct=display_direct,
+            labels_on=labels_on,
+            legend_on=legend_on,
+            nodes_on=nodes_on,
+        )
+

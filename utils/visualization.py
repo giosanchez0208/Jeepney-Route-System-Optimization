@@ -87,15 +87,16 @@ def draw_all(
         from PIL import ImageDraw, ImageFont
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("arial.ttf", int(img.height * 0.05))
+            font = ImageFont.truetype("arial.ttf", int(img.height * 0.025))
         except IOError:
             font = ImageFont.load_default()
         
-        # padding 2% of height
         pad = int(img.height * 0.02)
-        # We can draw outline or shadow to make it visible
-        draw.text((pad, pad), text, fill="black", font=font)
-        draw.text((pad-1, pad-1), text, fill="white", font=font)
+        # Black outline
+        for dx, dy in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+            draw.text((pad + dx, pad + dy), text, fill="black", font=font)
+        # White fill
+        draw.text((pad, pad), text, fill="white", font=font)
 
     if verbose:
         print(f"Rendered {len(drawable_objects)} objects into the composite image.")

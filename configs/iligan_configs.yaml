@@ -20,3 +20,12 @@ ddm:
   beta: 0.4
   idw_power: 2.0
   cache_dir: "utils/.cache/1PM_traffic"
+
+########## TRAVEL GRAPH WEIGHTS ########################
+travel_graph:
+  walk_wt: 0.0142
+  ride_wt: 0.0071
+  wait_wt: 8.5
+  transfer_wt: 14.2
+  direct_wt: 0.0
+  alight_wt: 0.0

@@ -52,7 +52,7 @@ class Node:
 	def layer(self, value: Optional[int]) -> None:
 		self._layer = _validate_layer(value)
   
-	def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#AED7FF") -> Image.Image:
+	def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, color: str = "#AED7FF", radius: int = 1) -> Image.Image:
 		if image.width != image.height:
 			raise ValueError("[NODE] Image must be square.")
 
@@ -69,7 +69,6 @@ class Node:
 		y = (tl_lat - self.lat) / lat_range * image.height
 
 		draw = ImageDraw.Draw(image)
-		radius = 3
 		draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
 
 		return image
