@@ -23,11 +23,11 @@ from .directed_edge import DirEdge, _getDistance
 from PIL import Image, ImageDraw
 
 class Jeep:
-    def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float) -> None:
+    def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float, max_capacity: int = 16) -> None:
         if not hasattr(route, 'path') or not hasattr(route, 'designated_color'):
             raise TypeError("[JEEP] route must have 'path' and 'designated_color' attributes.")
         if not isinstance(curr_pos, tuple) or len(curr_pos) != 2:
-            raise TypeError("[JEEP] curr_pos must be a tuple of exactly 2 elements (lat, lon).")
+            raise TypeError("[JEEP] curr_pos must be a tuple of exactly 2 elements (lon, lat).")
         if not isinstance(speed, (int, float)) or isinstance(speed, bool):
             raise TypeError("[JEEP] speed must be a numeric value.")
         if speed < 0:
@@ -44,7 +44,7 @@ class Jeep:
         self.curr_nodes_passed: Optional[list[tuple[Node, Route]]] = None
         self.heading: float = 0.0
         
-        self.passenger_max: int = 16
+        self.passenger_max: int = max_capacity
         self.curr_passenger_count: int = 0
 
         self._edge_idx: int = 0
@@ -56,9 +56,9 @@ class Jeep:
     def __str__(self) -> str:
         return (
             f"Jeep({self.id}): route={self.route.id}, "
-            f"pos={self.curr_pos}, heading={self.heading:.2f}°, "
+            f"pos=({self.curr_pos[0]:.4f}, {self.curr_pos[1]:.4f}), heading={self.heading:.2f}°, "
             f"passengers={self.curr_passenger_count}/{self.passenger_max}, "
-            f"speed={self.speed} m/s, color={self.designated_color}"
+            f"speed={self.speed} m/s"
         )
 
     def _snap_to_route(self) -> None:
@@ -75,7 +75,7 @@ class Jeep:
         self._edge_idx = best_idx
         self._edge_progress = 0.0
         snapped_edge: DirEdge = self.route.path[self._edge_idx]
-        self.curr_pos = (snapped_edge.start.lat, snapped_edge.start.lon)
+        self.curr_pos = (snapped_edge.start.lon, snapped_edge.start.lat)
 
     def _update_heading(self) -> None:
         if not self.route.path:
@@ -109,11 +109,11 @@ class Jeep:
         
         if edge_length > 0:
             ratio: float = self._edge_progress / edge_length
-            lat: float = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
             lon: float = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
-            self.curr_pos = (lat, lon)
+            lat: float = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
+            self.curr_pos = (lon, lat)
         else:
-            self.curr_pos = (current_edge.start.lat, current_edge.start.lon)
+            self.curr_pos = (current_edge.start.lon, current_edge.start.lat)
             
         if not self.curr_nodes_passed:
             self.curr_nodes_passed = None
@@ -165,7 +165,6 @@ class Jeep:
         return sum(e.weight for e in path)
 
     def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, radius: int = 12) -> Image.Image:
-
         if image.width != image.height:
             raise ValueError("[JEEP] Visualization requires a square image.")
 
@@ -180,33 +179,25 @@ class Jeep:
         if lon_range == 0 or lat_range == 0:
             return image
 
-        x = image.width * (self.curr_pos[1] - tl_lon) / lon_range
-        y = image.height * (tl_lat - self.curr_pos[0]) / lat_range
+        x = image.width * (self.curr_pos[0] - tl_lon) / lon_range
+        y = image.height * (tl_lat - self.curr_pos[1]) / lat_range
 
         x = max(0, min(image.width - 1, int(x)))
         y = max(0, min(image.height - 1, int(y)))
 
         angle = math.radians(self.heading)
 
+        # Draw a triangle representing the jeep
         front = (x + radius * math.cos(angle), y + radius * math.sin(angle))
         left = (x + radius * math.cos(angle + 2.5), y + radius * math.sin(angle + 2.5))
         right = (x + radius * math.cos(angle - 2.5), y + radius * math.sin(angle - 2.5))
 
         draw.polygon([front, left, right], fill=self.designated_color, outline="white")
 
-        ratio = self.curr_passenger_count / self.passenger_max
-        bar_w = radius * 2
-        bar_h = 6
-
-        bx1 = x - bar_w // 2
-        by1 = y + radius + 8
-        bx2 = bx1 + bar_w
-        by2 = by1 + bar_h
-
-        draw.rectangle([bx1, by1, bx2, by2], fill="gray")
-        draw.rectangle([bx1, by1, bx1 + int(bar_w * ratio), by2], fill=self.designated_color)
-
-        text = f"{self.curr_passenger_count}/{self.passenger_max}"
-        draw.text((x - radius, y + radius + 18), text, fill="black")
+        # Draw number of passengers on top
+        text = str(self.curr_passenger_count)
+        
+        # Approximate text bounding box (centering)
+        draw.text((x - 4, y - radius - 10), text, fill="white", stroke_width=1, stroke_fill="black")
 
         return image
