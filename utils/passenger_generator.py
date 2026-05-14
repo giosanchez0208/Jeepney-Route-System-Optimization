@@ -1,36 +1,48 @@
 """Flow: OD demand + travel graph + spawn schedule -> new passengers -> archived journeys.
 
-PassengerGenerator(tg: TravelGraph, od_gen: TrafficAwareODGenerator, rate_per_100: float, stdev: float, speed: float = 5.0) -> None manages stochastic spawning, passenger updates, and archive handoff.
+PassengerGenerator(tg: TravelGraph, sampler: DirectDemandSampler, rate_per_100: float, stdev: float, speed: float = 5.0) -> None manages stochastic spawning, passenger updates, and archive handoff.
 update(self) -> None advances the schedule and lifecycle.
 get_all_generated_journeys(self) -> list[list[DirEdge]] exposes every planned path for pheromone use.
 
-Inputs: a TravelGraph, TrafficAwareODGenerator, spawn rate, deviation, and speed.
+Inputs: a TravelGraph, DirectDemandSampler, spawn rate, deviation, and speed.
 Outputs: active passengers, archived passengers, and generated journey lists.
-Imported modules used: DirEdge, Passenger, TravelGraph, TrafficAwareODGenerator,
-and random.
+Imported modules used: DirEdge, Passenger, TravelGraph, DirectDemandSampler, and random.
 """
 
+from __future__ import annotations
 import random
+from uuid import uuid4
+from typing import TYPE_CHECKING
 
-from .directed_edge import DirEdge
+if TYPE_CHECKING:
+    from .directed_edge import DirEdge
+    from .travel_graph import TravelGraph
+    from .direct_demand_sampler import DirectDemandSampler
+
 from .passenger import Passenger
-from .travel_graph import TravelGraph
-from .od_generator import TrafficAwareODGenerator
 
 class PassengerGenerator:
     def __init__(
         self, 
-        tg: TravelGraph, 
-        od_gen: TrafficAwareODGenerator, 
+        tg: 'TravelGraph', 
+        sampler: 'DirectDemandSampler', 
         rate_per_100: float, 
         stdev: float, 
         speed: float = 5.0
     ) -> None:
-        self.tg = tg
-        self.od_gen = od_gen
-        self.rate_per_100 = rate_per_100
-        self.stdev = stdev
-        self.speed = speed
+        if not tg:
+            raise ValueError("[PASSENGER GENERATOR] TravelGraph cannot be None.")
+        if not sampler:
+            raise ValueError("[PASSENGER GENERATOR] DirectDemandSampler cannot be None.")
+        if rate_per_100 < 0:
+            raise ValueError("[PASSENGER GENERATOR] rate_per_100 cannot be negative.")
+
+        self.id: str = f"PG{uuid4().hex}"
+        self.tg: 'TravelGraph' = tg
+        self.sampler: 'DirectDemandSampler' = sampler
+        self.rate_per_100: float = float(rate_per_100)
+        self.stdev: float = float(stdev)
+        self.speed: float = float(speed)
         
         self.passengers: list[Passenger] = []
         self.new_passengers_this_tick: list[Passenger] = []
@@ -40,6 +52,9 @@ class PassengerGenerator:
         self.spawn_schedule: list[int] = []
         
         self._generate_schedule()
+
+    def __str__(self) -> str:
+        return f"PassengerGenerator({self.id}): active={len(self.passengers)}, archived={len(self.archived_passengers)}, tick={self.tick_counter}"
 
     def _generate_schedule(self) -> None:
         """Calculates a randomized distribution of passenger spawns for the next 100 ticks."""
@@ -58,12 +73,13 @@ class PassengerGenerator:
         spawns_now = self.spawn_schedule[self.tick_counter % 100]
         
         for _ in range(spawns_now):
-            points = self.od_gen.generate_origins(n_points=2)
-            journey = self.tg.findShortestJourney(points[0], points[1])
+            origin = self.sampler.get_point()
+            dest = self.sampler.get_point()
+            journey = self.tg.findShortestJourney(origin, dest)
             
             if journey:
                 p = Passenger(
-                    start_pos=(points[0].lat, points[0].lon), 
+                    start_pos=(origin.lon, origin.lat), 
                     journey=journey, 
                     speed=self.speed,
                     spawn_tick=self.tick_counter
@@ -85,7 +101,7 @@ class PassengerGenerator:
         self.passengers[:] = active_passengers
         self.tick_counter += 1
         
-    def get_all_generated_journeys(self) -> list[list[DirEdge]]:
+    def get_all_generated_journeys(self) -> list[list['DirEdge']]:
         """Extracts the planned paths of all passengers for pheromone deposition."""
         all_passengers = self.passengers + self.archived_passengers
         return [p.journey for p in all_passengers]

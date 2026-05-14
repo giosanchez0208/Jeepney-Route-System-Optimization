@@ -11,13 +11,13 @@ from PIL import Image
 from typing import Optional
 
 class TravelGraph:
-    def __init__(self, cg: CityGraph, route_generator: RouteGenerator, config: dict, n_routes: int = 5, n_points: int = 4) -> None:
+    def __init__(self, cg: CityGraph, config: dict, routes: Optional[list[Route]] = None, route_generator: Optional[RouteGenerator] = None, n_routes: int = 5, n_points: int = 4) -> None:
         if not cg:
             raise ValueError("[TRAVEL GRAPH] CityGraph cannot be None.")
-        if not route_generator:
-            raise ValueError("[TRAVEL GRAPH] RouteGenerator cannot be None.")
         if not config:
             raise ValueError("[TRAVEL GRAPH] Configuration dictionary cannot be None.")
+        if routes is None and route_generator is None:
+            raise ValueError("[TRAVEL GRAPH] Must provide either 'routes' or 'route_generator'.")
             
         self.cg = cg
         self.config = config
@@ -31,7 +31,12 @@ class TravelGraph:
         self.direct_wt = config.get("direct_wt", 0.0)
         self.alight_wt = config.get("alight_wt", 0.0)
 
-        self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
+        self.alight_wt = config.get("alight_wt", 0.0)
+
+        if routes is not None:
+            self.routes: list[Route] = routes
+        else:
+            self.routes: list[Route] = self._generate_routes(route_generator, n_routes, n_points)
         
         self.l1_nodes: dict[tuple[float, float], Node] = {}
         self.l3_nodes: dict[tuple[float, float], Node] = {}
