@@ -1,27 +1,11 @@
-"""Flow: setup -> graphs, routes, jeeps, passengers -> simulation ticks -> result export.
-
-SimulationSetup(city_query: str, config: dict, routes: list[Route]) -> None wraps initialization.
-build(self, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None) -> Simulation assembles the runtime stack.
-SimulationResult(fitness_score: float, metrics: dict[str, Any], recorded_paths: list[tuple[Any, float]], jeep_system: Optional[JeepSystem] = None, sim_id: Optional[str] = None) -> None stores metrics and export helpers.
-export_map(self, area_query: str, out_dir: str, draw_routes: bool = True) -> None, export_report(self, out_dir: str) -> None, and from_file(cls, filepath: str) -> SimulationResult handle saved outputs.
-Simulation(city_query: str, bounds: tuple[float, float, float, float], jeep_system: JeepSystem, passenger_generator: PassengerGenerator, max_ticks: int, beta_penalty: float = 2.0, alpha_std_penalty: float = 0.5, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None, config: Optional[dict] = None) -> None runs the simulation.
-update(self) -> None, run(self) -> SimulationResult, and export_snapshot(self, filename: str, draw_routes: bool = True, draw_jeeps: bool = True, draw_passengers: bool = True) -> None are the main runtime methods.
-
-Inputs: city query, configuration, routes, and runtime components. All speed values are interpreted as km/h and one simulation tick equals one second.
-Outputs: live simulation state plus serialized results, maps, and reports.
-Imported modules used: CityGraph, TravelGraph,
-DirectDemandSampler, DDMConfig, PassengerGenerator, JeepSystem, Route, Jeep,
-LiveVisualizer, StaticVisualizer, Passenger, and threading.
-"""
-
 from __future__ import annotations
 import math
 import uuid
 import json
-import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Any
+from PIL import Image, ImageDraw, ImageFont
 
 from .city_graph import CityGraph
 from .travel_graph import TravelGraph
@@ -30,7 +14,6 @@ from .passenger_generator import PassengerGenerator
 from .jeep_system import JeepSystem
 from .route import Route
 from .jeep import Jeep
-from .visualizer import LiveVisualizer, StaticVisualizer
 from .passenger import Passenger
 
 class SimulationSetup:
@@ -48,7 +31,7 @@ class SimulationSetup:
     def __str__(self) -> str:
         return f"SimulationSetup({self.id}): {self.city_query}, {len(self.routes)} routes provided"
 
-    def build(self, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None) -> 'Simulation':
+    def build(self) -> 'Simulation':
         print("[Setup] Initializing CityGraph...")
         cg_cfg = self.config.get("city_graph", {})
         cg = CityGraph(
@@ -62,41 +45,41 @@ class SimulationSetup:
         sampler = DirectDemandSampler(
             city=cg,
             config=DDMConfig(**self.config.get("ddm", {})),
-            only_drivable=True
+            verbose=False
         )
                     
         print("[Setup] Injecting Transit Routes into Travel Graph...")
         tg = TravelGraph(cg, config=self.config.get("travel_graph", {}), routes=self.routes)
         
         print("[Setup] Deploying Fleet...")
+        sim_cfg = self.config.get("simulation", {})
         jeeps = []
-        fleet_size = self.config.get("simulation", {}).get("jeep_capacity", 16) # wait, capacity is 16, fleet size from Mohring
-        
-        # In a real run, you might use FleetAllocator first to distribute jeeps.
-        # But if we just spawn a fixed amount per route for now:
-        fleet_per_route = self.config.get("F_FLEET_SIZE", 3)
-        jeep_speed_kmh = self.config.get("JEEP_SPEED", 10.0)  # km/h; one tick equals one second
-        jeep_capacity = self.config.get("simulation", {}).get("jeep_capacity", 16)
+        total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
+        jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0) 
+        jeep_capacity = sim_cfg.get("jeep_capacity", 16)
+        weight_tol = sim_cfg.get("weight_tolerance", 50.0)
+
+        jeeps_per_route = max(1, total_jeeps // len(self.routes))
 
         for route in self.routes:
-            for _ in range(fleet_per_route):
+            for _ in range(jeeps_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
                 jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
             routes=self.routes, 
-            weight_tolerance=self.config.get("WEIGHT_TOLERANCE", 50.0),
-            equidistant_spawn=self.config.get("EQUIDISTANT_SPAWN", True)
+            weight_tolerance=weight_tol,
+            equidistant_spawn=True
         )
         
         print("[Setup] Initializing Passenger Spawner...")
         passenger_generator = PassengerGenerator(
             tg=tg,
             sampler=sampler,
-            rate_per_100=self.config.get("SPAWN_RATE_PER_100", 50.0),
-            stdev=self.config.get("SPAWN_STDEV", 10.0),
-            speed=self.config.get("PASSENGER_SPEED", 5.0)  # km/h; one tick equals one second
+            rate_per_hour=sim_cfg.get("spawn_rate_per_hour", 40.0),
+            stdev=sim_cfg.get("spawn_stdev", 5.0),
+            speed=sim_cfg.get("passenger_speed_kmh", 5.0) 
         )
         
         return Simulation(
@@ -104,11 +87,9 @@ class SimulationSetup:
             bounds=self.bounds,
             jeep_system=jeep_system,
             passenger_generator=passenger_generator,
-            max_ticks=self.config.get("simulation", {}).get("num_ticks", 3600),
+            max_ticks=sim_cfg.get("num_ticks", 3600),
             beta_penalty=self.config.get("BETA_PENALTY", 2.0),
             alpha_std_penalty=self.config.get("ALPHA_STD_PENALTY", 0.5),
-            visualizer=visualizer,
-            vis_kwargs=vis_kwargs,
             config=self.config
         )
 
@@ -131,25 +112,6 @@ class SimulationResult:
 
     def __str__(self) -> str:
         return f"SimulationResult({self.sim_id}): fitness={self.fitness_score:.2f}, completed={self.metrics.get('completed_count', 0)}"
-
-    def export_map(self, area_query: str, out_dir: str, draw_routes: bool = True) -> None:
-        if not self.jeep_system: return
-        out_path = Path(out_dir)
-        out_path.mkdir(parents=True, exist_ok=True)
-        filename = out_path / f"map_sim_{self.sim_id}.png"
-        
-        # Pull bounds from route node bounding box dynamically for the static export
-        all_lats = [n.lat for r in self.jeep_system.routes for e in r.path for n in (e.start, e.end)]
-        all_lons = [n.lon for r in self.jeep_system.routes for e in r.path for n in (e.start, e.end)]
-        dyn_bounds = (min(all_lats), max(all_lats), min(all_lons), max(all_lons)) if all_lats else (0,0,0,0)
-
-        vis = StaticVisualizer(
-            bounds=dyn_bounds, 
-            title=f"Simulation Output: {self.sim_id}",
-            routes=self.jeep_system.routes if draw_routes else [],
-            jeeps=[], passengers=[], system_manager=None, mode="dark_nolabels"
-        )
-        vis.export(str(filename), scale_up=2)
 
     def export_report(self, out_dir: str) -> None:
         out_path = Path(out_dir)
@@ -181,8 +143,6 @@ class Simulation:
         max_ticks: int, 
         beta_penalty: float = 2.0, 
         alpha_std_penalty: float = 0.5, 
-        visualizer: bool = False, 
-        vis_kwargs: Optional[dict[str, Any]] = None, 
         config: Optional[dict] = None
     ) -> None:
         self.id: str = f"S{uuid.uuid4().hex}"
@@ -193,15 +153,12 @@ class Simulation:
         self.max_ticks: int = int(max_ticks)
         self.beta_penalty: float = float(beta_penalty)
         self.alpha_std_penalty: float = float(alpha_std_penalty)
-        self.visualizer_mode: bool = visualizer
-        self.vis_kwargs: dict[str, Any] = vis_kwargs or {}
         self.config: dict = config or {}
         
         self.current_tick: int = 0
         self.is_complete: bool = False
         self.speed_multiplier: int = 1 
         
-        # Synchronize passenger memory reference
         self.jeep_system.passengers = self.passenger_generator.passengers
 
     def __str__(self) -> str:
@@ -219,31 +176,10 @@ class Simulation:
             self.current_tick += 1
 
     def run(self) -> SimulationResult:
-        """Executes the main loop based on visualizer settings."""
-        if self.visualizer_mode:
-            self._run_with_visualizer()
-        else:
-            self._run_headless()
-        return self._calculate_results()
-
-    def _run_headless(self) -> None:
-        """Runs the simulation as fast as the CPU allows."""
+        """Executes the headless simulation loop until max_ticks is reached."""
         while not self.is_complete: 
             self.update()
-
-    def _run_with_visualizer(self) -> None:
-        """Hands off the simulation state to the GUI."""
-        vis = LiveVisualizer(
-            bounds=self.bounds, 
-            routes=self.jeep_system.routes,
-            jeeps=self.jeep_system.jeeps,
-            passengers=self.passenger_generator.passengers, 
-            system_manager=self,
-            **self.vis_kwargs
-        )
-        print(f"[*] Launching Visual Simulation for {self.max_ticks} ticks...")
-        vis.display()
-        self.is_complete = True 
+        return self._calculate_results()
 
     def _calculate_results(self) -> SimulationResult:
         """Computes fitness metrics for the Genetic Algorithm."""
@@ -282,40 +218,45 @@ class Simulation:
             jeep_system=self.jeep_system
         )
 
-    def export_snapshot(self, filename: str, draw_routes: bool = True, draw_jeeps: bool = True, draw_passengers: bool = True) -> None:
-        """Public API to take an async snapshot of the current state with specific layers."""
-        # Safely extract immutable coordinates so the main thread can keep running
-        pass_coords = [(p.curr_lon, p.curr_lat) for p in self.passenger_generator.passengers] if draw_passengers else []
-        jeep_data = [(j.route, j.curr_pos, j.heading, getattr(j, 'curr_passenger_count', 0)) for j in self.jeep_system.jeeps] if draw_jeeps else []
-        routes = self.jeep_system.routes if draw_routes else []
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, draw_jeeps: bool = True, draw_passengers: bool = True) -> Image.Image:
+        """Draws the dynamic simulation state onto the provided base map."""
+        if image.width != image.height:
+            raise ValueError("[SIMULATION] Visualization requires a square image.")
+            
+        img = image.copy()
         
-        # Fire and forget the rendering thread
-        thread = threading.Thread(
-            target=self._async_render_worker, 
-            args=(str(filename), pass_coords, jeep_data, routes), 
-            daemon=True
-        )
-        thread.start()
+        if draw_jeeps:
+            img = self.jeep_system.draw(context, img, radius=10)
+            
+        if draw_passengers:
+            for p in self.passenger_generator.passengers:
+                img = p.draw(context, img, size=6)
+                
+        return img
 
-    def _async_render_worker(self, filename: str, pass_coords: list, jeep_data: list, routes: list) -> None:
-        """Background worker that builds the image without blocking the CPU."""
-        dummy_passengers = [Passenger(start_pos=(lon, lat), journey=[routes[0].path[0]], speed=0) for lon, lat in pass_coords] if routes and routes[0].path else []
+    def draw_dashboard(self, image: Image.Image) -> Image.Image:
+        """Overlays core operational metrics onto the rendering frame."""
+        img = image.copy()
+        draw = ImageDraw.Draw(img)
         
-        dummy_jeeps = []
-        for route, pos, heading, count in jeep_data:
-            dj = Jeep(route=route, curr_pos=pos, speed=0)
-            dj.heading = heading
-            dj.curr_passenger_count = count
-            dummy_jeeps.append(dj)
-
-        vis = StaticVisualizer(
-            bounds=self.bounds,
-            title=Path(filename).stem,
-            routes=routes,
-            jeeps=dummy_jeeps,
-            passengers=dummy_passengers,
-            system_manager=None,
-            mode="dark_nolabels"
+        try:
+            font = ImageFont.truetype("arial.ttf", int(img.height * 0.025))
+        except IOError:
+            font = ImageFont.load_default()
+            
+        pad = int(img.height * 0.02)
+        active_passengers = len(self.passenger_generator.passengers)
+        completed_passengers = len(self.passenger_generator.archived_passengers)
+        
+        stats_text = (
+            f"TICK: {self.current_tick} / {self.max_ticks}\n"
+            f"JEEPS: {len(self.jeep_system.jeeps)}\n"
+            f"ACTIVE PAX: {active_passengers}\n"
+            f"DONE PAX: {completed_passengers}"
         )
-        vis.export(filename, scale_up=1)
-        print(f"[Async Export] Saved: {filename}")
+        
+        for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
+            draw.multiline_text((pad + dx, pad + dy), stats_text, fill="black", font=font)
+            
+        draw.multiline_text((pad, pad), stats_text, fill="white", font=font)
+        return img
