@@ -33,9 +33,17 @@ travel_graph:
   direct_wt: 0.0
   alight_wt: 0.0
 
-# SIMULATION PARAMETERS
+########## SIMULATION PARAMETERS ########################
 # Speed values consumed by the simulation-facing modules are in km/h, and one tick equals one second.
+
 simulation:
   mohring_sample_size: 2000
   jeep_capacity: 16
   num_ticks: 3600
+  jeep_speed_kmh: 40.0
+  passenger_speed_kmh: 5.0
+  num_routes: 5
+  total_allocatable_jeeps: 25
+  weight_tolerance: 50.0
+  spawn_rate_per_hour: 40.0
+  spawn_stdev: 5.0
