@@ -1,19 +1,9 @@
-"""Flow: routes + jeeps + DirectDemandSampler -> fleet allocation -> passenger boarding -> system update loop.
-
-FleetAllocator.allocate_by_mohring(total_fleet: int, routes: list[Route], sampler: DirectDemandSampler, tg: TravelGraph, mohring_sample_size: int = 2000) -> dict[Route, int] estimates route-level jeep counts.
-FleetAllocator.evaluate_allocation(allocation: dict[Route, int], sampler: DirectDemandSampler) -> dict[Route, dict[str, float]] reports demand/service balance.
-JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float = 50.0, equidistant_spawn: bool = True) -> None owns the active passenger list and system state.
-add_passenger(self, passenger: Passenger) -> None and update(self) -> None are the public system methods.
-
-Inputs: jeeps, routes, weight tolerance, demand sampler, and the travel graph.
-Outputs: fleet allocations, allocation reports, and a live system state.
-Imported modules used: Jeep, Passenger, Route, DirectDemandSampler, TravelGraph, plus math and random helpers.
-"""
-
 from __future__ import annotations
 import math
 from uuid import uuid4
 from typing import Optional, TYPE_CHECKING
+
+from PIL import Image
 
 if TYPE_CHECKING:
     from .direct_demand_sampler import DirectDemandSampler
@@ -232,3 +222,12 @@ class JeepSystem:
                                 p.current_jeep = jeep
                                 p.wait_ticks = 0
                                 jeep.modify_passenger(1)
+
+    def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, radius: int = 12) -> Image.Image:
+        if image.width != image.height:
+            raise ValueError("[JEEP SYSTEM] Visualization requires a square image.")
+        
+        for jeep in self.jeeps:
+            image = jeep.draw(context, image, radius)
+            
+        return image
