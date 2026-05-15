@@ -1,6 +1,6 @@
 """Flow: import utils -> access the jeepney routing toolkit.
 
-All speed values exposed by the simulation-facing modules are interpreted as km/h, and one simulation tick equals one second.
+All speed values exposed by the simulation-facing modules are interpreted as km/h, and one simulation tick equals seconds_per_tick seconds.
 
 Main modules exposed by this package:
 - node.py -> Node(lon: float, lat: float, layer: Optional[int] = None) -> None
@@ -8,10 +8,10 @@ Main modules exposed by this package:
 - city_graph.py -> CityGraph(bbox: Optional[tuple[float, float, float, float]] = None, name: str = "UrbanNetwork", landmarks: Optional[dict] = None, pbf_path: str = "...", use_api: bool = False, verbose: bool = False) -> None
 - route.py -> Route(city_graph: CityGraph, path: list[DirEdge], id: Optional[str] = None) -> None and RouteGenerator(city_graph: CityGraph, sampler: DirectDemandSampler, verbose: bool = False) -> None
 - travel_graph.py -> TravelGraph(cg: CityGraph, config: dict, routes: Optional[list[Route]] = None, route_generator: Optional[RouteGenerator] = None, n_routes: int = 5, n_points: int = 4) -> None
-- passenger.py -> Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None
-- passenger_generator.py -> PassengerGenerator(tg: TravelGraph, od_gen: TrafficAwareODGenerator, rate_per_100: float, stdev: float, speed: float = 5.0) -> None
+- passenger.py -> Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_time: int = 0, seconds_per_tick: int = 1) -> None
+- passenger_generator.py -> PassengerGenerator(tg: TravelGraph, od_gen: TrafficAwareODGenerator, rate_per_100: float, stdev: float, speed: float = 5.0, seconds_per_tick: int = 1) -> None
 - od_generator.py -> TrafficAwareODGenerator(cg: CityGraph, traffic_csv_path: str | Path, betas: Optional[dict[str, float]] = None) -> None
-- jeep.py -> Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None
+- jeep.py -> Jeep(route: Route, currPos: tuple[float, float], speed: float, max_capacity: int = 16, seconds_per_tick: int = 1) -> None
 - jeep_system.py -> JeepSystem(jeeps: list[Jeep], routes: list[Route], weight_tolerance: float = 50.0, equidistant_spawn: bool = True) -> None
 - pheromone.py -> PheromoneMatrix(all_edges: Iterable[Any], initial_tau: float = 1.0, rho: float = 0.1, q: float = 1000.0) -> None
 - local_search.py -> ACOLocalSearch(cg: Any, p_local: float = 0.5, base_window_size: int = 15) -> None

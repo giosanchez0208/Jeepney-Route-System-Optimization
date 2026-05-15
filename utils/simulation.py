@@ -53,6 +53,7 @@ class SimulationSetup:
         
         print("[Setup] Deploying Fleet...")
         sim_cfg = self.config.get("simulation", {})
+        seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
         jeeps = []
         total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
         jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0) 
@@ -64,7 +65,7 @@ class SimulationSetup:
         for route in self.routes:
             for _ in range(jeeps_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
-                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity))
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity, seconds_per_tick=seconds_per_tick))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
@@ -79,7 +80,8 @@ class SimulationSetup:
             sampler=sampler,
             rate_per_hour=sim_cfg.get("spawn_rate_per_hour", 40.0),
             stdev=sim_cfg.get("spawn_stdev", 5.0),
-            speed=sim_cfg.get("passenger_speed_kmh", 5.0) 
+            speed=sim_cfg.get("passenger_speed_kmh", 5.0),
+            seconds_per_tick=seconds_per_tick
         )
         
         return Simulation(
@@ -150,14 +152,20 @@ class Simulation:
         self.bounds: tuple[float, float, float, float] = bounds 
         self.jeep_system: JeepSystem = jeep_system
         self.passenger_generator: PassengerGenerator = passenger_generator
-        self.max_ticks: int = int(max_ticks)
         self.beta_penalty: float = float(beta_penalty)
         self.alpha_std_penalty: float = float(alpha_std_penalty)
         self.config: dict = config or {}
+        self.seconds_per_tick: int = int(self.config.get("simulation", {}).get("seconds_per_tick", 1))
+        if self.seconds_per_tick <= 0:
+            raise ValueError("[SIMULATION] seconds_per_tick must be positive.")
+        self.seconds_per_tick: int = config.get("simulation", {}).get("seconds_per_tick", 1)
+        self.max_ticks: int = int(max_ticks / self.seconds_per_tick)
+        self.simulated_time: int = 0
         
         self.current_tick: int = 0
         self.is_complete: bool = False
         self.speed_multiplier: int = 1 
+        self.simulated_time: int = 0
         
         self.jeep_system.passengers = self.passenger_generator.passengers
 
@@ -165,7 +173,6 @@ class Simulation:
         return f"Simulation({self.id}): tick={self.current_tick}/{self.max_ticks}, complete={self.is_complete}"
 
     def update(self) -> None:
-        """Advances the simulation state by the speed multiplier."""
         for _ in range(self.speed_multiplier):
             if self.current_tick >= self.max_ticks:
                 self.is_complete = True
@@ -174,6 +181,7 @@ class Simulation:
             self.passenger_generator.update()
             self.jeep_system.update()
             self.current_tick += 1
+            self.simulated_time += self.seconds_per_tick
 
     def run(self) -> SimulationResult:
         """Executes the headless simulation loop until max_ticks is reached."""
@@ -186,8 +194,8 @@ class Simulation:
         completed = self.passenger_generator.archived_passengers
         incomplete = self.passenger_generator.passengers
         
-        completed_times = [p.despawn_tick - p.spawn_tick for p in completed if p.despawn_tick is not None]
-        incomplete_penalties = [self.current_tick - p.spawn_tick + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
+        completed_times = [p.despawn_time - p.spawn_time for p in completed if p.despawn_time is not None]
+        incomplete_penalties = [self.simulated_time - p.spawn_time + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
         
         n_completed = len(completed_times)
         if n_completed > 0:
@@ -212,7 +220,8 @@ class Simulation:
                 "std_commute_time": std_commute, 
                 "sum_completed_time": sum_completed, 
                 "sum_penalty_time": sum_incomplete, 
-                "ticks_simulated": self.current_tick
+                "ticks_simulated": self.current_tick,
+                "simulated_time": self.simulated_time
             },
             recorded_paths=all_recorded_paths,
             jeep_system=self.jeep_system
@@ -281,6 +290,7 @@ class SimulationEvaluator:
         self.spawn_rate = self.sim_cfg.get("spawn_rate_per_hour", 40.0)
         self.spawn_stdev = self.sim_cfg.get("spawn_stdev", 5.0)
         self.pax_speed = self.sim_cfg.get("passenger_speed_kmh", 5.0)
+        self.seconds_per_tick = self.sim_cfg.get("seconds_per_tick", 1)
         
         self.max_ticks = self.sim_cfg.get("num_ticks", 3600)
         self.beta_penalty = float(config.get("BETA_PENALTY", 2.0))
@@ -293,7 +303,7 @@ class SimulationEvaluator:
         for route in routes:
             for _ in range(jeeps_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
-                jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity))
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity, seconds_per_tick=self.seconds_per_tick))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
@@ -307,7 +317,8 @@ class SimulationEvaluator:
             sampler=self.demand_sampler,
             rate_per_hour=self.spawn_rate,
             stdev=self.spawn_stdev,
-            speed=self.pax_speed
+            speed=self.pax_speed,
+            seconds_per_tick=self.seconds_per_tick
         )
         
         sim = Simulation(
