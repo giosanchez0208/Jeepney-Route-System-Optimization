@@ -260,3 +260,68 @@ class Simulation:
             
         draw.multiline_text((pad, pad), stats_text, fill="white", font=font)
         return img
+    
+class SimulationEvaluator:
+    """
+    A persistent factory for rapidly evaluating multiple route configurations 
+    against a static city and demand model. Designed for GA loops.
+    """
+    def __init__(self, config: dict, city_graph: CityGraph, travel_graph: TravelGraph, demand_sampler: DirectDemandSampler) -> None:
+        self.config = config
+        self.city_graph = city_graph
+        self.travel_graph = travel_graph
+        self.demand_sampler = demand_sampler
+        
+        self.sim_cfg = config.get("simulation", {})
+        self.total_jeeps = self.sim_cfg.get("total_allocatable_jeeps", 25)
+        self.jeep_speed = self.sim_cfg.get("jeep_speed_kmh", 40.0)
+        self.jeep_capacity = self.sim_cfg.get("jeep_capacity", 16)
+        self.weight_tol = self.sim_cfg.get("weight_tolerance", 50.0)
+        
+        self.spawn_rate = self.sim_cfg.get("spawn_rate_per_hour", 40.0)
+        self.spawn_stdev = self.sim_cfg.get("spawn_stdev", 5.0)
+        self.pax_speed = self.sim_cfg.get("passenger_speed_kmh", 5.0)
+        
+        self.max_ticks = self.sim_cfg.get("num_ticks", 3600)
+        self.beta_penalty = float(config.get("BETA_PENALTY", 2.0))
+        self.alpha_std_penalty = float(config.get("ALPHA_STD_PENALTY", 0.5))
+
+    def evaluate(self, routes: list['Route'], verbose: bool = False) -> SimulationResult:
+        jeeps = []
+        jeeps_per_route = max(1, self.total_jeeps // len(routes)) if routes else 0
+        
+        for route in routes:
+            for _ in range(jeeps_per_route):
+                start_coord = (route.path[0].start.lon, route.path[0].start.lat)
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity))
+                
+        jeep_system = JeepSystem(
+            jeeps=jeeps, 
+            routes=routes, 
+            weight_tolerance=self.weight_tol,
+            equidistant_spawn=True
+        )
+        
+        passenger_generator = PassengerGenerator(
+            tg=self.travel_graph,
+            sampler=self.demand_sampler,
+            rate_per_hour=self.spawn_rate,
+            stdev=self.spawn_stdev,
+            speed=self.pax_speed
+        )
+        
+        sim = Simulation(
+            city_query=self.config.get("city_graph", {}).get("name", "City"),
+            bounds=self.city_graph.get_bounds(),
+            jeep_system=jeep_system,
+            passenger_generator=passenger_generator,
+            max_ticks=self.max_ticks,
+            beta_penalty=self.beta_penalty,
+            alpha_std_penalty=self.alpha_std_penalty,
+            config=self.config
+        )
+        
+        if verbose:
+            print(f"[EVALUATOR] Executing headless simulation for {self.max_ticks} ticks...")
+            
+        return sim.run()

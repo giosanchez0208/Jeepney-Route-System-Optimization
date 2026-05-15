@@ -47,3 +47,11 @@ simulation:
   weight_tolerance: 50.0
   spawn_rate_per_hour: 2000.0 # remember to sensitivity test this parameter, as it is the most critical and least empirically grounded. It is a city-wide aggregate rate that will be spatially distributed by the DDM.
   spawn_stdev: 15.0
+
+  ########## OPTIMIZATION PARAMETERS ########################
+  # [TODO] RESEARCH AND JUSTIFY THESE VALUES
+optimization:
+  initial_tau: 1.0
+  rho: 0.1
+  q: 1000.0
+  default_jeep_weight: 1.0
