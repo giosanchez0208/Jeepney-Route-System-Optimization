@@ -1,17 +1,3 @@
-"""Flow: route + start position + speed (km/h) -> moving jeep state -> passenger and node queries.
-
-Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None initializes the vehicle, snaps it to the nearest route edge, and keeps heading plus passenger counts in sync with movement.
-update(self) -> None advances the jeep.
-nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]], modifyPassenger(self, amt: int) -> None, returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge], and getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float] are the main query methods.
-
-Inputs: a Route, a starting coordinate pair, and speed in km/h. One update tick equals one second.
-Outputs: updated position, heading, and per-frame node crossings.
-Imported modules used: Node, Route, DirEdge, and _getDistance.
-"""
-
-# To test run - "python jeep_testing.py"
-# To validate/diagnostic run - jeep_diagnostic.ipynb
-
 from __future__ import annotations
 import math
 from uuid import uuid4
