@@ -50,6 +50,7 @@ BETA_PENALTY: 2.0
 
 # ==========================================
 # PHASE A: FINAL VALIDATION SIMULATION
+# Speed values are km/h and one tick equals one second.
 # ==========================================
 MAX_TICKS: 3600
 PASSENGER_SPEED: 5.0

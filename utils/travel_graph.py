@@ -31,8 +31,6 @@ class TravelGraph:
         self.direct_wt = config.get("direct_wt", 0.0)
         self.alight_wt = config.get("alight_wt", 0.0)
 
-        self.alight_wt = config.get("alight_wt", 0.0)
-
         if routes is not None:
             self.routes: list[Route] = routes
         else:
@@ -315,7 +313,7 @@ class TravelGraph:
         JOURNEY_EDGE_WIDTH = 5
         JOURNEY_TRANSITION_RADIUS = 3
 
-        ROUTE_PALETTE = ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#C77DFF"]
+        ROUTE_PALETTE = ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#C77DFF", "#E63946", "#F4A261", "#E76F51", "#2A9D8F", "#0077B6", "#9C27B0", "#FF9F1C", "#00B4D8", "#388E3C", "#F50057", "#FF5252", "#FB8500", "#4CAF50", "#1E88E5", "#7B1FA2", "#D90429", "#FFB703", "#0096C7", "#00C9A7", "#3F51B5", "#673AB7", "#C51162", "#795548", "#607D8B", "#455A64"]
         EDGE_COLORS = {
             "SW": "#7EB8DA", "EW": "#7ECFC0",
             "WA": "#FFB74D", "AL": "#81C784", "TR": "#E57373", "DI": "#CE93D8",

@@ -1,11 +1,13 @@
 """Flow: import utils -> access the jeepney routing toolkit.
 
+All speed values exposed by the simulation-facing modules are interpreted as km/h, and one simulation tick equals one second.
+
 Main modules exposed by this package:
 - node.py -> Node(lon: float, lat: float, layer: Optional[int] = None) -> None
 - directed_edge.py -> DirEdge(start: Node, end: Node, is_drivable: bool, weight: int = 1, id: Optional[str] = None, next_edges: Optional[list[str]] = None, type: Optional[str] = None) -> None
-- city_graph.py -> CityGraph(query: str) -> None
-- route.py -> Route(city_graph: CityGraph, path: Optional[list[DirEdge]] = None, od_gen: Optional[TrafficAwareODGenerator] = None) -> None
-- travel_graph.py -> StaticTravelGraph(cg: CityGraph) -> None and TravelGraph(stg: StaticTravelGraph, routes: list[Route]) -> None
+- city_graph.py -> CityGraph(bbox: Optional[tuple[float, float, float, float]] = None, name: str = "UrbanNetwork", landmarks: Optional[dict] = None, pbf_path: str = "...", use_api: bool = False, verbose: bool = False) -> None
+- route.py -> Route(city_graph: CityGraph, path: list[DirEdge], id: Optional[str] = None) -> None and RouteGenerator(city_graph: CityGraph, sampler: DirectDemandSampler, verbose: bool = False) -> None
+- travel_graph.py -> TravelGraph(cg: CityGraph, config: dict, routes: Optional[list[Route]] = None, route_generator: Optional[RouteGenerator] = None, n_routes: int = 5, n_points: int = 4) -> None
 - passenger.py -> Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None
 - passenger_generator.py -> PassengerGenerator(tg: TravelGraph, od_gen: TrafficAwareODGenerator, rate_per_100: float, stdev: float, speed: float = 5.0) -> None
 - od_generator.py -> TrafficAwareODGenerator(cg: CityGraph, traffic_csv_path: str | Path, betas: Optional[dict[str, float]] = None) -> None

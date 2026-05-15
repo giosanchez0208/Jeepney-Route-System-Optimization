@@ -4,7 +4,7 @@ PassengerGenerator(tg: TravelGraph, sampler: DirectDemandSampler, rate_per_100: 
 update(self) -> None advances the schedule and lifecycle.
 get_all_generated_journeys(self) -> list[list[DirEdge]] exposes every planned path for pheromone use.
 
-Inputs: a TravelGraph, DirectDemandSampler, spawn rate, deviation, and speed.
+Inputs: a TravelGraph, DirectDemandSampler, spawn rate, deviation, and walking speed in km/h. One update tick equals one second.
 Outputs: active passengers, archived passengers, and generated journey lists.
 Imported modules used: DirEdge, Passenger, TravelGraph, DirectDemandSampler, and random.
 """
@@ -42,7 +42,8 @@ class PassengerGenerator:
         self.sampler: 'DirectDemandSampler' = sampler
         self.rate_per_100: float = float(rate_per_100)
         self.stdev: float = float(stdev)
-        self.speed: float = float(speed)
+        self.speed_kmh: float = float(speed)
+        self.speed: float = self.speed_kmh
         
         self.passengers: list[Passenger] = []
         self.new_passengers_this_tick: list[Passenger] = []
@@ -81,7 +82,7 @@ class PassengerGenerator:
                 p = Passenger(
                     start_pos=(origin.lon, origin.lat), 
                     journey=journey, 
-                    speed=self.speed,
+                    speed=self.speed_kmh,
                     spawn_tick=self.tick_counter
                 )
                 self.passengers.append(p)
