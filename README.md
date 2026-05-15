@@ -292,6 +292,10 @@ Errors:
 - `SimulationSetup` raises when routes are missing.
 - `SimulationResult.from_file()` raises when the saved payload cannot be parsed.
 
+**Example output:**
+
+![Simulation](documentation/sample_simulation.gif)
+
 ### `visualization.py`
 
 `visualization.py` collects the reusable render helpers.
