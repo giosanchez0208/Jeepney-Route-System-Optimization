@@ -26,7 +26,7 @@ class PassengerGenerator:
         self, 
         tg: 'TravelGraph', 
         sampler: 'DirectDemandSampler', 
-        rate_per_100: float, 
+        rate_per_hour: float, 
         stdev: float, 
         speed: float = 5.0
     ) -> None:
@@ -34,13 +34,13 @@ class PassengerGenerator:
             raise ValueError("[PASSENGER GENERATOR] TravelGraph cannot be None.")
         if not sampler:
             raise ValueError("[PASSENGER GENERATOR] DirectDemandSampler cannot be None.")
-        if rate_per_100 < 0:
-            raise ValueError("[PASSENGER GENERATOR] rate_per_100 cannot be negative.")
+        if rate_per_hour < 0:
+            raise ValueError("[PASSENGER GENERATOR] rate_per_hour cannot be negative.")
 
         self.id: str = f"PG{uuid4().hex}"
         self.tg: 'TravelGraph' = tg
         self.sampler: 'DirectDemandSampler' = sampler
-        self.rate_per_100: float = float(rate_per_100)
+        self.rate_per_hour: float = float(rate_per_hour)
         self.stdev: float = float(stdev)
         self.speed_kmh: float = float(speed)
         self.speed: float = self.speed_kmh
@@ -59,7 +59,7 @@ class PassengerGenerator:
 
     def _generate_schedule(self) -> None:
         """Calculates a randomized distribution of passenger spawns for the next 100 ticks."""
-        spawn_count = int(max(0, random.gauss(self.rate_per_100, self.stdev)))
+        spawn_count = int(max(0, random.gauss(self.rate_per_hour / 3600, self.stdev)))
         self.spawn_schedule = [0] * 100
         
         for _ in range(spawn_count):

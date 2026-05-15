@@ -101,7 +101,14 @@ class Passenger:
                 self.curr_lat = current_edge.end.lat
                 self.curr_lon = current_edge.end.lon
                 self._edge_idx += 1
-            case "AL" | "TR" | "DI":
+            case "TR":
+                self.curr_lat = current_edge.end.lat
+                self.curr_lon = current_edge.end.lon
+                self._edge_idx += 1
+                self.state = "WAITING"
+            case "RI":
+                self.state = "WAITING"
+            case "AL" | "DI":
                 self.curr_lat = current_edge.end.lat
                 self.curr_lon = current_edge.end.lon
                 self._edge_idx += 1
