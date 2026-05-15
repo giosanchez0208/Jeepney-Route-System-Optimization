@@ -88,10 +88,9 @@ class PassengerGenerator:
         for p in self.passengers:
             p.update()
             
-            if p.state == "DONE":
-                if p.despawn_time is None:
-                    p.despawn_time = self.simulated_time
-                    p.despawn_tick = p.despawn_time
+            if p.state == Passenger.DONE:
+                if p.despawn_tick is None:
+                    p.despawn_tick = self.simulated_time
                 self.archived_passengers.append(p)
             else:
                 active_passengers.append(p)

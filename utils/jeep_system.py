@@ -1,4 +1,5 @@
 from __future__ import annotations
+import collections
 import math
 from uuid import uuid4
 from typing import Optional, TYPE_CHECKING
@@ -31,7 +32,6 @@ class FleetAllocator:
         if total_fleet <= 0:
             raise ValueError("[FLEET ALLOCATOR] Total fleet must be positive.")
 
-        # Estimate route demand using DirectDemandSampler
         route_demand: dict[Route, float] = {r: 0.0 for r in routes}
         
         for _ in range(mohring_sample_size):
@@ -39,7 +39,6 @@ class FleetAllocator:
             dest = sampler.get_point()
             journey = tg.findShortestJourney(origin, dest)
             if journey:
-                # Count usage of RI edges for routes
                 for edge in journey:
                     if edge.id.startswith("RI_R"):
                         try:
@@ -48,7 +47,6 @@ class FleetAllocator:
                         except (IndexError, ValueError):
                             continue
 
-        # Mohring effect: allocate fleet proportional to the square root of demand
         route_tau: dict[Route, float] = {r: math.sqrt(max(1.0, demand)) for r, demand in route_demand.items()}
             
         total_sqrt_tau = sum(route_tau.values())
@@ -82,8 +80,6 @@ class FleetAllocator:
                 cls._route_length_cache[route.id] = length_sum
             
             length_sum = cls._route_length_cache[route.id]
-            
-            # Simple placeholder demand for report since we don't recalculate tau here
             demand = count * count  
             
             load_factor = demand / count if count > 0 else float('inf')
@@ -96,6 +92,7 @@ class FleetAllocator:
                 "headway": headway,
             }
         return report
+
 
 class JeepSystem:
     def __init__(
@@ -115,20 +112,27 @@ class JeepSystem:
         self.id: str = f"JS{uuid4().hex}"
         self.jeeps: list[Jeep] = jeeps
         self.routes: list[Route] = routes
+        
+        # Maintain total list for metrics, active set for execution loops.
         self.passengers: list[Passenger] = []
+        self.active_passengers: set[Passenger] = set()
+        
         self.weight_tolerance: float = float(weight_tolerance)
+        
+        self.waiting_passengers: dict[tuple[float, float], set[Passenger]] = collections.defaultdict(set)
+        self._waiting_coord_by_passenger: dict[Passenger, tuple[float, float]] = {}
+        self._route_indices: dict[Route, int] = {route: idx for idx, route in enumerate(self.routes)}
 
         if equidistant_spawn:
             self._space_jeeps_equidistantly()
 
     def __str__(self) -> str:
-        return f"JeepSystem({self.id}): {len(self.jeeps)} jeeps on {len(self.routes)} routes, {len(self.passengers)} active passengers"
+        return f"JeepSystem({self.id}): {len(self.jeeps)} jeeps on {len(self.routes)} routes, {len(self.active_passengers)} active passengers"
 
     def _space_jeeps_equidistantly(self) -> None:
-        route_jeeps: dict[Route, list[Jeep]] = {r: [] for r in self.routes}
+        route_jeeps: dict[Route, list[Jeep]] = collections.defaultdict(list)
         for j in self.jeeps:
-            if j.route in route_jeeps:
-                route_jeeps[j.route].append(j)
+            route_jeeps[j.route].append(j)
                 
         for route, assigned_jeeps in route_jeeps.items():
             if not assigned_jeeps:
@@ -167,67 +171,114 @@ class JeepSystem:
         if not isinstance(passenger, Passenger):
             raise TypeError("[JEEP SYSTEM] Must add a Passenger object.")
         self.passengers.append(passenger)
+        self.active_passengers.add(passenger)
+        
+        if passenger.state == Passenger.WAITING:
+            self._register_waiting_passenger(passenger)
+        elif passenger.state == Passenger.RIDING and passenger.current_jeep:
+            passenger.current_jeep.onboard_passengers.add(passenger)
+
+    def _register_waiting_passenger(self, passenger: Passenger) -> None:
+        new_coord = (passenger.curr_lat, passenger.curr_lon)
+        prev_coord = self._waiting_coord_by_passenger.get(passenger)
+        
+        if prev_coord == new_coord:
+            return
+            
+        if prev_coord is not None:
+            prev_set = self.waiting_passengers.get(prev_coord)
+            if prev_set is not None:
+                prev_set.discard(passenger)
+                if not prev_set:
+                    del self.waiting_passengers[prev_coord]
+                    
+        self.waiting_passengers[new_coord].add(passenger)
+        self._waiting_coord_by_passenger[passenger] = new_coord
+
+    def _unregister_waiting_passenger(self, passenger: Passenger, coord: Optional[tuple[float, float]] = None) -> None:
+        known_coord = self._waiting_coord_by_passenger.pop(passenger, None)
+        target_coord = known_coord if coord is None else coord
+        
+        if target_coord is None:
+            return
+            
+        target_set = self.waiting_passengers.get(target_coord)
+        if target_set is not None:
+            target_set.discard(passenger)
+            if not target_set:
+                del self.waiting_passengers[target_coord]
 
     def update(self) -> None:
-        # Spatial queues mapping coordinate tuples to active passengers
-        waiting_queue: dict[tuple[float, float], list[Passenger]] = {}
-        jeep_riders: dict[Jeep, list[Passenger]] = {}
+        completed_passengers = []
 
-        # 1. Update all passengers and sort them into immediate lookup maps
-        for p in self.passengers:
+        for p in self.active_passengers:
+            prev_state = p.state
+            prev_jeep = p.current_jeep
+            prev_wait_coord = (p.curr_lat, p.curr_lon) if prev_state == Passenger.WAITING else None
+            
             p.update()
-            if p.state == "WAITING":
-                coord = (p.curr_lat, p.curr_lon)
-                if coord not in waiting_queue:
-                    waiting_queue[coord] = []
-                waiting_queue[coord].append(p)
-            elif p.state == "RIDING" and p.current_jeep:
-                if p.current_jeep not in jeep_riders:
-                    jeep_riders[p.current_jeep] = []
-                jeep_riders[p.current_jeep].append(p)
 
-        # 2. Update jeeps and handle boarding/alighting via direct queue lookups
+            if p.state == Passenger.DONE:
+                completed_passengers.append(p)
+
+            if prev_state == Passenger.WAITING and p.state != Passenger.WAITING:
+                self._unregister_waiting_passenger(p, prev_wait_coord)
+            elif p.state == Passenger.WAITING:
+                self._register_waiting_passenger(p)
+
+            if prev_state == Passenger.RIDING and prev_jeep and (p.state != Passenger.RIDING or p.current_jeep is not prev_jeep):
+                prev_jeep.onboard_passengers.discard(p)
+            if p.state == Passenger.RIDING and p.current_jeep and (prev_state != Passenger.RIDING or p.current_jeep is not prev_jeep):
+                p.current_jeep.onboard_passengers.add(p)
+                
+        for p in completed_passengers:
+            self.active_passengers.discard(p)
+
         for jeep in self.jeeps:
             jeep.update()
             passed_nodes_data = jeep.nodes_passed_this_frame()
             
             if not passed_nodes_data:
                 continue
-                
+            
             for node, route in passed_nodes_data:
-                try:
-                    route_idx = self.routes.index(route)
-                except ValueError:
+                route_idx = self._route_indices.get(route)
+                if route_idx is None:
                     continue
                 
-                # Check for alighting passengers in this specific jeep
-                riders = jeep_riders.get(jeep, [])
-                if riders:
-                    still_riding = []
-                    for p in riders:
-                        target_node = p.get_target_alight_node()
-                        if target_node and target_node.lat == node.lat and target_node.lon == node.lon:
-                            p.state = "WALKING"
-                            p.current_jeep = None
-                            p.curr_lat = node.lat
-                            p.curr_lon = node.lon
-                            p.complete_ride()
-                            jeep.modify_passenger(-1)
-                        else:
-                            still_riding.append(p)
-                    jeep_riders[jeep] = still_riding
-                            
-                # Check for boarding passengers at this exact node coordinate
-                coord = (node.lat, node.lon)
-                waiting_at_node = waiting_queue.get(coord, [])
+                # Alighting phase
+                for p in tuple(jeep.onboard_passengers):
+                    target_node = p.get_target_alight_node()
+                    if target_node and target_node.lat == node.lat and target_node.lon == node.lon:
+                        p.state = Passenger.WALKING
+                        p.current_jeep = None
+                        p.curr_lat = node.lat
+                        p.curr_lon = node.lon
+                        p.complete_ride()
+                        jeep.modify_passenger(-1)
+                        jeep.onboard_passengers.discard(p)
                 
+                coord = (node.lat, node.lon)
+                waiting_at_node = self.waiting_passengers.get(coord)
+                
+                # Boarding phase
                 if waiting_at_node and jeep.curr_passenger_count < jeep.passenger_max:
-                    still_waiting = []
-                    for p in waiting_at_node:
-                        if jeep.curr_passenger_count >= jeep.passenger_max:
-                            still_waiting.append(p)
+                    for p in tuple(waiting_at_node):
+                        if p.state != Passenger.WAITING:
+                            self._waiting_coord_by_passenger.pop(p, None)
+                            waiting_at_node.discard(p)
                             continue
-                            
+
+                        current_coord = (p.curr_lat, p.curr_lon)
+                        if current_coord != coord:
+                            self._waiting_coord_by_passenger.pop(p, None)
+                            waiting_at_node.discard(p)
+                            self._register_waiting_passenger(p)
+                            continue
+
+                        if jeep.curr_passenger_count >= jeep.passenger_max:
+                            break
+                        
                         target_route_idx = p.get_target_route_idx()
                         boarded = False
                         
@@ -241,23 +292,18 @@ class JeepSystem:
                                     planned_weight = p.get_planned_ride_weight()
                                     if alt_weight <= planned_weight + self.weight_tolerance:
                                         boarded = True
-                                        
+                        
                         if boarded:
-                            p.state = "RIDING"
+                            p.state = Passenger.RIDING
                             p.current_jeep = jeep
                             p.wait_ticks = 0
                             jeep.modify_passenger(1)
-                            # Append to riders in case they alight at another node passed THIS same frame
-                            if jeep not in jeep_riders:
-                                jeep_riders[jeep] = []
-                            jeep_riders[jeep].append(p)
-                        else:
-                            still_waiting.append(p)
+                            jeep.onboard_passengers.add(p)
+                            self._waiting_coord_by_passenger.pop(p, None)
+                            waiting_at_node.discard(p)
                             
-                    if still_waiting:
-                        waiting_queue[coord] = still_waiting
-                    else:
-                        del waiting_queue[coord]
+                    if not waiting_at_node:
+                        del self.waiting_passengers[coord]
 
     def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, radius: int = 12) -> Image.Image:
         if image.width != image.height:

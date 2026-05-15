@@ -35,6 +35,8 @@ class Jeep:
         self.passenger_max: int = max_capacity
         self.curr_passenger_count: int = 0
         self.seconds_per_tick: int = seconds_per_tick
+        
+        self.onboard_passengers: set = set()
 
         self._edge_idx: int = 0
         self._edge_progress: float = 0.0

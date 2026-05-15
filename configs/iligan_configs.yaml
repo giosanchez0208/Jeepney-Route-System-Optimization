@@ -34,19 +34,19 @@ travel_graph:
 
 ########## SIMULATION PARAMETERS ########################
 # Speed values consumed by the simulation-facing modules are in km/h, and one tick equals one second.
-
+# demo values for quick evaluation. These should be replaced with empirically justified values for final testing and deployment.
 simulation:
   mohring_sample_size: 2000
   jeep_capacity: 16
-  num_ticks: 7200             # 2 simulated hours
+  num_ticks: 360
   jeep_speed_kmh: 40.0
   passenger_speed_kmh: 5.0
-  num_routes: 5
-  total_allocatable_jeeps: 25
+  num_routes: 20
+  total_allocatable_jeeps: 100
   weight_tolerance: 50.0
-  spawn_rate_per_hour: 1000.0 # Restored for heavy network stress testing
+  spawn_rate_per_hour: 300.0
   spawn_stdev: 15.0
-  seconds_per_tick: 15        # Process 15 seconds of physics per frame
+  seconds_per_tick: 30
 
 ########## OPTIMIZATION PARAMETERS ########################
 # [TODO] RESEARCH AND JUSTIFY THESE VALUES
