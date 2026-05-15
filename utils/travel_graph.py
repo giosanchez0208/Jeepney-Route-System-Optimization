@@ -7,6 +7,9 @@ from .directed_edge import DirEdge, _getDistance
 from .city_graph import CityGraph
 from .route import Route, RouteGenerator
 
+import numpy as np
+from scipy.spatial import cKDTree
+
 from PIL import Image
 from typing import Optional
 
@@ -67,6 +70,12 @@ class TravelGraph:
             n3 = Node(n.lon, n.lat)
             n3.layer = 3
             self.l3_nodes[coord] = n3
+
+        self._l1_coords = np.array(list(self.l1_nodes.keys()))
+        self._l1_kdtree = cKDTree(self._l1_coords)
+        
+        self._l3_coords = np.array(list(self.l3_nodes.keys()))
+        self._l3_kdtree = cKDTree(self._l3_coords)
 
         sw_c = count(1)
         ew_c = count(1)
@@ -191,15 +200,25 @@ class TravelGraph:
         for e in self.travel_graph:
             e.weight = saved_weights[e]
 
+    def _snap_node(self, target: Node, layer: int) -> Node:
+        coords = np.array([[target.lon, target.lat]])
+        if layer == 1:
+            _, idx = self._l1_kdtree.query(coords)
+            matched_coord = tuple(self._l1_coords[idx[0]])
+            return self.l1_nodes[matched_coord]
+        elif layer == 3:
+            _, idx = self._l3_kdtree.query(coords)
+            matched_coord = tuple(self._l3_coords[idx[0]])
+            return self.l3_nodes[matched_coord]
+        else:
+            raise ValueError("[TRAVEL GRAPH] Invalid snap layer. Must be 1 or 3.")
+        
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
         if start is None or end is None:
             raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
             
-        l1_start = self.l1_nodes.get((start.lon, start.lat))
-        l3_end = self.l3_nodes.get((end.lon, end.lat))
-
-        if not l1_start or not l3_end:
-            raise ValueError("[TRAVEL GRAPH] Start or end node not found in TravelGraph.")
+        l1_start = self._snap_node(start, 1)
+        l3_end = self._snap_node(end, 3)
 
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
@@ -251,11 +270,11 @@ class TravelGraph:
         return sum(e.getLength() for e in path if e.id[:2] in {"SW", "RI", "EW"})
 
     def calculateJourneyWeight(self, start: Node, end: Node) -> float:
-        l1_start = self.l1_nodes.get((start.lon, start.lat))
-        l3_end = self.l3_nodes.get((end.lon, end.lat))
-
-        if not l1_start or not l3_end:
+        if start is None or end is None:
             return 0.0
+            
+        l1_start = self._snap_node(start, 1)
+        l3_end = self._snap_node(end, 3)
 
         frontier: list[tuple[float, float, int, Node]] = []
         sequence = count()
