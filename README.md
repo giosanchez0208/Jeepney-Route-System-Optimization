@@ -1,6 +1,6 @@
 # Jeepney Route System Optimization
 
-This README covers only:
+This README covers:
 
 - `utils/node.py`
 - `utils/directed_edge.py`
@@ -8,66 +8,64 @@ This README covers only:
 - `utils/route.py`
 - `utils/travel_graph.py`
 - `utils/city_graph.py`
-- `diagnostic.ipynb`
+- `utils/jeep.py`
+- `utils/jeep_system.py`
+- `utils/passenger.py`
+- `utils/passenger_generator.py`
+- `utils/simulation.py`
+- `utils/visualization.py`
+- `diagnostic_core.ipynb`
+- `diagnostic_sim.ipynb`
 - `configs/iligan_configs.yaml`
-
-It documents the actual control flow, the design rationale already recorded in the notebook and config, and the academic references that appear in those sources.
 
 ## Module notes
 
 ### `node.py`
 
-`Node` is the atomic spatial object.
+`Node` is the immutable spatial atom used everywhere else.
 
-- Stores immutable `lon` and `lat`.
-- Accepts optional `layer` values from `0` to `3`, or `None`.
-- Rejects invalid coordinates, non-finite values, and illegal layer values.
-- Generates a stable UUID-based identity.
-- Draws itself onto square PIL images using a coordinate context.
+- Holds a stable `lon`, `lat`, and optional `layer`.
+- Gives the graph code a fixed coordinate identity to stitch against.
 
-The point of the class is strict state control. The graph code depends on coordinate stability, so `lon` and `lat` cannot be reassigned after construction.
+Errors:
+
+- Raises on invalid longitude, latitude, or layer values.
 
 ### `directed_edge.py`
 
-`DirEdge` represents a directed connection between two `Node` objects.
+`DirEdge` turns two nodes into a directional graph step.
 
-- Validates that endpoints exist and are not identical.
-- Enforces layer-compatible geometry.
-- Computes length with a haversine distance helper.
-- Classifies edges by layer transition:
-  - `start_walk`
-  - `wait`
-  - `ride`
-  - `alight`
-  - `transfer`
-  - `end_walk`
-  - `direct`
-- Draws itself on square PIL images.
-- Exposes `_connect()` and `_stitch()` helpers for internal graph wiring.
+- Encodes legal movement between layers.
+- Computes edge length.
+- Powers the low-level stitching used by route and journey builders.
 
-This file is the topology guardrail. If a route violates its layer logic here, every downstream module inherits garbage.
+Errors:
 
-`_stitch()` deserves an explicit note: it builds adjacency links by matching an edge's terminal node to the next edge's starting node on the same coordinate-layer tuple. That is the fast, deterministic bridge between raw edge lists and a traversable graph.
+- Raises when endpoints are missing, identical, or layer-incompatible.
 
 ### `city_graph.py`
 
-`CityGraph` builds the street network and shortest-path layer.
+`CityGraph` builds the drivable street backbone from OSM data.
 
-- Loads a road graph from a PBF file or Overpass API.
-- Caches the binary graph for repeat runs.
-- Converts OSM nodes into `Node` objects.
-- Converts arterial road segments into paired `DirEdge` objects.
-- Filters drivable edges using highway tags for arterial classes only.
-- Stitches edges into adjacency chains.
-- Computes shortest paths with an A*-style search that only expands drivable edges.
-- Supports landmark snapping and bounding-box drawing.
-- Supports `inject_toy_data()` for synthetic test graphs.
+- Loads and caches the road network.
+- Converts usable street segments into `Node` and `DirEdge` objects.
+- Finds shortest drivable corridors for route generation.
 
-Reasoning:
+Why it matters:
 
-- Transit design on an unpruned road graph explodes combinatorially.
-- Jeepneys operate as corridor services, not arbitrary point-to-point taxis.
-- The arterial skeleton is the correct search space for route generation.
+- It narrows the design problem to the corridor network jeepneys can actually serve.
+- It is the source graph for route generation and demand sampling.
+
+Errors:
+
+- Raises on invalid bounding boxes.
+- Raises if toy data is injected into an already populated graph.
+- Raises when the start and end nodes are not part of the graph or no path exists.
+
+**Example outputs:**
+
+![All edges in Iligan](documentation/iligan_city_graph_all_edges.png)
+![Drivable edges only](documentation/iligan_city_graph_drivable_only.png)
 
 ```mermaid
 flowchart TD
@@ -82,141 +80,87 @@ flowchart TD
 
 ### `direct_demand_sampler.py`
 
-`DirectDemandSampler` turns sparse traffic observations into a sampling distribution over nodes.
+`DirectDemandSampler` turns sparse traffic observations into node sampling.
 
-Main pieces:
+- Blends TomTom flow data with structural centrality.
+- Uses IDW to fill gaps where traffic data is missing.
+- Builds alias tables for constant-time sampling.
 
-- `DDMConfig` stores the model constants and sample-size parameters.
-- `TrafficClient` isolates TomTom API calls and cache handling.
-- `DirectDemandSampler` computes the final node sampler.
+Why it matters:
 
-Pipeline:
+- It feeds route generation and passenger spawning with realistic origins and destinations.
+- It avoids pretending the network has complete demand coverage.
 
-1. Filter the usable nodes.
-2. Compute a Cochran sample size for API calls.
-3. Select query centroids.
-4. Pull empirical TomTom flow weights.
-5. Impute missing nodes with inverse distance weighting.
-6. Blend traffic and centrality with the Direct Demand Model.
-7. Build Walker alias tables for constant-time sampling.
+Errors:
 
-Core equations:
+- Raises when `TOMTOM_API_KEY` is missing.
+- Raises when there are no valid or drivable nodes to sample.
+- Raises when cached sampler state does not match the current city graph.
+- Raises when the final DDM probability mass is zero.
 
-```text
-n0 = (Z^2 p q) / e^2
-n  = n0 / (1 + (n0 - 1) / N)
+**Example outputs:**
 
-P_i ∝ W_i^alpha * C_i^beta
+![DDM all nodes](documentation/iligan_ddm_all_nodes.png)
+![DDM drivable only](documentation/iligan_ddm_drivable_only.png)
 
-W_j = Σ(V_i / d_ij^p) / Σ(1 / d_ij^p)
-```
-
-The config currently uses:
-
-- `alpha = 0.6`
-- `beta = 0.4`
-- `idw_power = 2.0`
-
-That split is deliberate. The repo notes treat observed traffic as the stronger signal and structural centrality as the weaker prior.
-
-Operational constraints:
-
-- Requires `TOMTOM_API_KEY` in the environment.
-- Caches API responses and sampler state in `utils/.cache`.
-- Falls back to baseline weights only when no empirical traffic is available.
-
-```mermaid
-flowchart LR
-    N[Nodes in CityGraph] --> F[Filter nodes]
-    F --> K[Betweenness centrality]
-    F --> S[Select query centroids]
-    S --> T[TomTom Flow API]
-    T --> I[IDW imputation]
-    K --> P[DDM weighting]
-    I --> P
-    P --> A[Walker alias table]
-    A --> R["O(1) sampling"]
-```
+The current config keeps `alpha = 0.6`, `beta = 0.4`, and `idw_power = 2.0`, so traffic stays the stronger signal.
 
 ### `route.py`
 
-`Route` is the final closed transit loop.
+`Route` is the closed layer-2 loop that represents a jeepney line.
 
-This file is functionally complete, but it is still being refactored into cleaner validation and construction boundaries. The current behavior is already stable enough to use.
-
-- Rejects empty paths.
-- Requires all path edges to stay on layer 2.
-- Requires exactly one outgoing layer-2 edge per edge in the path.
-- Rejects broken contiguity before the route is accepted.
-- Requires closed loops for generated and coordinate-snapped routes.
-- Deduplicates consecutive snapped nodes before path construction.
-- Auto-generates a route color.
+- Rejects broken or non-layer-2 paths.
+- Keeps routes contiguous and closed.
+- Serves as the backbone for both `TravelGraph` and `JeepSystem`.
 
 `RouteGenerator`:
 
-- Pulls demand points from `DirectDemandSampler`.
-- Uses `CityGraph.find_shortest_path()` between successive sampled nodes.
-- Closes the loop back to the first node.
-- Promotes the resulting path into a layer-2 route.
-- Treats shortest-path output as the demo route backbone, not as a free-form path.
+- Samples demand points from `DirectDemandSampler`.
+- Uses `CityGraph.find_shortest_path()` to link them.
+- Converts the result into a closed route.
 
 `route_from_coords()`:
 
-- Snaps coordinate sequences to the nearest `CityGraph` nodes with a KDTree.
-- Removes duplicate consecutive nodes.
-- Rebuilds the closed route from the snapped points.
+- Snaps coordinates back to graph nodes.
+- Removes duplicate consecutive nodes before rebuilding the route.
 
-`RouteSystem` is only a drawing container for multiple routes.
+Why it matters:
 
-```mermaid
-flowchart TD
-    A[DirectDemandSampler] --> B[Sampled nodes]
-    B --> C[CityGraph.find_shortest_path]
-    C --> D[Base path segments]
-    D --> E[Promote to layer 2]
-    E --> F[Validate route safeguards]
-    F --> G[Closed Route]
-    H[route_from_coords] --> I[Snap coords to nodes]
-    I --> J[Drop duplicate consecutive nodes]
-    J --> K[Shortest-path reconstruction]
-    K --> F
+- It produces the actual route objects that downstream journey planning and simulation consume.
 
-    subgraph Safeguards
-        S1[Reject empty paths]
-        S2[Require layer 2 only]
-        S3[Require contiguous edges]
-        S4[Require one outgoing layer-2 edge per edge]
-        S5[Require closed loops]
-    end
+Errors:
 
-    F --> S1
-    F --> S2
-    F --> S3
-    F --> S4
-    F --> S5
-```
+- Raises on empty, non-`DirEdge`, broken, branching, or non-closed paths.
+- Raises when route generation cannot find a drivable path or the coordinates collapse to one node.
+
+**Example output:**
+
+![Sample route](documentation/sample_route.png)
 
 ### `travel_graph.py`
 
-`TravelGraph` lifts `CityGraph` and candidate `Route` objects into a layered journey network for passenger-level trip search.
+`TravelGraph` lifts routes into a passenger journey graph.
 
-- Requires a `CityGraph` and config, plus either prebuilt `routes` or a `RouteGenerator`.
-- Clones graph coordinates into layer 1 (start walk) and layer 3 (end walk) node sets.
-- Builds route-scoped layer-2 nodes so ride segments remain tied to their own route.
-- Constructs typed edge families:
-  - `SW`: start-walk edges on layer 1.
-  - `WA`: wait edges from layer 1 to route layer 2.
-  - `RI`: ride edges inside route layer 2.
-  - `AL`: alight edges from layer 2 to layer 3.
-  - `TR`: transfer edges from layer 3 back to layer 2.
-  - `EW`: end-walk edges on layer 3.
-  - `DI`: direct layer-1 to layer-3 links.
-- Applies generalized-cost weights from config (`walk_wt`, `ride_wt`, `wait_wt`, `transfer_wt`, `direct_wt`, `alight_wt`).
-- Runs A*-style search in `findShortestJourney()` from `(lon, lat, layer 1)` to `(lon, lat, layer 3)`.
-- Exposes both distance and weighted-cost summaries via `calculateJourneyDistance()` and `calculateJourneyWeight()`.
-- Supports 2D rendering through `draw()` and 3D journey rendering through `create_3d()`.
+- Creates walking, waiting, riding, alighting, transfer, and direct edges.
+- Keeps ride edges scoped to the correct route.
+- Solves passenger trips with weighted shortest-path search.
 
-The stitching logic is the critical safeguard: route layer-2 edges are stitched per route index so journeys cannot "teleport" between unrelated loops that happen to share coordinates.
+Why it matters:
+
+- It is the layer that turns origin-destination pairs into full journeys for passengers.
+- It is the bridge between route design and simulation behavior.
+
+Errors:
+
+- Raises when the city graph or config is missing.
+- Raises when neither routes nor a route generator is provided.
+- Raises when route generation fails.
+- Raises when snap layers are invalid or journey endpoints are missing.
+
+**Example outputs:**
+
+![Sample journey](documentation/sample_journey.png)
+![Travel graph](documentation/iligan_travel_graph.gif)
 
 ```mermaid
 flowchart TD
@@ -245,34 +189,154 @@ flowchart TD
     O --> P[Journey edge sequence]
 ```
 
-### `diagnostic.ipynb`
+### `jeep.py`
 
-This notebook is the reasoning log and validation harness.
+`Jeep` is the moving vehicle that follows a route and carries passengers.
 
-It documents:
+- Advances along the route one tick at a time.
+- Tracks heading, position, and passenger count.
+- Returns the traversed nodes so `JeepSystem` can handle boarding and alighting.
 
-- node validation behavior
-- graph initialization checks
-- direct-demand sampling assumptions
-- Cochran sample-size justification
-- the use of TomTom traffic data
+Why it matters:
 
-It also keeps the explanatory text that the README now condenses into stable reference prose.
+- It is the live vehicle actor used in the simulation and the visualizer.
+
+Errors:
+
+- Raises when the route is invalid, the speed is negative, or the current position is malformed.
+- `return_path_from()` returns an empty list if the requested nodes are not on the route.
+
+**Example output:**
+
+![Jeep travelling route](documentation/sample_jeep_travelling_route.gif)
+
+### `jeep_system.py`
+
+`JeepSystem` coordinates the fleet and passenger interactions.
+
+- Spreads jeeps across routes.
+- Handles boarding and alighting at matching nodes.
+- Lets a passenger board an alternate jeep only when the route weight stays within tolerance.
+
+Why it matters:
+
+- It is the operational layer that turns static routes into service behavior.
+- It decides when a passenger actually boards, rides, and gets dropped off.
+
+Errors:
+
+- Raises when the jeep list, route list, or weight tolerance is invalid.
+
+`FleetAllocator` lives in the same file and provides the demand-based fleet split used by the larger workflow.
+
+**Example output:**
+
+![Jeep system](documentation/sample_jeep_system.gif)
+
+### `passenger.py`
+
+`Passenger` is the rider state machine.
+
+- Tracks walking, waiting, riding, and done states.
+- Stores the planned journey and timing metrics.
+- Exposes route and alighting queries for `JeepSystem`.
+
+Why it matters:
+
+- It is the object that lets the simulation measure commute time and incomplete trips.
+
+Errors:
+
+- Raises when the start position is malformed, speed is negative, or the journey is empty.
+- Raises when coordinate setters receive non-numeric values.
+
+### `passenger_generator.py`
+
+`PassengerGenerator` turns the demand sampler into live passengers.
+
+- Samples origin-destination pairs.
+- Converts valid journeys into active passengers.
+- Archives completed passengers for later analysis.
+
+Why it matters:
+
+- It is the bridge from demand modeling into the simulation loop.
+- It also preserves every generated journey for later pheromone or route analysis.
+
+Errors:
+
+- Raises when the travel graph or sampler is missing.
+- Raises when the spawn rate is negative.
+- If a sampled journey cannot be found, the passenger is simply not spawned.
+
+**Example output:**
+
+![Passenger generation](documentation/sample_passenger_generation.gif)
+
+### `simulation.py`
+
+`Simulation` runs the full system end to end.
+
+- Builds the city graph, sampler, travel graph, fleet, and passenger generator.
+- Advances the simulation tick by tick.
+- Scores the run and packages the result data.
+- Draws the live map and dashboard overlay.
+
+Why it matters:
+
+- This is the notebook-ready endpoint for understanding the system from setup to simulation output.
+- If you want a thorough picture of everything up to simulation, this is the module to read alongside `diagnostic_sim.ipynb`.
+
+Errors:
+
+- `SimulationSetup` raises when routes are missing.
+- `SimulationResult.from_file()` raises when the saved payload cannot be parsed.
+
+### `visualization.py`
+
+`visualization.py` collects the reusable render helpers.
+
+- `compile_to_gif()` turns a frame list into a GIF byte stream.
+- `draw_all()` layers multiple drawables onto one base image.
+- `LiveTkinterVisualizer` provides a live Tkinter playback loop.
+
+Why it matters:
+
+- It turns the simulation and graph objects into outputs you can show in the README, notebook, or thesis defense.
+
+Errors:
+
+- `compile_to_gif()` raises on empty frames, invalid frame types, non-positive FPS, or export paths outside `utils/.cache/`.
+
+### `diagnostic_core.ipynb`
+
+This notebook is the reasoning log and validation harness for the core spatial modules.
+
+- Documents node validation behavior.
+- Shows graph initialization checks.
+- Explains direct-demand sampling assumptions and TomTom usage.
+
+### `diagnostic_sim.ipynb`
+
+This notebook extends the core workflow into the simulation stack.
+
+- Connects route output to jeep movement, passenger spawning, and service behavior.
+- Shows the live visualizer and GIF compilation flow.
+- Is the best notebook if you want a full understanding of the system up to simulation.
 
 ### `configs/iligan_configs.yaml`
 
-This config file is the project baseline for Iligan City.
+This file is the Iligan City baseline configuration.
 
-- Sets the bounding box for the active network footprint.
-- Names the landmarks used for contextual rendering.
-- Stores the DDM parameters.
-- Records the reasoning behind the `alpha` / `beta` split.
+- Fixes the city footprint and landmarks.
+- Stores the DDM, travel graph weights, and simulation parameters.
+- Documents why traffic is weighted more heavily than centrality.
 
-The comments in this file are part of the documentation. They explain why the model is constrained to the current operational area and why the demand sampler weights traffic more heavily than centrality.
+The `travel_graph` weights are generalized-cost penalties, while the `simulation` section controls route count, fleet size, capacity, speeds, and spawn rate.
 
 ## Design rationale
 
-- The network footprint matches the active Iligan jeepney system. That keeps comparisons against the current baseline meaningful.
+- The network footprint matches the active Iligan jeepney system, so comparisons stay grounded.
 - Route generation uses a pruned arterial graph because the design problem is not solved on residential dead ends.
 - The demand sampler uses sparse TomTom observations instead of pretending full coverage exists.
 - Centrality is a structural prior, not the primary signal.
