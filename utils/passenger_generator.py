@@ -58,8 +58,10 @@ class PassengerGenerator:
         return f"PassengerGenerator({self.id}): active={len(self.passengers)}, archived={len(self.archived_passengers)}, tick={self.tick_counter}"
 
     def _generate_schedule(self) -> None:
-        """Calculates a randomized distribution of passenger spawns for the next 100 ticks."""
-        spawn_count = int(max(0, random.gauss(self.rate_per_hour / 3600, self.stdev)))
+        # Scale the per-second rate to match the 100-tick schedule window
+        expected_per_100_ticks = (self.rate_per_hour / 3600.0) * 100.0
+        
+        spawn_count = int(max(0, random.gauss(expected_per_100_ticks, self.stdev)))
         self.spawn_schedule = [0] * 100
         
         for _ in range(spawn_count):
