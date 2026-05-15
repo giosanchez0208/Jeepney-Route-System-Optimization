@@ -14,7 +14,7 @@ from typing import Optional
 from PIL import Image, ImageDraw
 
 from .node import Node
-from .directed_edge import DirEdge
+from .directed_edge import DirEdge, EDGE_SW, EDGE_WA, EDGE_RI, EDGE_AL, EDGE_TR, EDGE_EW, EDGE_DI
 from .jeep import Jeep
 
 _KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
@@ -67,10 +67,10 @@ class Passenger:
         
         running_cost = 0.0
         for i, edge in enumerate(self.journey):
-            running_cost += getattr(edge, 'weight', edge.getLength())
+            running_cost += getattr(edge, 'weight', edge._length)
             self._cost_prefix_sums[i + 1] = running_cost
             
-            if edge.id.startswith("RI_R"):
+            if edge._edge_type == EDGE_RI:
                 try:
                     self._target_route_indices[i] = int(edge.id.split("_")[1][1:])
                 except (IndexError, ValueError):
@@ -82,11 +82,11 @@ class Passenger:
         current_ride_weight = 0.0
         for i in range(len(self.journey) - 1, -1, -1):
             edge = self.journey[i]
-            if edge.id.startswith(("AL", "TR")):
+            if edge._edge_type in (EDGE_AL, EDGE_TR):
                 last_alight = edge.start
                 current_ride_weight = 0.0
-            elif edge.id.startswith("RI"):
-                current_ride_weight += getattr(edge, 'weight', edge.getLength())
+            elif edge._edge_type == EDGE_RI:
+                current_ride_weight += getattr(edge, 'weight', edge._length)
                 
             self._target_alight_nodes[i] = last_alight
             self._planned_ride_weights[i] = current_ride_weight
@@ -134,27 +134,26 @@ class Passenger:
             return
             
         current_edge = self.journey[self._edge_idx]
-        edge_prefix = current_edge.id[:2]
+        etype = current_edge._edge_type
         
-        match edge_prefix:
-            case "WA":
-                self.state = Passenger.WAITING
-                self.curr_lat = current_edge.end.lat
-                self.curr_lon = current_edge.end.lon
-                self._edge_idx += 1
-            case "TR":
-                self.curr_lat = current_edge.end.lat
-                self.curr_lon = current_edge.end.lon
-                self._edge_idx += 1
-                self.state = Passenger.WAITING
-            case "RI":
-                self.state = Passenger.WAITING
-            case "AL" | "DI":
-                self.curr_lat = current_edge.end.lat
-                self.curr_lon = current_edge.end.lon
-                self._edge_idx += 1
-            case "SW" | "EW":
-                self._walk()
+        if etype == EDGE_WA:
+            self.state = Passenger.WAITING
+            self.curr_lat = current_edge.end.lat
+            self.curr_lon = current_edge.end.lon
+            self._edge_idx += 1
+        elif etype == EDGE_TR:
+            self.curr_lat = current_edge.end.lat
+            self.curr_lon = current_edge.end.lon
+            self._edge_idx += 1
+            self.state = Passenger.WAITING
+        elif etype == EDGE_RI:
+            self.state = Passenger.WAITING
+        elif etype in (EDGE_AL, EDGE_DI):
+            self.curr_lat = current_edge.end.lat
+            self.curr_lon = current_edge.end.lon
+            self._edge_idx += 1
+        elif etype in (EDGE_SW, EDGE_EW):
+            self._walk()
             
     def _walk(self) -> None:
         distance_to_move = self.speed_kmph * _KMH_TO_METERS_PER_TICK * self.seconds_per_tick
@@ -162,10 +161,10 @@ class Passenger:
         while distance_to_move > 0 and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
             
-            if not current_edge.id.startswith(("SW", "EW")):
+            if current_edge._edge_type not in (EDGE_SW, EDGE_EW):
                 break
                 
-            edge_length = current_edge.getLength()
+            edge_length = current_edge._length
             remaining_edge_dist = edge_length - self._edge_progress
             
             if distance_to_move >= remaining_edge_dist:
@@ -200,9 +199,9 @@ class Passenger:
         
     def complete_ride(self) -> None:
         while self._edge_idx < len(self.journey):
-            edge_id = self.journey[self._edge_idx].id
+            edge = self.journey[self._edge_idx]
             self._edge_idx += 1
-            if edge_id.startswith(("AL", "TR")):
+            if edge._edge_type in (EDGE_AL, EDGE_TR):
                 break
 
     def get_remaining_time(self) -> float:
@@ -213,7 +212,7 @@ class Passenger:
             
         if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
-            edge_len = current_edge.getLength()
+            edge_len = current_edge._length
             if edge_len > 0:
                 edge_weight = getattr(current_edge, 'weight', edge_len)
                 ratio = self._edge_progress / edge_len
