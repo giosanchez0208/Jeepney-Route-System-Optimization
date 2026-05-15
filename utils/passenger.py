@@ -8,9 +8,7 @@ Inputs: a start position, a DirEdge journey, movement speed in km/h, spawn time,
 Outputs: updated passenger state plus route and timing queries.
 Imported modules used: Node, DirEdge, Jeep, Optional, and PIL.Image.
 """
-
 from __future__ import annotations
-import math
 from uuid import uuid4
 from typing import Optional
 from PIL import Image, ImageDraw
@@ -22,6 +20,18 @@ from .jeep import Jeep
 _KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
 
 class Passenger:
+    WALKING = 0
+    WAITING = 1
+    RIDING = 2
+    DONE = 3
+    
+    _STATE_NAMES = {
+        WALKING: "WALKING",
+        WAITING: "WAITING",
+        RIDING: "RIDING",
+        DONE: "DONE"
+    }
+
     def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_time: int = 0, seconds_per_tick: int = 1) -> None:
         if not isinstance(start_pos, tuple) or len(start_pos) != 2:
             raise TypeError("[PASSENGER] start_pos must be a tuple of (lon, lat).")
@@ -36,9 +46,9 @@ class Passenger:
         self.journey: list[DirEdge] = journey
         self.speed_kmph: float = float(speed)
         self.speed: float = self.speed_kmph
-        self.seconds_per_tick: int = int(seconds_per_tick)
+        self.seconds_per_tick: int = seconds_per_tick
         
-        self.state: str = "WALKING"  # WALKING, WAITING, RIDING, DONE
+        self.state: int = Passenger.WALKING  
         self.wait_ticks: int = 0
         
         self._edge_idx: int = 0
@@ -46,28 +56,56 @@ class Passenger:
         
         self.current_jeep: Optional[Jeep] = None
         
-        # Metric Tracking
-        self.spawn_time: int = int(spawn_time)
-        self.spawn_tick: int = self.spawn_time
-        self.despawn_time: Optional[int] = None
-        self.despawn_tick: Optional[int] = self.despawn_time
-        self.total_path_cost: float = sum(getattr(edge, 'weight', edge.getLength()) for edge in self.journey)
+        # Track metric using the corrected variable name
+        self.spawn_tick: int = spawn_time
+        self.despawn_tick: Optional[int] = None
+
+        self._cost_prefix_sums: list[float] = [0.0] * (len(self.journey) + 1)
+        self._target_alight_nodes: list[Optional[Node]] = [None] * len(self.journey)
+        self._planned_ride_weights: list[float] = [0.0] * len(self.journey)
+        self._target_route_indices: list[Optional[int]] = [None] * len(self.journey)
+        
+        running_cost = 0.0
+        for i, edge in enumerate(self.journey):
+            running_cost += getattr(edge, 'weight', edge.getLength())
+            self._cost_prefix_sums[i + 1] = running_cost
+            
+            if edge.id.startswith("RI_R"):
+                try:
+                    self._target_route_indices[i] = int(edge.id.split("_")[1][1:])
+                except (IndexError, ValueError):
+                    pass
+
+        self.total_path_cost: float = running_cost
+        
+        last_alight = None
+        current_ride_weight = 0.0
+        for i in range(len(self.journey) - 1, -1, -1):
+            edge = self.journey[i]
+            if edge.id.startswith(("AL", "TR")):
+                last_alight = edge.start
+                current_ride_weight = 0.0
+            elif edge.id.startswith("RI"):
+                current_ride_weight += getattr(edge, 'weight', edge.getLength())
+                
+            self._target_alight_nodes[i] = last_alight
+            self._planned_ride_weights[i] = current_ride_weight
 
     def __str__(self) -> str:
         return (
             f"Passenger({self.id}): pos=({self.curr_lat:.4f}, {self.curr_lon:.4f}), "
-            f"state={self.state}, speed={self.speed_kmph} km/h, progress={self._edge_idx}/{len(self.journey)} edges"
+            f"state={Passenger._STATE_NAMES.get(self.state, 'UNKNOWN')}, speed={self.speed_kmph} km/h, progress={self._edge_idx}/{len(self.journey)} edges"
         )
 
     @property
     def curr_lat(self) -> float:
-        if self.state == "RIDING" and self.current_jeep:
+        if self.state == Passenger.RIDING and self.current_jeep:
             return self.current_jeep.curr_pos[1]
         return self._lat
 
     @property
     def curr_lon(self) -> float:
-        if self.state == "RIDING" and self.current_jeep:
+        if self.state == Passenger.RIDING and self.current_jeep:
             return self.current_jeep.curr_pos[0]
         return self._lon
 
@@ -85,14 +123,14 @@ class Passenger:
 
     def update(self) -> None:
         match self.state:
-            case "DONE" | "RIDING":
+            case Passenger.DONE | Passenger.RIDING:
                 return
-            case "WAITING":
+            case Passenger.WAITING:
                 self.wait_ticks += 1
                 return
 
         if self._edge_idx >= len(self.journey):
-            self.state = "DONE"
+            self.state = Passenger.DONE
             return
             
         current_edge = self.journey[self._edge_idx]
@@ -100,7 +138,7 @@ class Passenger:
         
         match edge_prefix:
             case "WA":
-                self.state = "WAITING"
+                self.state = Passenger.WAITING
                 self.curr_lat = current_edge.end.lat
                 self.curr_lon = current_edge.end.lon
                 self._edge_idx += 1
@@ -108,9 +146,9 @@ class Passenger:
                 self.curr_lat = current_edge.end.lat
                 self.curr_lon = current_edge.end.lon
                 self._edge_idx += 1
-                self.state = "WAITING"
+                self.state = Passenger.WAITING
             case "RI":
-                self.state = "WAITING"
+                self.state = Passenger.WAITING
             case "AL" | "DI":
                 self.curr_lat = current_edge.end.lat
                 self.curr_lon = current_edge.end.lon
@@ -146,33 +184,19 @@ class Passenger:
                     self.curr_lon = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
 
     def get_target_route_idx(self) -> Optional[int]:
-        if self.state != "WAITING" or self._edge_idx >= len(self.journey):
+        if self.state != Passenger.WAITING or self._edge_idx >= len(self.journey):
             return None
-        edge = self.journey[self._edge_idx]
-        if edge.id.startswith("RI_R"):
-            return int(edge.id.split("_")[1][1:])
-        return None
+        return self._target_route_indices[self._edge_idx]
         
     def get_target_alight_node(self) -> Optional[Node]:
-        idx = self._edge_idx
-        while idx < len(self.journey):
-            edge = self.journey[idx]
-            if edge.id.startswith(("AL", "TR")):
-                return edge.start
-            idx += 1
-        return None
+        if self._edge_idx >= len(self.journey):
+            return None
+        return self._target_alight_nodes[self._edge_idx]
         
     def get_planned_ride_weight(self) -> float:
-        weight = 0.0
-        idx = self._edge_idx
-        while idx < len(self.journey):
-            edge = self.journey[idx]
-            if edge.id.startswith("RI"):
-                weight += getattr(edge, 'weight', edge.getLength())
-            elif edge.id.startswith(("AL", "TR")):
-                break
-            idx += 1
-        return weight
+        if self._edge_idx >= len(self.journey):
+            return 0.0
+        return self._planned_ride_weights[self._edge_idx]
         
     def complete_ride(self) -> None:
         while self._edge_idx < len(self.journey):
@@ -182,20 +206,18 @@ class Passenger:
                 break
 
     def get_remaining_time(self) -> float:
-        if self.state == "DONE" or self._edge_idx >= len(self.journey):
+        if self.state == Passenger.DONE or self._edge_idx >= len(self.journey):
             return 0.0
             
-        remaining_cost = 0.0
-        for idx in range(self._edge_idx, len(self.journey)):
-            edge = self.journey[idx]
-            remaining_cost += getattr(edge, 'weight', edge.getLength())
+        remaining_cost = self.total_path_cost - self._cost_prefix_sums[self._edge_idx]
             
-        if self.state == "WALKING" and self._edge_idx < len(self.journey):
+        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
-            edge_len = getattr(current_edge, 'weight', current_edge.getLength())
+            edge_len = current_edge.getLength()
             if edge_len > 0:
-                ratio = self._edge_progress / current_edge.getLength()
-                remaining_cost -= (edge_len * ratio)
+                edge_weight = getattr(current_edge, 'weight', edge_len)
+                ratio = self._edge_progress / edge_len
+                remaining_cost -= (edge_weight * ratio)
                 
         return max(0.0, remaining_cost)
 
@@ -203,7 +225,7 @@ class Passenger:
         if image.width != image.height:
             raise ValueError("[PASSENGER] Visualization requires a square image.")
 
-        if self.state == "RIDING":
+        if self.state == Passenger.RIDING:
             return image
 
         tl_lon, tl_lat = context[0]
@@ -218,7 +240,6 @@ class Passenger:
         x = image.width * (self.curr_lon - tl_lon) / lon_range
         y = image.height * (tl_lat - self.curr_lat) / lat_range
         
-        # Clamping
         x = max(0, min(image.width - 1, int(x)))
         y = max(0, min(image.height - 1, int(y)))
 
