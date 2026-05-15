@@ -1,10 +1,10 @@
-"""Flow: route + start position + speed -> moving jeep state -> passenger and node queries.
+"""Flow: route + start position + speed (km/h) -> moving jeep state -> passenger and node queries.
 
 Jeep(route: Route, currPos: tuple[float, float], speed: float) -> None initializes the vehicle, snaps it to the nearest route edge, and keeps heading plus passenger counts in sync with movement.
 update(self) -> None advances the jeep.
 nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]], modifyPassenger(self, amt: int) -> None, returnPathFrom(self, start_node: Node, end_node: Node) -> list[DirEdge], and getWeightIf(self, start_node: Node, end_node: Node) -> Optional[float] are the main query methods.
 
-Inputs: a Route, a starting coordinate pair, and speed.
+Inputs: a Route, a starting coordinate pair, and speed in km/h. One update tick equals one second.
 Outputs: updated position, heading, and per-frame node crossings.
 Imported modules used: Node, Route, DirEdge, and _getDistance.
 """
@@ -21,6 +21,8 @@ from .node import Node
 from .route import Route
 from .directed_edge import DirEdge, _getDistance
 from PIL import Image, ImageDraw
+
+_KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
 
 class Jeep:
     def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float, max_capacity: int = 16) -> None:
@@ -58,7 +60,7 @@ class Jeep:
             f"Jeep({self.id}): route={self.route.id}, "
             f"pos=({self.curr_pos[0]:.4f}, {self.curr_pos[1]:.4f}), heading={self.heading:.2f}°, "
             f"passengers={self.curr_passenger_count}/{self.passenger_max}, "
-            f"speed={self.speed} m/s"
+            f"speed={self.speed_kmph} km/h"
         )
 
     def _snap_to_route(self) -> None:
@@ -87,7 +89,7 @@ class Jeep:
 
     def update(self) -> None:
         self.curr_nodes_passed = []
-        distance_to_move: float = self.speed
+        distance_to_move: float = self.speed_kmph * _KMH_TO_METERS_PER_TICK
         
         while distance_to_move > 0:
             current_edge: DirEdge = self.route.path[self._edge_idx]
@@ -118,7 +120,9 @@ class Jeep:
         if not self.curr_nodes_passed:
             self.curr_nodes_passed = None
 
-    def nodes_passed_this_frame(self) -> Optional[list[tuple[Node, Route]]]:
+    def nodes_passed_this_frame(self, format_as_str: bool = False) -> Optional[list[tuple[Node, Route]]]:
+        if format_as_str:
+            return [f"{node} ({route.id})" for node, route in self.curr_nodes_passed] if self.curr_nodes_passed else None
         return self.curr_nodes_passed
 
     def modify_passenger(self, amt: int) -> None:
@@ -185,14 +189,19 @@ class Jeep:
         x = max(0, min(image.width - 1, int(x)))
         y = max(0, min(image.height - 1, int(y)))
 
-        angle = math.radians(self.heading)
+        # Convert the internal compass-style heading into screen coordinates.
+        # PIL uses x-right / y-down, so the rendering angle needs to be flipped.
+        angle = math.radians(-self.heading - 90.0)
 
-        # Draw a triangle representing the jeep
+        # Draw a small isosceles triangle instead of a symmetric marker so the
+        # vehicle direction reads more clearly in motion.
+        rear_offset = math.radians(150.0)
+        rear_radius = radius * 0.75
         front = (x + radius * math.cos(angle), y + radius * math.sin(angle))
-        left = (x + radius * math.cos(angle + 2.5), y + radius * math.sin(angle + 2.5))
-        right = (x + radius * math.cos(angle - 2.5), y + radius * math.sin(angle - 2.5))
+        left = (x + rear_radius * math.cos(angle + rear_offset), y + rear_radius * math.sin(angle + rear_offset))
+        right = (x + rear_radius * math.cos(angle - rear_offset), y + rear_radius * math.sin(angle - rear_offset))
 
-        draw.polygon([front, left, right], fill=self.designated_color, outline="white")
+        draw.polygon([front, left, right], fill=self.designated_color, outline="black")
 
         # Draw number of passengers on top
         text = str(self.curr_passenger_count)

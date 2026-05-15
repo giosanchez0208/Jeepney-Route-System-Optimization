@@ -7,7 +7,7 @@ export_map(self, area_query: str, out_dir: str, draw_routes: bool = True) -> Non
 Simulation(city_query: str, bounds: tuple[float, float, float, float], jeep_system: JeepSystem, passenger_generator: PassengerGenerator, max_ticks: int, beta_penalty: float = 2.0, alpha_std_penalty: float = 0.5, visualizer: bool = False, vis_kwargs: Optional[dict[str, Any]] = None, config: Optional[dict] = None) -> None runs the simulation.
 update(self) -> None, run(self) -> SimulationResult, and export_snapshot(self, filename: str, draw_routes: bool = True, draw_jeeps: bool = True, draw_passengers: bool = True) -> None are the main runtime methods.
 
-Inputs: city query, configuration, routes, and runtime components.
+Inputs: city query, configuration, routes, and runtime components. All speed values are interpreted as km/h and one simulation tick equals one second.
 Outputs: live simulation state plus serialized results, maps, and reports.
 Imported modules used: CityGraph, TravelGraph,
 DirectDemandSampler, DDMConfig, PassengerGenerator, JeepSystem, Route, Jeep,
@@ -75,13 +75,13 @@ class SimulationSetup:
         # In a real run, you might use FleetAllocator first to distribute jeeps.
         # But if we just spawn a fixed amount per route for now:
         fleet_per_route = self.config.get("F_FLEET_SIZE", 3)
-        jeep_speed = self.config.get("JEEP_SPEED", 10.0)
+        jeep_speed_kmh = self.config.get("JEEP_SPEED", 10.0)  # km/h; one tick equals one second
         jeep_capacity = self.config.get("simulation", {}).get("jeep_capacity", 16)
-        
+
         for route in self.routes:
             for _ in range(fleet_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
-                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed, max_capacity=jeep_capacity))
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
@@ -96,7 +96,7 @@ class SimulationSetup:
             sampler=sampler,
             rate_per_100=self.config.get("SPAWN_RATE_PER_100", 50.0),
             stdev=self.config.get("SPAWN_STDEV", 10.0),
-            speed=self.config.get("PASSENGER_SPEED", 5.0)
+            speed=self.config.get("PASSENGER_SPEED", 5.0)  # km/h; one tick equals one second
         )
         
         return Simulation(

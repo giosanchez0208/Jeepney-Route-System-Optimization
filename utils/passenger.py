@@ -1,10 +1,10 @@
-"""Flow: start position + journey -> passenger state machine -> walking, waiting, riding, done.
+"""Flow: start position + journey + speed (km/h) -> passenger state machine -> walking, waiting, riding, done.
 
 Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None tracks live coordinates, state transitions, ride planning, and remaining travel time.
 update(self) -> None advances the passenger state.
 get_target_route_idx(self) -> Optional[int], get_target_alight_node(self) -> Optional[Node], get_planned_ride_weight(self) -> float, complete_ride(self) -> None, and get_remaining_time(self) -> float are the query/control methods.
 
-Inputs: a start position, a DirEdge journey, movement speed, and spawn tick.
+Inputs: a start position, a DirEdge journey, movement speed in km/h, and spawn tick. One update tick equals one second.
 Outputs: updated passenger state plus route and timing queries.
 Imported modules used: Node, DirEdge, Jeep, Optional, and PIL.Image.
 """
@@ -19,6 +19,8 @@ from .node import Node
 from .directed_edge import DirEdge
 from .jeep import Jeep
 
+_KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
+
 class Passenger:
     def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None:
         if not isinstance(start_pos, tuple) or len(start_pos) != 2:
@@ -32,7 +34,8 @@ class Passenger:
         self._lon: float = float(start_pos[0])
         self._lat: float = float(start_pos[1])
         self.journey: list[DirEdge] = journey
-        self.speed: float = float(speed)
+        self.speed_kmph: float = float(speed)
+        self.speed: float = self.speed_kmph
         
         self.state: str = "WALKING"  # WALKING, WAITING, RIDING, DONE
         self.wait_ticks: int = 0
@@ -50,7 +53,7 @@ class Passenger:
     def __str__(self) -> str:
         return (
             f"Passenger({self.id}): pos=({self.curr_lat:.4f}, {self.curr_lon:.4f}), "
-            f"state={self.state}, speed={self.speed} m/s, progress={self._edge_idx}/{len(self.journey)} edges"
+            f"state={self.state}, speed={self.speed_kmph} km/h, progress={self._edge_idx}/{len(self.journey)} edges"
         )
 
     @property
@@ -106,7 +109,7 @@ class Passenger:
                 self._walk()
             
     def _walk(self) -> None:
-        distance_to_move = self.speed
+        distance_to_move = self.speed_kmph * _KMH_TO_METERS_PER_TICK
         
         while distance_to_move > 0 and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
