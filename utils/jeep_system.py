@@ -138,7 +138,7 @@ class JeepSystem:
             if not assigned_jeeps:
                 continue
                 
-            total_length = sum(e.getLength() for e in route.path)
+            total_length = sum(e._length for e in route.path)
             if total_length <= 0:
                 continue
                 
@@ -149,7 +149,7 @@ class JeepSystem:
                 accumulated = 0.0
                 
                 for idx, edge in enumerate(route.path):
-                    edge_len = edge.getLength()
+                    edge_len = edge._length
                     
                     if accumulated + edge_len >= target_dist - 1e-5:
                         jeep._edge_idx = idx
@@ -249,7 +249,7 @@ class JeepSystem:
                 # Alighting phase
                 for p in tuple(jeep.onboard_passengers):
                     target_node = p.get_target_alight_node()
-                    if target_node and target_node.lat == node.lat and target_node.lon == node.lon:
+                    if target_node is not None and target_node is node:
                         p.state = Passenger.WALKING
                         p.current_jeep = None
                         p.curr_lat = node.lat
