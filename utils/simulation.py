@@ -158,9 +158,6 @@ class Simulation:
         self.current_tick: int = 0
         self.is_complete: bool = False
         self.speed_multiplier: int = 1 
-        
-        # Track spawned passengers to route them natively through JeepSystem.add_passenger
-        self._last_pax_count: int = 0
 
     def __str__(self) -> str:
         return f"Simulation({self.id}): tick={self.current_tick}/{self.max_ticks}, complete={self.is_complete}"
@@ -174,12 +171,10 @@ class Simulation:
                 
             self.passenger_generator.update()
             
-            # Synchronize new passengers to populate the JeepSystem spatial index
-            current_pax = self.passenger_generator.passengers
-            if len(current_pax) > self._last_pax_count:
-                for p in current_pax[self._last_pax_count:]:
-                    self.jeep_system.add_passenger(p)
-                self._last_pax_count = len(current_pax)
+            # Use the pre-populated new_passengers_this_tick list instead of
+            # slicing the full passengers list by a stale counter every tick.
+            for p in self.passenger_generator.new_passengers_this_tick:
+                self.jeep_system.add_passenger(p)
 
             self.jeep_system.update()
             self.current_tick += 1
