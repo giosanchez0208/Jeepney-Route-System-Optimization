@@ -42,11 +42,13 @@ def _validate_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, floa
         raise ValueError("[CITY GRAPH] Invalid bbox. Must be a tuple of 4 floats: (min_lat, max_lat, min_lon, max_lon).")
     return bbox
 
-def _get_cache_path(name: str, bbox: tuple[float, float, float, float]) -> str:
-    os.makedirs("utils/.cache", exist_ok=True)
-    base_str = f"{name}_{bbox}_pruned"
+def _get_cache_path(bbox: tuple[float, float, float, float], cache_dir: str, prefix: str) -> str:
+    os.makedirs(cache_dir, exist_ok=True)
+    base_str = f"{prefix}_{bbox}"
     file_hash = hashlib.md5(base_str.encode()).hexdigest()
-    return f"utils/.cache/{file_hash}_graph.pkl"
+    return os.path.join(cache_dir, f"{file_hash}_graph.pkl")
+
+# city_graph.py
 
 class CityGraph:
     def __init__(
@@ -56,7 +58,9 @@ class CityGraph:
         landmarks: Optional[dict[str, tuple[float, float]]] = None, 
         pbf_path: str = "utils/data/philippines-latest.osm.pbf",
         use_api: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        cache_dir: str = "utils/.cache",
+        cache_prefix: str = "city_graph"
     ) -> None:
         self.name: str = name
         self.verbose: bool = verbose
@@ -71,7 +75,10 @@ class CityGraph:
             self.pbf_path = pbf_path
             self.use_api = use_api
             
-            self._graph_cache_path = _get_cache_path(self.name, self.bbox)
+            # Isolate OSM graph cache
+            isolated_cache_dir = os.path.join(cache_dir, "city_graphs")
+            self._graph_cache_path = _get_cache_path(self.bbox, isolated_cache_dir, cache_prefix)
+            
             self._road_graph = self._load_road_graph()
             self._node_lookup: dict[int, Node] = {}
             

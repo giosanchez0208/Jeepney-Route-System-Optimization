@@ -44,7 +44,7 @@ class DDMConfig:
     margin_error: float = 0.05   # 5% Margin of Error
     api_limit_override: Optional[int] = None
 
-DDM_MODEL_CACHE_VERSION = 1
+DDM_MODEL_CACHE_VERSION = 2
 
 def _node_cache_key(node: Node) -> tuple[float, float, Optional[int]]:
     return (round(node.lon, 10), round(node.lat, 10), getattr(node, "layer", None))
@@ -61,7 +61,7 @@ def _city_cache_signature(city: NetworkGraph) -> str:
         base = f"{len(city.nodes)}|{len(city.graph)}|{node_bits}"
     return hashlib.md5(base.encode()).hexdigest()
 
-def _config_signature(config: DDMConfig, only_drivable: bool) -> str:
+def _config_signature(config: DDMConfig) -> str:
     payload = {
         "alpha": config.alpha,
         "beta": config.beta,
@@ -83,8 +83,10 @@ class TrafficClient:
         if not api_key:
             raise ValueError("[ENVIRONMENT] TOMTOM_API_KEY is missing from the .env file.")
         self.api_key = api_key
-        self.cache_dir = cache_dir
         self.verbose = verbose
+        
+        # Isolate TomTom API payloads
+        self.cache_dir = os.path.join(cache_dir, "tomtom_api")
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def gather_empirical_traffic(self, target_nodes: list[Node]) -> dict[Node, float]:
@@ -144,15 +146,14 @@ class DirectDemandSampler:
         self, 
         city: NetworkGraph, 
         config: DDMConfig = DDMConfig(),
-        only_drivable: bool = False,
         verbose: bool = False
     ):
         self.city = city
         self.config = config
         self.verbose = verbose
-        self.only_drivable = only_drivable
         
-        self.target_nodes = self._filter_nodes(only_drivable)
+        self.drivable_nodes = self._extract_drivable_nodes()
+        self.target_nodes = self.city.nodes
         self.node_list = sorted(self.target_nodes, key=_node_cache_key)
         self.n = len(self.node_list)
         
@@ -160,7 +161,7 @@ class DirectDemandSampler:
             raise ValueError("[DIRECT DEMAND] No valid nodes available for sampling.")
 
         self._node_lookup = {_node_cache_key(node): node for node in self.node_list}
-        self._cache_dir = os.path.join(self.config.cache_dir, "direct_demand")
+        self._cache_dir = os.path.join(self.config.cache_dir, "ddm_models")
         os.makedirs(self._cache_dir, exist_ok=True)
         self._cache_path = os.path.join(self._cache_dir, f"{self._build_cache_key()}.pkl")
 
@@ -198,6 +199,7 @@ class DirectDemandSampler:
         self._build_alias_tables(self.raw_probabilities)
         self._save_cache()
 
+    
     def _calculate_optimal_sample_size(self) -> int:
         if self.config.api_limit_override is not None:
             return self.config.api_limit_override
@@ -212,14 +214,21 @@ class DirectDemandSampler:
         optimal_size = math.ceil(n_0 / (1 + ((n_0 - 1) / N)))
         return optimal_size
 
+    def _extract_drivable_nodes(self) -> set[Node]:
+        drivable_nodes = set()
+        for edge in getattr(self.city, "graph", []):
+            if getattr(edge, "is_drivable", False):
+                drivable_nodes.add(edge.start)
+                drivable_nodes.add(edge.end)
+        return drivable_nodes
+
     def _build_cache_key(self) -> str:
         signature = {
             "city": _city_cache_signature(self.city),
-            "config": _config_signature(self.config, self.only_drivable),
+            "config": _config_signature(self.config),
             "nodes": self.n,
         }
         return hashlib.md5(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
     def _resolve_node(self, key: tuple[float, float, Optional[int]]) -> Node:
         node = self._node_lookup.get(key)
         if node is None:
@@ -234,7 +243,7 @@ class DirectDemandSampler:
             payload = pickle.load(f)
 
         if not isinstance(payload, dict):
-            raise ValueError("[DIRECT DEMAND] Invalid sampler cache payload.")
+            return False
 
         if payload.get("version") != DDM_MODEL_CACHE_VERSION:
             return False
@@ -243,47 +252,37 @@ class DirectDemandSampler:
             return False
 
         self.api_sample_limit = payload["api_sample_limit"]
-        self.node_list = [self._resolve_node(tuple(key)) for key in payload["node_list_keys"]]
         self.prob = list(payload["prob"])
         self.alias = list(payload["alias"])
-        self.node_probabilities = {
-            self._resolve_node(tuple(key)): value
-            for key, value in payload["node_probabilities"].items()
-        }
+        
+        # Rebuild dictionaries using the deterministic index of self.node_list
+        self.node_probabilities = {self.node_list[idx]: v for idx, v in payload["node_probabilities"].items()}
         self.max_prob = payload["max_prob"]
-        self.centrality_scores = {
-            self._resolve_node(tuple(key)): value
-            for key, value in payload.get("centrality_scores", {}).items()
-        }
-        self.target_centroids = [
-            self._resolve_node(tuple(key))
-            for key in payload.get("target_centroid_keys", [])
-        ]
-        self.empirical_traffic = {
-            self._resolve_node(tuple(key)): value
-            for key, value in payload.get("empirical_traffic", {}).items()
-        }
-        self.traffic_weights = {
-            self._resolve_node(tuple(key)): value
-            for key, value in payload.get("traffic_weights", {}).items()
-        }
+        
+        self.centrality_scores = {self.node_list[idx]: v for idx, v in payload.get("centrality_scores", {}).items()}
+        self.target_centroids = [self.node_list[idx] for idx in payload.get("target_centroids", [])]
+        self.empirical_traffic = {self.node_list[idx]: v for idx, v in payload.get("empirical_traffic", {}).items()}
+        self.traffic_weights = {self.node_list[idx]: v for idx, v in payload.get("traffic_weights", {}).items()}
+        
         self.raw_probabilities = list(payload.get("raw_probabilities", []))
         return True
 
     def _save_cache(self) -> None:
+        # Create a reverse lookup to map Node instances to their stable integer index
+        node_to_idx = {node: i for i, node in enumerate(self.node_list)}
+        
         payload = {
             "version": DDM_MODEL_CACHE_VERSION,
             "cache_key": self._build_cache_key(),
             "api_sample_limit": self.api_sample_limit,
-            "node_list_keys": [_node_cache_key(node) for node in self.node_list],
             "prob": self.prob,
             "alias": self.alias,
-            "node_probabilities": {_node_cache_key(node): value for node, value in self.node_probabilities.items()},
+            "node_probabilities": {node_to_idx[n]: v for n, v in self.node_probabilities.items()},
             "max_prob": self.max_prob,
-            "centrality_scores": {_node_cache_key(node): value for node, value in self.centrality_scores.items()},
-            "target_centroid_keys": [_node_cache_key(node) for node in self.target_centroids],
-            "empirical_traffic": {_node_cache_key(node): value for node, value in self.empirical_traffic.items()},
-            "traffic_weights": {_node_cache_key(node): value for node, value in self.traffic_weights.items()},
+            "centrality_scores": {node_to_idx[n]: v for n, v in self.centrality_scores.items()},
+            "target_centroids": [node_to_idx[n] for n in self.target_centroids],
+            "empirical_traffic": {node_to_idx[n]: v for n, v in self.empirical_traffic.items()},
+            "traffic_weights": {node_to_idx[n]: v for n, v in self.traffic_weights.items()},
             "raw_probabilities": self.raw_probabilities,
         }
 
@@ -419,18 +418,21 @@ class DirectDemandSampler:
         while small:
             self.prob[small.pop()] = 1.0
 
-    def get_point(self) -> Node:
-        i = random.randint(0, self.n - 1)
-        if random.random() <= self.prob[i]:
-            return self.node_list[i]
-        return self.node_list[self.alias[i]]
+    def get_point(self, only_drivable: bool = False) -> Node:
+        if only_drivable and not self.drivable_nodes:
+            raise ValueError("[DIRECT DEMAND] Cannot sample drivable nodes. City graph contains 0 drivable edges.")
 
-    def draw_density(self, img_map: Image.Image, context: tuple[tuple[float, float], tuple[float, float]], num_points: int = 5000) -> None:
-        print("\n[bold]Traffic Density Spectrum Legend:[/bold]")
-        print("[blue]██[/blue] Low Traffic")
-        print("[yellow]██[/yellow] Moderate Traffic")
-        print("[red]██[/red] High Traffic")
-        
+        while True:
+            i = random.randint(0, self.n - 1)
+            if random.random() <= self.prob[i]:
+                node = self.node_list[i]
+            else:
+                node = self.node_list[self.alias[i]]
+                
+            if not only_drivable or node in self.drivable_nodes:
+                return node
+
+    def draw_density(self, img_map: Image.Image, context: tuple[tuple[float, float], tuple[float, float]], num_points: int = 5000, only_drivable: bool = False) -> None:
         draw = ImageDraw.Draw(img_map)
         tl_lon, tl_lat = context[0]
         br_lon, br_lat = context[1]
@@ -438,7 +440,7 @@ class DirectDemandSampler:
         lat_range = tl_lat - br_lat
 
         for _ in range(num_points):
-            node = self.get_point()
+            node = self.get_point(only_drivable=only_drivable)
             prob_ratio = self.node_probabilities[node] / self.max_prob
             
             if prob_ratio < 0.5:
