@@ -1,4 +1,5 @@
 from collections import defaultdict
+from functools import lru_cache
 from heapq import heappush, heappop
 from itertools import count
 
@@ -212,7 +213,8 @@ class TravelGraph:
             return self.l3_nodes[matched_coord]
         else:
             raise ValueError("[TRAVEL GRAPH] Invalid snap layer. Must be 1 or 3.")
-        
+    
+    @lru_cache(maxsize=4096)
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
         if start is None or end is None:
             raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")

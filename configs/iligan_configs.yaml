@@ -14,7 +14,6 @@ city_graph:
     Robinsons Place: [8.2175, 124.2380]
 
 ############ DIRECT DEMAND MODEL ######################
-
 # Since standard formal rules and operating data do not apply, spatial heuristics and sensitivity testing are the only mathematically sound approaches for initial model convergence. Global Network for Popular Transportation & UNDP. (2024). A Closer Look at Informal (Popular) Transportation: An Emerging Portrait. United Nations Development Programme.
 # Jeepneys are treated as semi-flexible agents. This paper explicitly links Southeast Asian paratransit (including Philippine jeepneys) to DRT algorithms. This justifies using jeepney routes as demand-responsive agents reacting to spatial probability distributions (DDM) rather than fixed historical origin-destination matrices. Vongpraseuth, T., et al. (2025). Acceptance and Demand Estimation of Demand Responsive Transit (DRT) in a Least Developed Country: The Case of Paratransit. International Journal of Connected Transportation.
 # Ramos-Santiago demonstrates that while structural network topology (centrality) is important, local activity indicators fundamentally amplify ridership generation. This is the reasoning behind higher coefficient of 0.6 and structural proxy lower coefficient 0.4 split. It grounds the assumption that raw local activity (TomTom flow) exerts a statistically heavier pull on passenger generation than pure geometric network location (Betweenness Centrality).
@@ -39,17 +38,18 @@ travel_graph:
 simulation:
   mohring_sample_size: 2000
   jeep_capacity: 16
-  num_ticks: 3600
+  num_ticks: 7200             # 2 simulated hours
   jeep_speed_kmh: 40.0
   passenger_speed_kmh: 5.0
   num_routes: 5
   total_allocatable_jeeps: 25
   weight_tolerance: 50.0
-  spawn_rate_per_hour: 2000.0 # remember to sensitivity test this parameter, as it is the most critical and least empirically grounded. It is a city-wide aggregate rate that will be spatially distributed by the DDM.
+  spawn_rate_per_hour: 1000.0 # Restored for heavy network stress testing
   spawn_stdev: 15.0
+  seconds_per_tick: 15        # Process 15 seconds of physics per frame
 
-  ########## OPTIMIZATION PARAMETERS ########################
-  # [TODO] RESEARCH AND JUSTIFY THESE VALUES
+########## OPTIMIZATION PARAMETERS ########################
+# [TODO] RESEARCH AND JUSTIFY THESE VALUES
 optimization:
   initial_tau: 1.0
   rho: 0.1

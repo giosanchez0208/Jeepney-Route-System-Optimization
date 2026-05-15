@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 _KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
 
 class Jeep:
-    def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float, max_capacity: int = 16) -> None:
+    def __init__(self, route: Route, curr_pos: tuple[float, float], speed: float, max_capacity: int = 16, seconds_per_tick: int = 1) -> None:
         if not hasattr(route, 'path') or not hasattr(route, 'designated_color'):
             raise TypeError("[JEEP] route must have 'path' and 'designated_color' attributes.")
         if not isinstance(curr_pos, tuple) or len(curr_pos) != 2:
@@ -34,13 +34,14 @@ class Jeep:
         
         self.passenger_max: int = max_capacity
         self.curr_passenger_count: int = 0
+        self.seconds_per_tick: int = seconds_per_tick
 
         self._edge_idx: int = 0
         self._edge_progress: float = 0.0
         
         self._snap_to_route()
         self._update_heading()
-
+        
     def __str__(self) -> str:
         return (
             f"Jeep({self.id}): route={self.route.id}, "
@@ -75,7 +76,7 @@ class Jeep:
 
     def update(self) -> None:
         self.curr_nodes_passed = []
-        distance_to_move: float = self.speed_kmph * _KMH_TO_METERS_PER_TICK
+        distance_to_move: float = self.speed_kmph * _KMH_TO_METERS_PER_TICK * self.seconds_per_tick
         
         while distance_to_move > 0:
             current_edge: DirEdge = self.route.path[self._edge_idx]

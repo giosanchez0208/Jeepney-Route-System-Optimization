@@ -1,10 +1,10 @@
 """Flow: start position + journey + speed (km/h) -> passenger state machine -> walking, waiting, riding, done.
 
-Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None tracks live coordinates, state transitions, ride planning, and remaining travel time.
+Passenger(start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_time: int = 0) -> None tracks live coordinates, state transitions, ride planning, and remaining travel time.
 update(self) -> None advances the passenger state.
 get_target_route_idx(self) -> Optional[int], get_target_alight_node(self) -> Optional[Node], get_planned_ride_weight(self) -> float, complete_ride(self) -> None, and get_remaining_time(self) -> float are the query/control methods.
 
-Inputs: a start position, a DirEdge journey, movement speed in km/h, and spawn tick. One update tick equals one second.
+Inputs: a start position, a DirEdge journey, movement speed in km/h, spawn time, and seconds per tick.
 Outputs: updated passenger state plus route and timing queries.
 Imported modules used: Node, DirEdge, Jeep, Optional, and PIL.Image.
 """
@@ -22,7 +22,7 @@ from .jeep import Jeep
 _KMH_TO_METERS_PER_TICK: float = 1000.0 / 3600.0
 
 class Passenger:
-    def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_tick: int = 0) -> None:
+    def __init__(self, start_pos: tuple[float, float], journey: list[DirEdge], speed: float, spawn_time: int = 0, seconds_per_tick: int = 1) -> None:
         if not isinstance(start_pos, tuple) or len(start_pos) != 2:
             raise TypeError("[PASSENGER] start_pos must be a tuple of (lon, lat).")
         if speed < 0:
@@ -36,6 +36,7 @@ class Passenger:
         self.journey: list[DirEdge] = journey
         self.speed_kmph: float = float(speed)
         self.speed: float = self.speed_kmph
+        self.seconds_per_tick: int = int(seconds_per_tick)
         
         self.state: str = "WALKING"  # WALKING, WAITING, RIDING, DONE
         self.wait_ticks: int = 0
@@ -46,8 +47,10 @@ class Passenger:
         self.current_jeep: Optional[Jeep] = None
         
         # Metric Tracking
-        self.spawn_tick: int = spawn_tick
-        self.despawn_tick: Optional[int] = None
+        self.spawn_time: int = int(spawn_time)
+        self.spawn_tick: int = self.spawn_time
+        self.despawn_time: Optional[int] = None
+        self.despawn_tick: Optional[int] = self.despawn_time
         self.total_path_cost: float = sum(getattr(edge, 'weight', edge.getLength()) for edge in self.journey)
 
     def __str__(self) -> str:
@@ -116,7 +119,7 @@ class Passenger:
                 self._walk()
             
     def _walk(self) -> None:
-        distance_to_move = self.speed_kmph * _KMH_TO_METERS_PER_TICK
+        distance_to_move = self.speed_kmph * _KMH_TO_METERS_PER_TICK * self.seconds_per_tick
         
         while distance_to_move > 0 and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
