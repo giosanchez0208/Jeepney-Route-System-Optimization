@@ -6,6 +6,21 @@ from PIL import Image, ImageDraw
 
 from .node import Node
 
+# Integer type constants for O(1) dispatch in Passenger.update() and _walk().
+# These replace per-tick id[:2] string slices and startswith() calls.
+EDGE_SW = 1   # start walk (L1 → L1)
+EDGE_WA = 2   # wait       (L1 → L2)
+EDGE_RI = 3   # ride       (L2 → L2)
+EDGE_AL = 4   # alight     (L2 → L3)
+EDGE_TR = 5   # transfer   (L3 → L2)
+EDGE_EW = 6   # end walk   (L3 → L3)
+EDGE_DI = 7   # direct     (L1 → L3)
+
+_PREFIX_TO_TYPE: dict[str, int] = {
+    "SW": EDGE_SW, "WA": EDGE_WA, "RI": EDGE_RI,
+    "AL": EDGE_AL, "TR": EDGE_TR, "EW": EDGE_EW, "DI": EDGE_DI,
+}
+
 ### HELPER FUNCTIONS FOR DIR EDGE INITIALIZATION ###
 def _nodes_match(node1: Node, node2: Node) -> bool:
     return node1.lon == node2.lon and node1.lat == node2.lat and node1.layer == node2.layer
@@ -46,12 +61,17 @@ class DirEdge:
         self.id = id if id is not None else f"{start.id}{end.id}"
         self.next_edges = next_edges if next_edges is not None else []
         self.type = type if type is not None else self.getType()
+        # Cache haversine distance at construction time — getLength() is called
+        # thousands of times per simulation tick across Jeep.update(),
+        # Passenger._walk(), and spacing/allocation routines.
+        self._length: float = _getDistance(start, end)
+        self._edge_type: int = _PREFIX_TO_TYPE.get(self.id[:2], 0)
 
     def __str__(self) -> str:
         return f"DirEdge({self.id}): {self.start.id} -> {self.end.id}, type={self.type}, weight={self.weight}, drivable={self.is_drivable}"
     
     def getLength(self) -> float:
-        return _getDistance(self.start, self.end)
+        return self._length
 
     def isConnectedTo(self, other: DirEdge) -> bool:
         return _nodes_match(self.end, other.start)
