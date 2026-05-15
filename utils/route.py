@@ -103,7 +103,8 @@ class RouteGenerator:
             raise ValueError("[ROUTE GENERATOR] Minimum of 2 points required to generate a route.")
         
         for attempt in range(max_retries):
-            nodes = [self.sampler.get_point() for _ in range(n_points)]
+            # Enforce the drivable constraint during sampling
+            nodes = [self.sampler.get_point(only_drivable=True) for _ in range(n_points)]
             base_path: list[DirEdge] = []
             failed_segment = None
             
