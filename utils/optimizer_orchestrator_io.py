@@ -1,9 +1,3 @@
-"""
-orchestrator_io.py
-
-Handles environment building, config preservation, and state checkpointing 
-for the MemeticResearchOrchestrator.
-"""
 
 import shutil
 import pickle
@@ -14,15 +8,20 @@ from .optimizer_config import ExperimentConfig, OptimizationState
 
 class StatePreservationEngine:
     def __init__(self, run_dir: Path):
-        self.run_dir = run_dir
+        self.run_dir = Path(run_dir)
         self.checkpoints_dir = self.run_dir / "checkpoints"
         self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     def save_state(self, state: OptimizationState):
-        """Serializes the exact state of the optimization loop."""
+        """Serializes the optimization state using an atomic write pattern."""
         filepath = self.checkpoints_dir / f"state_gen_{state.generation}.pkl"
-        with open(filepath, 'wb') as f:
+        tmp_filepath = filepath.with_suffix(".tmp")
+        
+        with open(tmp_filepath, 'wb') as f:
             pickle.dump(state, f)
+            
+        # Atomic replace prevents corrupted checkpoints on sudden termination
+        tmp_filepath.replace(filepath)
 
     def load_state(self, filepath: Path) -> OptimizationState:
         """Deserializes a state file to resume execution."""
@@ -42,7 +41,6 @@ class OptimizerBuilder:
         run_dir = config.output_root / f"opt_{timestamp}"
         run_dir.mkdir(parents=True, exist_ok=True)
         
-        # Lock the configuration into the instance directory
         shutil.copy(config_path, run_dir / "configs.yaml")
         
         return config, run_dir
@@ -66,7 +64,6 @@ class OptimizerBuilder:
         if not checkpoints:
             raise FileNotFoundError("No valid .pkl checkpoints found to resume.")
             
-        # Extract the highest generation number to resume from the latest state
         latest_checkpoint = max(checkpoints, key=lambda p: int(p.stem.split('_')[-1]))
         state = preservation_engine.load_state(latest_checkpoint)
         
