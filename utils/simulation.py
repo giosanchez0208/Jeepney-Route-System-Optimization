@@ -185,6 +185,37 @@ class Simulation:
             self.update()
         return self._calculate_results()
 
+    def run_until_drained(self, safety_cap: int = 100_000) -> SimulationResult:
+        """Runs until every spawned passenger has completed their journey.
+
+        Unlike run(), this ignores max_ticks and instead terminates as soon as
+        passenger_generator.passengers is empty (all active passengers reached DONE).
+        The PassengerGenerator will stop spawning new passengers after its internal
+        schedule is exhausted (~100-tick windows), so the loop naturally converges.
+
+        Args:
+            safety_cap: Hard upper-bound tick limit to prevent truly infinite loops
+                        in degenerate cases (e.g. passengers waiting forever with no
+                        jeep that can reach them). Defaults to 100,000 ticks.
+        """
+        tick = 0
+        while tick < safety_cap:
+            self.passenger_generator.update()
+            for p in self.passenger_generator.new_passengers_this_tick:
+                self.jeep_system.add_passenger(p)
+            self.jeep_system.update()
+            self.current_tick += 1
+            tick += 1
+
+            # Terminate once no more passengers are actively in the system.
+            # archived_passengers are DONE; passengers list holds still-active ones.
+            if len(self.passenger_generator.passengers) == 0:
+                break
+
+        self.is_complete = True
+        return self._calculate_results()
+
+
     def _calculate_results(self) -> SimulationResult:
         """Computes fitness metrics for the Genetic Algorithm."""
         completed = self.passenger_generator.archived_passengers
