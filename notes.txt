@@ -271,3 +271,73 @@ GEN   | BEST COST    | MEAN COST    | STAG
 ------------------------------------------------------------
 Diagnostic Complete.
 DIAGNOSTIC RESULT OPTIMZER
+
+
+==========================
+Overhaul Sequence
+Execute the overhaul in a bottom-up sequence based on the dependency graph. Establish foundational data structures and isolated logic before integrating them into the orchestrator.
+
+optimizer_config.py (Zero dependencies; immutable state).
+
+optimizer_adaptive.py (Zero dependencies; pure math).
+
+optimizer_telemetry.py (File I/O; consumes generic objects).
+
+optimizer_orchestrator_io.py (Depends on config; handles state serialization).
+
+local_search.py (Algorithmic core; depends on graph and route objects).
+
+genetic.py (Evolutionary core; depends on local search and fleet allocation).
+
+optimizer_engine.py (Execution logic; coordinates genetic and local search).
+
+optimizer.py (Main orchestrator; depends on all modules).
+
+Testing Directives
+1. optimizer_config.py
+
+Test Type: Unit Tests.
+
+Target: Feed a valid YAML file to verify exact attribute assignment and type casting. Feed a malformed YAML file to ensure standard exception handling. Validate default parameter initializations.
+
+2. optimizer_adaptive.py
+
+Test Type: Unit Tests.
+
+Target: Input stagnation_counter = 0 to assert return value matches base mutation. Increment the counter to verify exponential scaling. Input a high counter to assert the hard cap of 0.8 is strictly enforced.
+
+3. optimizer_telemetry.py
+
+Test Type: Integration Tests (File System).
+
+Target: Use a temporary directory. Call log_generation and log_lineage to assert CSV rows append correctly without overwriting. Pass dummy population data to export_json_snapshot and assert the resulting JSON structure matches the defined schema.
+
+4. optimizer_orchestrator_io.py
+
+Test Type: Integration Tests (File System).
+
+Target: Initialize a dummy OptimizationState. Execute save_state and then load_state. Assert the deserialized object properties match the original object exactly. Verify build_new_run creates the correct directory structure and duplicates the YAML file.
+
+5. local_search.py
+
+Test Type: Unit Tests with Mocked Graph.
+
+Target: Mock a minimalist CityGraph with known shortest paths. Pass a fixed Route and PheromoneMatrix. Assert strategy_spatial_attraction redirects the path toward the specified high-demand edge. Assert strategy_tortuosity_pruning accurately truncates convoluted segments.
+
+6. genetic.py
+
+Test Type: Unit Tests with Mocked Evaluator.
+
+Target: Mock FleetAllocator to return static costs. Instantiate two Chromosome objects. Assert crossover_topological_hub returns a valid list of routes bounded by target_route_count. Assert inherit_pheromones outputs a matrix where edge weights are correctly proportional to parent fitness ratios.
+
+7. optimizer_engine.py
+
+Test Type: Integration Tests.
+
+Target: Initialize the engine. Force state.population to a known list. Call step_generation with a mutation rate of 0.0. Assert n_elite chromosomes are preserved exactly. Assert tournament selection pulls from the existing population.
+
+8. optimizer.py
+
+Test Type: End-to-End System Tests.
+
+Target: Set g_max = 2 in a test configuration. Run start(). Assert the loop terminates at the correct generation. Trigger a mock KeyboardInterrupt during execution and assert the finally block successfully triggers the state preservation protocol.
