@@ -40,6 +40,7 @@ class PassengerGenerator:
         self.seconds_per_tick: int = seconds_per_tick
         self.simulated_time: int = 0
 
+        self.total_spawned: int = 0
         self.passengers: list[Passenger] = []
         self.new_passengers_this_tick: list[Passenger] = []
         self.archived_passengers: list[Passenger] = []
@@ -83,13 +84,14 @@ class PassengerGenerator:
                 )
                 self.passengers.append(p)
                 self.new_passengers_this_tick.append(p)
+                self.total_spawned += 1
 
         active_passengers = []
         for p in self.passengers:
             p.update()
             
             if p.state == Passenger.DONE:
-                if p.despawn_tick is None:
+                if getattr(p, 'despawn_tick', None) is None:
                     p.despawn_tick = self.simulated_time
                 self.archived_passengers.append(p)
             else:

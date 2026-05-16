@@ -224,7 +224,8 @@ class Passenger:
         if image.width != image.height:
             raise ValueError("[PASSENGER] Visualization requires a square image.")
 
-        if self.state == Passenger.RIDING:
+        # Do not draw passengers that are inside a jeep or finished
+        if self.state == Passenger.RIDING or getattr(self, 'state', None) == getattr(Passenger, 'DONE', -1):
             return image
 
         tl_lon, tl_lat = context[0]
@@ -238,11 +239,15 @@ class Passenger:
 
         x = image.width * (self.curr_lon - tl_lon) / lon_range
         y = image.height * (tl_lat - self.curr_lat) / lat_range
-        
-        x = max(0, min(image.width - 1, int(x)))
-        y = max(0, min(image.height - 1, int(y)))
+
+        if self.state == Passenger.WAITING:
+            color = "gray"
+        elif self.state == Passenger.WALKING:
+            color = "blue"
+        else:
+            color = "white"
 
         draw = ImageDraw.Draw(image)
-        draw.rectangle([x - size/2, y - size/2, x + size/2, y + size/2], fill="blue")
-
+        draw.ellipse([(x - size, y - size), (x + size, y + size)], fill=color)
+        
         return image
