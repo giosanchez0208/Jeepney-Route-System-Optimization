@@ -9,24 +9,38 @@ import json
 from pathlib import Path
 from typing import Any
 
+class _DummyJeep:
+    """Mock actor to bridge Chromosome allocations with the JeepSystem API."""
+    def __init__(self, route): 
+        self.route = route
+
+class _DummySystem:
+    """Mock environment to fulfill PheromoneMatrix gap calculation requirements."""
+    def __init__(self, routes: list, allocation: dict):
+        self.routes = routes
+        self.jeeps = [_DummyJeep(r) for r, count in allocation.items() for _ in range(count)]
+
 class TelemetryEngine:
     def __init__(self, run_dir: Path, bounds: tuple[float, float, float, float]):
-        self.run_dir = run_dir
+        self.run_dir = Path(run_dir)
         self.bounds = bounds
         self.history_file = self.run_dir / "history.csv"
         self.lineage_file = self.run_dir / "lineage.csv"
         self.snapshots_dir = self.run_dir / "snapshots"
-        self.snapshots_dir.mkdir(exist_ok=True)
+        self.snapshots_dir.mkdir(exist_ok=True, parents=True)
         self._init_csvs()
 
     def _init_csvs(self):
-        with open(self.history_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Generation", "Global_Best_Cost", "Population_Mean_Cost", "Active_Mutation_Rate", "Stagnation_Counter"])
+        """Initializes CSVs only if they do not exist to protect resumed runs."""
+        if not self.history_file.exists() or self.history_file.stat().st_size == 0:
+            with open(self.history_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Generation", "Global_Best_Cost", "Population_Mean_Cost", "Active_Mutation_Rate", "Stagnation_Counter"])
         
-        with open(self.lineage_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["UID", "Generation", "Cost", "Parent_A", "Parent_B"])
+        if not self.lineage_file.exists() or self.lineage_file.stat().st_size == 0:
+            with open(self.lineage_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["UID", "Generation", "Cost", "Parent_A", "Parent_B"])
 
     def log_generation(self, gen: int, best_cost: float, mean_cost: float, mut_rate: float, stag: int):
         with open(self.history_file, 'a', newline='') as f:
@@ -51,8 +65,16 @@ class TelemetryEngine:
         pheromones_data = [{"edge": [{"lat": edge.start.lat, "lon": edge.start.lon}, {"lat": edge.end.lat, "lon": edge.end.lon}], "intensity": round(tau, 2)} 
                            for edge, tau in best_chrom.pheromones.tau.items() if tau > 1.1]
 
-        # Aggregate edge gaps into node chokepoints
-        gaps = best_chrom.pheromones.calculate_demand_service_gaps(best_chrom.routes)
+        # Bridge API gap safely
+        allocation = getattr(best_chrom, 'allocation', {r: 0 for r in best_chrom.routes})
+        dummy_sys = _DummySystem(best_chrom.routes, allocation)
+        
+        try:
+            gaps = best_chrom.pheromones.calculate_demand_service_gaps(dummy_sys)
+        except TypeError:
+            # Fallback if Pheromone API is still legacy during partial refactoring
+            gaps = best_chrom.pheromones.calculate_demand_service_gaps(best_chrom.routes)
+            
         node_gaps = {}
         for edge, gap in gaps.items():
             if gap > 0:
@@ -66,11 +88,21 @@ class TelemetryEngine:
         for edge, tau in best_chrom.pheromones.tau.items():
             node_demand[edge.start] = node_demand.get(edge.start, 0) + tau
             node_demand[edge.end] = node_demand.get(edge.end, 0) + tau
+        
         hub_node = max(node_demand, key=node_demand.get) if node_demand else None
         hub_coords = {"lat": hub_node.lat, "lon": hub_node.lon} if hub_node else None
 
         pop_fitness = [round(c.cost, 2) for c in population]
-        pop_gaps = [round(sum(c.pheromones.calculate_demand_service_gaps(c.routes).values()), 2) for c in population]
+        
+        pop_gaps = []
+        for c in population:
+            alloc = getattr(c, 'allocation', {r: 0 for r in c.routes})
+            ds = _DummySystem(c.routes, alloc)
+            try:
+                g = c.pheromones.calculate_demand_service_gaps(ds)
+            except TypeError:
+                g = c.pheromones.calculate_demand_service_gaps(c.routes)
+            pop_gaps.append(round(sum(g.values()), 2))
 
         payload = {
             "generation": generation,
