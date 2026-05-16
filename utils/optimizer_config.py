@@ -1,5 +1,5 @@
 """
-config.py
+optimizer_config.py
 
 Handles YAML ingestion, type validation, and mutable state tracking.
 """
@@ -11,16 +11,12 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    traffic_csv_path: Path
-    city_bounds: tuple[float, float, float, float]
-    
-    k_routes: int
-    total_fleet: int
-    
+    # Orchestrator IO
     output_root: Path
     telemetry_interval: int
     checkpoint_interval: int
     
+    # Genetic Algorithm Params
     n_population: int
     g_max: int
     n_stagnation: int
@@ -29,23 +25,33 @@ class ExperimentConfig:
     p_mutation: float
     gamma_crossover: float
     
+    # Local Search & Pheromone Params
     initial_pheromone: float
     rho_evaporation: float
     q_pheromone_intensity: float
     p_local_search: float
     
+    # System Cost Penalties
+    alpha_std_penalty: float
+    beta_penalty: float
+
+    # System Definition
+    k_routes: int
+    total_fleet: int
+    city_bounds: tuple[float, float, float, float]
+    
+    # Travel Graph Weights
     walk_wt: float
     ride_wt: float
     wait_wt: float
     transfer_wt: float
-    alpha_std_penalty: float
-    beta_penalty: float
     
+    # Simulation Params
     max_ticks: int
     passenger_speed: float
     jeep_speed: float
     jeep_capacity: int
-    spawn_rate_per_100: float
+    spawn_rate_per_hour: float
     spawn_stdev: float
     weight_tolerance: float
     equidistant_spawn: bool
@@ -54,40 +60,61 @@ class ExperimentConfig:
     def from_yaml(cls, path: str | Path) -> "ExperimentConfig":
         with open(path, "r") as f:
             data = yaml.safe_load(f)
+            
+        opt = data.get("optimization", {})
+        sim = data.get("simulation", {})
+        tg = data.get("travel_graph", {})
         
+        # Bbox fallback for toy_city vs real city
+        if "city_graph" in data:
+            bbox = tuple(data["city_graph"].get("bbox", [0.0, 0.0, 0.0, 0.0]))
+        else:
+            # Generate a rough bbox from toy city origin and grid size
+            tc = data.get("toy_city", {})
+            lon1 = tc.get("origin_lon", 0.0)
+            lat1 = tc.get("origin_lat", 0.0)
+            step = tc.get("step_deg", 0.0)
+            size = tc.get("grid_size", 0)
+            bbox = (lon1, lat1, lon1 + (step * size), lat1 + (step * size))
+
         return cls(
-            traffic_csv_path=Path(data["TRAFFIC_CSV_PATH"]),
-            city_bounds=tuple(data["CITY_BOUNDS"]),
-            k_routes=int(data["K_ROUTES"]),
-            total_fleet=int(data["TOTAL_FLEET"]),
-            output_root=Path(data["OUTPUT_ROOT"]),
-            telemetry_interval=int(data["TELEMETRY_INTERVAL"]),
-            checkpoint_interval=int(data["CHECKPOINT_INTERVAL"]),
-            n_population=int(data["N_POPULATION"]),
-            g_max=int(data["G_MAX"]),
-            n_stagnation=int(data["N_STAGNATION"]),
-            n_elite=int(data["N_ELITE"]),
-            k_tournament=int(data["K_TOURNAMENT"]),
-            p_mutation=float(data["P_MUTATION"]),
-            gamma_crossover=float(data["GAMMA_CROSSOVER"]),
-            initial_pheromone=float(data["INITIAL_PHEROMONE"]),
-            rho_evaporation=float(data["RHO_EVAPORATION"]),
-            q_pheromone_intensity=float(data["Q_PHEROMONE_INTENSITY"]),
-            p_local_search=float(data["P_LOCAL_SEARCH"]),
-            walk_wt=float(data["WALK_WT"]),
-            ride_wt=float(data["RIDE_WT"]),
-            wait_wt=float(data["WAIT_WT"]),
-            transfer_wt=float(data["TRANSFER_WT"]),
-            alpha_std_penalty=float(data["ALPHA_STD_PENALTY"]),
-            beta_penalty=float(data["BETA_PENALTY"]),
-            max_ticks=int(data["MAX_TICKS"]),
-            passenger_speed=float(data["PASSENGER_SPEED"]),
-            jeep_speed=float(data["JEEP_SPEED"]),
-            jeep_capacity=int(data["JEEP_CAPACITY"]),
-            spawn_rate_per_100=float(data["SPAWN_RATE_PER_100"]),
-            spawn_stdev=float(data["SPAWN_STDEV"]),
-            weight_tolerance=float(data["WEIGHT_TOLERANCE"]),
-            equidistant_spawn=bool(data["EQUIDISTANT_SPAWN"])
+            output_root=Path(opt.get("output_root", "outputs/")),
+            telemetry_interval=int(opt.get("telemetry_interval", 5)),
+            checkpoint_interval=int(opt.get("checkpoint_interval", 10)),
+            
+            n_population=int(opt.get("n_population", 20)),
+            g_max=int(opt.get("g_max", 50)),
+            n_stagnation=int(opt.get("n_stagnation", 10)),
+            n_elite=int(opt.get("n_elite", 2)),
+            k_tournament=int(opt.get("k_tournament", 3)),
+            p_mutation=float(opt.get("p_mutation", 0.2)),
+            gamma_crossover=float(opt.get("gamma_crossover", 0.5)),
+            
+            initial_pheromone=float(opt.get("initial_tau", 1.0)),
+            rho_evaporation=float(opt.get("rho", 0.1)),
+            q_pheromone_intensity=float(opt.get("q", 1000.0)),
+            p_local_search=float(opt.get("p_local_search", 0.5)),
+            
+            alpha_std_penalty=float(opt.get("alpha_std_penalty", 0.5)),
+            beta_penalty=float(opt.get("beta_penalty", 2.0)),
+            
+            k_routes=int(sim.get("num_routes", 5)),
+            total_fleet=int(sim.get("total_allocatable_jeeps", 20)),
+            city_bounds=bbox,
+            
+            walk_wt=float(tg.get("walk_wt", 0.0142)),
+            ride_wt=float(tg.get("ride_wt", 0.0071)),
+            wait_wt=float(tg.get("wait_wt", 8.5)),
+            transfer_wt=float(tg.get("transfer_wt", 14.2)),
+            
+            max_ticks=int(sim.get("num_ticks", 1000)),
+            passenger_speed=float(sim.get("passenger_speed_kmh", 4.5)),
+            jeep_speed=float(sim.get("jeep_speed_kmh", 20.0)),
+            jeep_capacity=int(sim.get("jeep_capacity", 16)),
+            spawn_rate_per_hour=float(sim.get("spawn_rate_per_hour", 120.0)),
+            spawn_stdev=float(sim.get("spawn_stdev", 10.0)),
+            weight_tolerance=float(sim.get("weight_tolerance", 50.0)),
+            equidistant_spawn=bool(sim.get("equidistant_spawn", True))
         )
 
 @dataclass
