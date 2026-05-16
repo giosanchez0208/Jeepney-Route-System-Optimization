@@ -1,0 +1,97 @@
+global:
+  cache_dir: ".cache"
+
+############ TOY CITY GRID ######################
+# A synthetic 10×10 grid city for fast diagnostic runs.
+# No PBF, no OSM API, no betweenness centrality, no TomTom calls.
+# Grid is ~1km × 1km using real-ish Philippine coordinates
+# so that haversine distances and speed calculations stay meaningful.
+# 0.001° ≈ 111m lat, ≈ 110m lon at lat=8.2° → each cell ≈ 110m.
+
+toy_city:
+  grid_size: 50          # NxN grid → 2500 nodes
+  origin_lon: 124.200    # Bottom-left corner (lon, lat)
+  origin_lat: 8.200
+  step_deg: 0.001        # ~110m per grid step
+
+############ TOY DIRECT DEMAND MODEL ######################
+# Demand is generated via IDW from named hotspots.
+# Nodes near a high-weight hotspot get proportionally more demand.
+# This gives the toy city realistic heavy/light traffic zones
+# without any API calls or betweenness centrality computation.
+#
+# Hotspot layout on the 10×10 grid (row/col from bottom-left):
+#   Market District   → top-left  quadrant  (high density)
+#   Jeepney Terminal  → bottom-right corner  (high density)
+#   University        → center               (medium-high)
+#   Residential North → top-right corner     (low-medium)
+#
+# The large weight gap between Market (12.0) and Residential (2.0)
+# creates a meaningful 6× demand contrast across the grid.
+
+toy_ddm:
+  idw_power: 2.0
+  hotspots:
+    - name: "Market District"
+      lon: 124.202
+      lat: 8.207
+      weight: 12.0
+
+    - name: "Jeepney Terminal"
+      lon: 124.208
+      lat: 8.201
+      weight: 9.0
+
+    - name: "University"
+      lon: 124.205
+      lat: 8.205
+      weight: 6.0
+
+    - name: "Residential North"
+      lon: 124.208
+      lat: 8.208
+      weight: 2.0
+
+    - name: "Industrial South"
+      lon: 124.201
+      lat: 8.201
+      weight: 4.0
+
+########## TRAVEL GRAPH WEIGHTS ########################
+# Identical to iligan_configs — we want to exercise the same
+# weight regime so bugs found here transfer to the real city.
+travel_graph:
+  walk_wt: 0.0142
+  ride_wt: 0.0071
+  wait_wt: 8.5
+  transfer_wt: 14.2
+  direct_wt: 0.0
+  alight_wt: 0.0
+
+########## SIMULATION PARAMETERS ########################
+# Drastically reduced for fast iteration:
+#   num_ticks: 30  → 30 × 30s = 15 minutes simulated
+#   num_routes: 5  → manageable TravelGraph stitch size
+#   total_allocatable_jeeps: 20
+#   spawn_rate_per_hour: 120 → ~1 passenger/tick on average
+simulation:
+  mohring_sample_size: 100
+  jeep_capacity: 16
+  num_ticks: 1000 # 1000 × 30s = 8.3 hours simulated, enough to see demand patterns stabilize
+   # 60 min allows for longer trips and transfer overhead in a small grid.
+   # Passengers beyond this are correctly penalized as unserved.
+  jeep_speed_kmh: 20.0
+  passenger_speed_kmh: 4.5
+  num_routes: 5
+  total_allocatable_jeeps: 20
+  weight_tolerance: 50.0
+  spawn_rate_per_hour: 120.0
+  spawn_stdev: 10.0
+  seconds_per_tick: 30
+
+########## OPTIMIZATION PARAMETERS ########################
+optimization:
+  initial_tau: 1.0
+  rho: 0.1
+  q: 1000.0
+  default_jeep_weight: 1.0
