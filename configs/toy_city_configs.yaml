@@ -90,8 +90,25 @@ simulation:
   seconds_per_tick: 30
 
 ########## OPTIMIZATION PARAMETERS ########################
+########## OPTIMIZATION PARAMETERS ########################
 optimization:
+  output_root: "outputs/toy_runs"
+  telemetry_interval: 2
+  checkpoint_interval: 5
+  
+  n_population: 10
+  g_max: 30
+  n_stagnation: 8
+  n_elite: 2
+  k_tournament: 3
+  p_mutation: 0.25
+  gamma_crossover: 0.5
+  
   initial_tau: 1.0
-  rho: 0.1
+  rho: 0.15
   q: 1000.0
+  p_local_search: 0.4
   default_jeep_weight: 1.0
+  
+  alpha_std_penalty: 0.5
+  beta_penalty: 2.0
