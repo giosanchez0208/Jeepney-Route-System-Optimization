@@ -113,9 +113,31 @@ Calculates optimal vehicle distribution across routes using Mohring's square roo
     - `allocate_by_mohring(total_fleet, routes, sampler, tg, sample_size) -> dict[Route, int]`
     - `evaluate_allocation(allocation, sampler) -> dict`
 
+## 5. Optimization and Local Search
+
+### PheromoneMatrix (`utils/pheromone.py`)
+Tracks spatial network demand and passenger traffic history across the city graph.
+- **Attributes**: `initial_tau` (float), `rho` (float), `q` (float), `tau` (dict-like view), `gaps` (dict mapping DirEdge to float gap scores).
+- **Methods**:
+    - `__init__(all_edges: Iterable[DirEdge], config: dict, sim_result: Optional[SimulationResult] = None)`
+    - `update_pheromones(sim_result: SimulationResult)`: Evaporates pheromones and deposits new ones based on simulated passenger travel costs.
+    - `calculate_demand_service_gaps(jeep_system: JeepSystem) -> dict[DirEdge, float]`: Computes the difference between demand and supply (`gap = tau - supply`).
+    - `draw(context: tuple, image: PIL.Image) -> PIL.Image`: Renders a high-contrast demand heatmap (purple to yellow) with linewidths scaling quadratically with density.
+
+### ACOLocalSearch (`utils/local_search.py`)
+Applies demand-driven mutations and spatial heuristics to optimize route systems.
+- **Attributes**: `cg` (CityGraph), `p_local` (float), `base_window_size` (int).
+- **Methods**:
+    - `__init__(cg: CityGraph, p_local: float = 0.5, base_window_size: int = 15)`
+    - `calculate_route_similarity(route_a: Route, route_b: Route) -> float`: Computes the discrete Fréchet distance between two routes.
+    - `strategy_spatial_attraction(routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`: Splices a detour toward an underserved demand corridor.
+    - `strategy_redundancy_repulsion(routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`: Removes redundant overlaps in overserved corridors.
+    - `strategy_tortuosity_pruning(routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> tuple[int, Optional[Route]]`: Smooths out inefficient wiggles while preserving gap immunity.
+    - `optimize_system(routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> dict`: One-shot runner applying all active mutations stochastically.
+
 ---
 
-## 5. Passenger Lifecycle
+## 6. Passenger Lifecycle
 
 ### Passenger (`utils/passenger.py`)
 A state-machine actor (WALKING -> WAITING -> RIDING -> DONE).
@@ -134,7 +156,7 @@ Manages stochastic passenger spawning and lifecycle tracking.
 
 ---
 
-## 6. Simulation and Analysis
+## 7. Simulation and Analysis
 
 ### Simulation (`utils/simulation.py`)
 The primary execution engine.
@@ -150,7 +172,7 @@ Orchestrates the instantiation sequence for the simulation stack.
 
 ---
 
-## 7. Setup and Visualization Helpers
+## 8. Setup and Visualization Helpers
 
 ### Toy City (`utils/toy_city.py`)
 Synthetic environment for rapid diagnostics.
@@ -165,7 +187,7 @@ Synthetic environment for rapid diagnostics.
 
 ---
 
-## 8. Operational Workflow: How to Get Started
+## 9. Operational Workflow: How to Get Started
 
 To build and run a simulation from scratch, modules must be instantiated in the following dependency order.
 
@@ -217,7 +239,26 @@ sim = setup.build()
 # - sim.passenger_generator
 ```
 
-### Step 5: Execution
+### Step 5: Optimization & Local Search
+Initialize the global pheromone landscape and apply spatial mutation operators to improve the route system under active passenger demand.
+```python
+from utils.pheromone import PheromoneMatrix
+from utils.local_search import ACOLocalSearch
+
+# 1. Initialize Pheromone demand matrix
+pheromones = PheromoneMatrix(city.graph, cfg)
+
+# 2. Compute demand-service gaps based on current fleet deployment
+pheromones.gaps = pheromones.calculate_demand_service_gaps(sim.jeep_system)
+
+# 3. Initialize the optimization local search engine
+engine = ACOLocalSearch(cg=city, base_window_size=15)
+
+# 4. Mutate routes (e.g. apply Spatial Attraction to capture underserved demand)
+engine.strategy_spatial_attraction(routes, pheromones, intensity=2.0)
+```
+
+### Step 6: Execution
 Run the simulation and extract the resulting metrics and paths.
 ```python
 # Run the simulation
@@ -227,7 +268,7 @@ result = sim.run()
 print(f"Completed Journeys: {result.metrics['completed_count']}")
 ```
 
-### Step 6: Visualization
+### Step 7: Visualization
 Compile the collected simulation frames into a GIF for review.
 ```python
 from utils.visualization import compile_to_gif
