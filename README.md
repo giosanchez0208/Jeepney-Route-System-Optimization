@@ -14,8 +14,11 @@ This README covers:
 - `utils/passenger_generator.py`
 - `utils/simulation.py`
 - `utils/visualization.py`
+- `utils/pheromone.py`
+- `utils/local_search.py`
 - `diagnostic_core.ipynb`
 - `diagnostic_sim.ipynb`
+- `diagnostic_mutation.ipynb`
 - `configs/iligan_configs.yaml`
 
 ## Module notes
@@ -312,6 +315,39 @@ Errors:
 
 - `compile_to_gif()` raises on empty frames, invalid frame types, non-positive FPS, or export paths outside `utils/.cache/`.
 
+### `pheromone.py`
+
+`PheromoneMatrix` tracks spatial network demand and passenger traffic history across the city.
+
+- Translates passenger journeys into a continuous demand heatmap.
+- Keys values by coordinate pairs (`(lon, lat)`) rather than edge object identity, ensuring consistent spatial lookups across different layers.
+- Calculates dynamic Demand-Service Gaps to locate overserved and underserved corridors.
+
+Why it matters:
+
+- It provides the spatial intelligence for local search operators, telling the genetic algorithm exactly where routes overlap too much or where coverage is lacking.
+
+Errors:
+
+- Raises a `ValueError` if visualization context is missing or if rendering is requested on a non-square canvas.
+
+### `local_search.py`
+
+`ACOLocalSearch` is the optimization engine that mutates routes to improve coverage, directness, and efficiency.
+
+- Coordinates spatial route mutation strategies to continuously optimize network performance.
+- Implements **Spatial Attraction** to splice detours toward underserved high-demand corridors.
+- Implements **Redundancy Repulsion** to excise overlapping pathways in overserved areas.
+- Implements **Tortuosity Pruning** to bypass geometric "wiggles" with straight-line shortest-path segments.
+
+Why it matters:
+
+- It performs the high-value spatial adaptations within the genetic algorithm, ensuring routes organically conform to city demand rather than relying on random blind walks.
+
+Errors:
+
+- Returns `None` if route systems or pheromones are missing, or if topological constraints (like loop contiguity) prevent a valid mutation from firing.
+
 ### `diagnostic_core.ipynb`
 
 This notebook is the reasoning log and validation harness for the core spatial modules.
@@ -327,6 +363,15 @@ This notebook extends the core workflow into the simulation stack.
 - Connects route output to jeep movement, passenger spawning, and service behavior.
 - Shows the live visualizer and GIF compilation flow.
 - Is the best notebook if you want a full understanding of the system up to simulation.
+
+### `diagnostic_mutation.ipynb`
+
+This notebook serves as the reasoning log, validation harness, and high-performance visual diagnostic for the genetic optimization's local search mutation operators (`ACOLocalSearch`).
+
+- Features an advanced, light-themed $3 \times 3$ operator showcase dashboard.
+- Validates the three primary mutation operators (Spatial Attraction, Redundancy Repulsion, and Tortuosity Pruning) using targeted candidate searches that guarantee organic triggers.
+- Quantifies performance shifts across baseline and mutated systems using both the static surrogate evaluator and full transit simulation runs.
+- Implements prioritized drawing overlays where the mutated route is colored in bold red and drawn last on top of muted slate-gray unmutated background routes.
 
 ### `configs/iligan_configs.yaml`
 
