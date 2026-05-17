@@ -16,46 +16,72 @@ toy_city:
 
 ############ TOY DIRECT DEMAND MODEL ######################
 # Demand is generated via IDW from named hotspots.
-# Nodes near a high-weight hotspot get proportionally more demand.
-# This gives the toy city realistic heavy/light traffic zones
-# without any API calls or betweenness centrality computation.
+# Scaled for a 50x50 grid (bounding box: lon 124.200-124.250, lat 8.200-8.250).
 #
-# Hotspot layout on the 10×10 grid (row/col from bottom-left):
-#   Market District   → top-left  quadrant  (high density)
-#   Jeepney Terminal  → bottom-right corner  (high density)
-#   University        → center               (medium-high)
-#   Residential North → top-right corner     (low-medium)
-#
-# The large weight gap between Market (12.0) and Residential (2.0)
-# creates a meaningful 6× demand contrast across the grid.
+# Spatial Topography:
+#   - Downtown/CBD: Centralized high-density core.
+#   - University Belt: Northern high-traffic cluster.
+#   - North/South Terminals: Anchor points for cross-city transit.
+#   - Mega Mall & BPO Hub: Mid-density commercial attractors.
+#   - Suburbs: Low-density distributed residential generation.
 
 toy_ddm:
   idw_power: 2.0
   hotspots:
-    - name: "Market District"
-      lon: 124.202
-      lat: 8.207
+    - name: "Downtown Public Market"
+      lon: 124.220
+      lat: 8.225
+      weight: 15.0
+
+    - name: "University Belt"
+      lon: 124.225
+      lat: 8.235
       weight: 12.0
 
-    - name: "Jeepney Terminal"
-      lon: 124.208
-      lat: 8.201
+    - name: "North Regional Terminal"
+      lon: 124.230
+      lat: 8.245
+      weight: 10.0
+
+    - name: "South City Terminal"
+      lon: 124.215
+      lat: 8.205
+      weight: 10.0
+
+    - name: "Mega Mall Complex"
+      lon: 124.235
+      lat: 8.220
       weight: 9.0
 
-    - name: "University"
-      lon: 124.205
-      lat: 8.205
+    - name: "BPO / Tech Park"
+      lon: 124.210
+      lat: 8.230
+      weight: 8.0
+
+    - name: "City General Hospital"
+      lon: 124.215
+      lat: 8.235
+      weight: 7.0
+
+    - name: "Heavy Industrial Zone"
+      lon: 124.240
+      lat: 8.210
       weight: 6.0
 
-    - name: "Residential North"
-      lon: 124.208
-      lat: 8.208
+    - name: "Suburban Residential (East)"
+      lon: 124.245
+      lat: 8.225
+      weight: 3.0
+
+    - name: "Suburban Residential (Northeast)"
+      lon: 124.245
+      lat: 8.245
       weight: 2.0
 
-    - name: "Industrial South"
-      lon: 124.201
-      lat: 8.201
-      weight: 4.0
+    - name: "Suburban Residential (Southwest)"
+      lon: 124.205
+      lat: 8.205
+      weight: 2.5
 
 ########## TRAVEL GRAPH WEIGHTS ########################
 # Identical to iligan_configs — we want to exercise the same
@@ -90,7 +116,6 @@ simulation:
   seconds_per_tick: 30
 
 ########## OPTIMIZATION PARAMETERS ########################
-########## OPTIMIZATION PARAMETERS ########################
 optimization:
   output_root: "outputs/toy_runs"
   telemetry_interval: 2
@@ -107,8 +132,11 @@ optimization:
   initial_tau: 1.0
   rho: 0.15
   q: 1000.0
-  p_local_search: 0.4
-  default_jeep_weight: 1.0
   
+  p_ls_attraction: 0.4 # Aggressive geometric expansion
+  p_ls_repulsion: 0.4 # Maintains systemic equilibrium with attraction
+  p_ls_pruning: 0.6 # Operates at higher frequency than additive mutations, acts as continuous garbage collection protool
+  
+  default_jeep_weight: 1.0
   alpha_std_penalty: 0.5
   beta_penalty: 2.0

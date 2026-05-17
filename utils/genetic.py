@@ -1,164 +1,189 @@
 """genetic.py
 
 Implements the Lamarckian Memetic Algorithm for Phase D.
-Handles Chromosome data structures, lineage tracking, crossover, 
-fitness-weighted pheromone inheritance, and tiered local search.
+Handles Chromosome data structures, lineage tracking, crossover,
+fitness-weighted pheromone inheritance, and local search execution.
 """
 
+from __future__ import annotations
 import math
 import random
-import pickle
 import uuid
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
 from .route import Route
 from .pheromone import PheromoneMatrix
 from .local_search import ACOLocalSearch
-from .jeep_system import FleetAllocator 
+from .jeep_system import FleetAllocator
+
 
 class Chromosome:
-    def __init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix, generation: int = 0, parents: list[str] = None):
-        self.uid = f"chrom_{uuid.uuid4().hex[:8]}"
-        self.generation = generation
-        self.parents = parents or []
-        self.routes = routes
-        self.allocation = allocation
-        self.pheromones = pheromones
-        self.cost = 0.0
+    """Represents a transit route configuration within the genetic algorithm."""
+
+    def __init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix, generation: int = 0, parents: Optional[list[str]] = None) -> None:
+        self.uid: str = f"chrom_{uuid.uuid4().hex[:8]}"
+        self.generation: int = generation
+        self.parents: list[str] = parents if parents is not None else []
+        self.routes: list[Route] = routes
+        self.allocation: dict[Route, int] = allocation
+        self.pheromones: PheromoneMatrix = pheromones
+        self.cost: float = 0.0
+
+    def __str__(self) -> str:
+        return f"Chromosome(uid={self.uid}, generation={self.generation}, cost={self.cost:.2f}, routes={len(self.routes)})"
+
 
 class MemeticAlgorithm:
-    def __init__(self, cg: Any, local_search: ACOLocalSearch, target_route_count: int):
-        self.cg = cg
-        self.local_search = local_search
-        self.target_route_count = target_route_count
+    """Executes Lamarckian evolutionary operations on Chromosome instances."""
 
-    def _get_busiest_node(self, routes: list[Route], pheromones: PheromoneMatrix) -> Any:
-        node_demand = {}
+    def __init__(self, cg: Any, local_search: ACOLocalSearch, target_route_count: int, verbose: bool = False) -> None:
+        if cg is None:
+            raise ValueError("[MEMETIC ALGO] CityGraph cannot be None.")
+        if local_search is None:
+            raise ValueError("[MEMETIC ALGO] ACOLocalSearch cannot be None.")
+        if target_route_count <= 0:
+            raise ValueError(f"[MEMETIC ALGO] Target route count must be positive, got {target_route_count}.")
+
+        self.cg: Any = cg
+        self.local_search: ACOLocalSearch = local_search
+        self.target_route_count: int = target_route_count
+        self.verbose: bool = verbose
+
+    def __str__(self) -> str:
+        return f"MemeticAlgorithm(target_route_count={self.target_route_count}, verbose={self.verbose})"
+
+    def _get_hub_edges(self, routes: list[Route], pheromones: PheromoneMatrix) -> set[Any]:
+        """Identifies the topological sub-graph of the top 10% highest demand edges."""
+        if not routes:
+            raise ValueError("[MEMETIC ALGO] Routes list is empty.")
+            
+        edge_demand: list[tuple[float, Any]] = []
         for r in routes:
             for edge in r.path:
-                tau = pheromones.tau.get(edge, 0)
-                node_demand[edge.start] = node_demand.get(edge.start, 0) + tau
-                node_demand[edge.end] = node_demand.get(edge.end, 0) + tau
+                tau: float = pheromones.tau.get(edge, 0.0)
+                edge_demand.append((tau, edge))
                 
-        if not node_demand: 
-            return random.choice(self.cg.nodes)
-        return max(node_demand, key=node_demand.get)
+        if not edge_demand:
+            return set()
+            
+        edge_demand.sort(key=lambda x: x[0], reverse=True)
+        top_k: int = max(1, len(edge_demand) // 10)
+        
+        return {getattr(e, 'id', id(e)) for _, e in edge_demand[:top_k]}
 
     def crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route]:
-        busiest_node = self._get_busiest_node(parent_a.routes, parent_a.pheromones)
-        
-        touching_routes = []
+        """
+        Executes a topological crossover utilizing a high-demand sub-graph cluster.
+        """
+        if parent_a is None or parent_b is None:
+            raise ValueError("[MEMETIC ALGO] Parents cannot be None for crossover.")
+
+        hub_edge_ids = self._get_hub_edges(parent_a.routes, parent_a.pheromones)
+
+        touching_routes: list[Route] = []
         for r in parent_a.routes:
-            nodes = {e.start for e in r.path}.union({e.end for e in r.path})
-            if busiest_node in nodes:
+            intersects = any(getattr(e, 'id', id(e)) in hub_edge_ids for e in r.path)
+            if intersects:
                 touching_routes.append(r)
-                
-        max_hub_size = math.ceil(self.target_route_count / 2.0)
-        
+
+        max_hub_size: int = math.ceil(self.target_route_count / 2.0)
+
         if len(touching_routes) > max_hub_size:
-            def localized_density(route: Route) -> float:
-                density = 0.0
+            def _localized_density(route: Route) -> float:
+                density: float = 0.0
                 for e in route.path:
-                    if e.start == busiest_node or e.end == busiest_node:
-                        density += parent_a.pheromones.tau.get(e, 0)
+                    if getattr(e, 'id', id(e)) in hub_edge_ids:
+                        density += parent_a.pheromones.tau.get(e, 0.0)
                 return density
-            
-            touching_routes.sort(key=localized_density, reverse=True)
+
+            touching_routes.sort(key=_localized_density, reverse=True)
             touching_routes = touching_routes[:max_hub_size]
 
-        hub_cluster = [Route(path=r.path[:], city_graph=self.cg) for r in touching_routes]
-                
+        hub_cluster: list[Route] = [Route(path=r.path[:], city_graph=self.cg) for r in touching_routes]
+
         if not hub_cluster:
             fallback = random.choice(parent_a.routes)
             hub_cluster = [Route(path=fallback.path[:], city_graph=self.cg)]
 
-        child_routes = hub_cluster[:]
-        hub_edges = {e for r in hub_cluster for e in r.path}
-            
-        candidates = []
+        child_routes: list[Route] = hub_cluster[:]
+        current_child_edge_ids = {getattr(e, 'id', id(e)) for r in hub_cluster for e in r.path}
+
+        candidates: list[tuple[int, Route]] = []
         for r in parent_b.routes:
-            overlap_count = sum(1 for e in r.path if e in hub_edges)
+            overlap_count: int = sum(1 for e in r.path if getattr(e, 'id', id(e)) in current_child_edge_ids)
             candidates.append((overlap_count, r))
-            
-        candidates.sort(key=lambda x: x[0]) 
-        
+
+        candidates.sort(key=lambda x: x[0])
+
         for _, r in candidates:
-            if len(child_routes) >= self.target_route_count: 
+            if len(child_routes) >= self.target_route_count:
                 break
             existing_paths = [cr.path for cr in child_routes]
             if r.path not in existing_paths:
                 child_routes.append(Route(path=r.path[:], city_graph=self.cg))
-                
+
         while len(child_routes) < self.target_route_count:
             fallback = random.choice(parent_a.routes)
             child_routes.append(Route(path=fallback.path[:], city_graph=self.cg))
-            
+
         return child_routes
 
     def inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix:
-        child_phero = PheromoneMatrix(all_edges=self.cg.graph)
-        total_cost = parent_a.cost + parent_b.cost
-        if total_cost == 0: 
+        if parent_a is None or parent_b is None:
+            raise ValueError("[MEMETIC ALGO] Parents cannot be None for inheritance.")
+
+        child_phero = PheromoneMatrix(all_edges=self.cg.graph, config={})
+        
+        total_cost: float = parent_a.cost + parent_b.cost
+        if total_cost == 0.0:
             total_cost = 1.0
-        
-        weight_a = parent_b.cost / total_cost
-        weight_b = parent_a.cost / total_cost
-        
+
+        weight_a: float = parent_b.cost / total_cost
+        weight_b: float = parent_a.cost / total_cost
+
         all_edges = set(parent_a.pheromones.tau.keys()).union(parent_b.pheromones.tau.keys())
         for e in all_edges:
-            tau_a = parent_a.pheromones.tau.get(e, 0)
-            tau_b = parent_b.pheromones.tau.get(e, 0)
-            blended = (weight_a * tau_a) + (weight_b * tau_b)
-            if blended > 0:
+            tau_a: float = parent_a.pheromones.tau.get(e, 0.0)
+            tau_b: float = parent_b.pheromones.tau.get(e, 0.0)
+            blended: float = (weight_a * tau_a) + (weight_b * tau_b)
+            if blended > 0.0:
                 child_phero.tau[e] = blended
-                
+
         return child_phero
 
-    def _execute_soft_prune(self, route: Route) -> Route:
-        if len(route.path) <= 2:
-            return route
-        return Route(path=route.path[:-1], city_graph=self.cg)
-
     def evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float:
+        if chrom is None:
+            raise ValueError("[MEMETIC ALGO] Chromosome cannot be None.")
+        if total_fleet <= 0:
+            raise ValueError(f"[MEMETIC ALGO] Total fleet must be positive, got {total_fleet}.")
+
         allocation = FleetAllocator.allocate_by_mohring(total_fleet, chrom.routes, chrom.pheromones, self.cg)
         report = FleetAllocator.evaluate_allocation(allocation, chrom.pheromones)
-        
-        system_cost = 0.0
+
+        system_cost: float = 0.0
         for r_data in report.values():
             if r_data["jeeps"] > 0:
                 system_cost += (r_data["headway"] * 0.4) + (r_data["length"] * 0.6)
             else:
-                system_cost += 10000.0 
+                system_cost += 10000.0
         chrom.allocation = allocation
         chrom.cost = system_cost
         return system_cost
 
     def apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool:
-        target_route_idx = random.randint(0, len(child.routes) - 1)
-        original_route = child.routes[target_route_idx]
+        if child is None:
+            raise ValueError("[MEMETIC ALGO] Child chromosome cannot be None.")
 
-        # Tier 1: Soft-Body Mutation
-        soft_route = self._execute_soft_prune(original_route)
-        child.routes[target_route_idx] = soft_route
-        soft_cost = self.evaluate_chromosome(child, total_fleet)
-        
-        if soft_cost < target_cost:
-            return True
-
-        # Revert soft mutation
-        child.routes[target_route_idx] = original_route
-
-        # Tier 2: Hard-Body ACO System Optimization
         original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
-        gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
         
-        self.local_search.optimize_system(child.routes, child.pheromones, gaps)
-        hard_cost = self.evaluate_chromosome(child, total_fleet)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        self.local_search.optimize_system(child.routes, child.pheromones, intensity=1.0)
+        
+        hard_cost: float = self.evaluate_chromosome(child, total_fleet)
 
         if hard_cost < target_cost:
             return True
 
-        # Rejection: Restore original state
         child.routes = original_routes_backup
         self.evaluate_chromosome(child, total_fleet)
         return False
