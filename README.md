@@ -331,6 +331,10 @@ Errors:
 
 - Raises a `ValueError` if visualization context is missing or if rendering is requested on a non-square canvas.
 
+**Example output:**
+
+![Route Infrastructure vs Pheromone Demand](documentation/route_infrastructure_vs_pheromone_demand.png)
+
 ### `local_search.py`
 
 `ACOLocalSearch` is the optimization engine that mutates routes to improve coverage, directness, and efficiency.
@@ -372,6 +376,10 @@ This notebook serves as the reasoning log, validation harness, and high-performa
 - Validates the three primary mutation operators (Spatial Attraction, Redundancy Repulsion, and Tortuosity Pruning) using targeted candidate searches that guarantee organic triggers.
 - Quantifies performance shifts across baseline and mutated systems using both the static surrogate evaluator and full transit simulation runs.
 - Implements prioritized drawing overlays where the mutated route is colored in bold red and drawn last on top of muted slate-gray unmutated background routes.
+
+**Example output:**
+
+![ACO Local Search Operator Showcase](documentation/aco_local_search_operator_showcase.png)
 
 ### `configs/iligan_configs.yaml`
 
