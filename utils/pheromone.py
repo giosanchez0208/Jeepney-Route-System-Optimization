@@ -48,6 +48,11 @@ class PheromoneMatrix:
         # that iterate it, but writes go through the coord-keyed store.
         self.tau: dict['DirEdge', float] = _TauView(self._tau, self._edge_repr)
 
+        # Cached demand-service gaps, populated by the ACO loop after each
+        # evaluation via: pheromones.gaps = pheromones.calculate_demand_service_gaps(jeep_system)
+        # Operators read this directly so gaps don't need to be passed as a parameter.
+        self.gaps: dict = {}
+
         if sim_result:
             self.update_pheromones(sim_result)
 
