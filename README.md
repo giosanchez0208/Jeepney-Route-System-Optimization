@@ -1,5 +1,150 @@
 # Jeepney Route System Optimization
 
+OVERVIEW:
+
+```mermaid
+flowchart TD
+    subgraph Layer0 [0 — Configuration]
+        Config[configs/iligan_configs.yaml\nExperimentConfig]
+    end
+
+    subgraph Layer1 [1 — Spatial Primitives]
+        N[Node\nlon, lat, layer]
+        DE[DirEdge\nstart, end, weight, drivable]
+        Stitch[_stitch / _connect\nO 1 hash adjacency]
+        Hav[Haversine Distance]
+        
+        N --> DE
+        DE --> Stitch
+        DE --> Hav
+    end
+
+    Config --> N
+    Config --> DE
+
+    subgraph Layer2 [2 — City Graph]
+        CG[CityGraph\nOSM / PBF / API]
+        ToyC[toy_city.py\nManhattan grid]
+    end
+
+    Stitch --> CG
+    N --> CG
+    ToyC -.-> CG
+
+    subgraph Layer3 [3 — Demand Surface]
+        DDMCfg[DDMConfig]
+        TomTom[TomTom API]
+        DDS[DirectDemandSampler\nWalker's Alias]
+        ToyDDM[ToyDDM]
+    end
+
+    CG --> DDS
+    DDMCfg --> DDS
+    TomTom --> DDS
+    ToyDDM -.-> DDS
+
+    subgraph Layer4 [4 — Route Generation]
+        RG[RouteGenerator]
+        Rt[Route\nClosed Layer-2 Loop]
+    end
+
+    DDS --> RG
+    CG --> RG
+    RG --> Rt
+
+    subgraph Layer5 [5 — Multi-layer Travel Graph]
+        TG[TravelGraph\nL1 walk, L2 ride, L3 alight/transfer]
+    end
+
+    Rt --> TG
+    CG --> TG
+
+    subgraph Layer6 [6 — Transit Agents]
+        J[Jeep]
+        JS[JeepSystem\nFleet Coordinator]
+        P[Passenger]
+        PG[PassengerGenerator]
+    end
+
+    TG --> J
+    TG --> JS
+    TG --> P
+    TG --> PG
+    J --> JS
+    P --> PG
+
+    subgraph Layer7 [7 — Simulation]
+        SimSet[SimulationSetup]
+        Sim[Simulation]
+        SimRes[SimulationResult]
+    end
+
+    JS --> SimSet
+    PG --> SimSet
+    SimSet --> Sim
+    Sim --> SimRes
+
+    subgraph Layer8 [8 — Evaluators]
+        SSE[StaticSurrogateEvaluator]
+        SE[SimulationEvaluator]
+    end
+
+    SimRes --> SSE
+    SimRes --> SE
+
+    subgraph Layer9 [9 — Pheromone Matrix & ACO]
+        PM[PheromoneMatrix]
+        ACO[ACOLocalSearch\nAttraction, Repulsion, Pruning]
+    end
+
+    SimRes -.-> PM
+    PM <--> ACO
+
+    subgraph Layer10 [10 — Genetic Algorithm]
+        Chr[Chromosome]
+        MA[MemeticAlgorithm]
+        OptState[OptimizationState]
+    end
+
+    PM --> Chr
+    ACO --> MA
+    Chr --> MA
+    MA --> OptState
+    SSE -.-> MA
+
+    subgraph Layer11 [11 — Memetic Engine]
+        Adapt[AdaptiveController]
+        ME[MemeticEngine\nTournament, Crossover, Lamarckian Gate]
+    end
+
+    OptState --> ME
+    Adapt --> ME
+    ME -. "Next Generation" .-> OptState
+
+    subgraph Layer12 [12 — Optimizer Orchestration]
+        SPE[StatePreservationEngine\nAtomic Checkpointing]
+        TE[TelemetryEngine\nJSON Snapshots, CSV]
+        OB[OptimizerBuilder]
+        Opt[Optimizer\nMaster Orchestrator]
+    end
+
+    ME --> TE
+    OptState -.-> Opt
+    OptState -.-> TE
+    OptState -.-> SPE
+    Config -.-> Opt
+    SPE --> Opt
+    TE --> Opt
+    OB --> Opt
+
+    subgraph Support [Support & Diagnostics]
+        Viz[visualization.py\nGIF, Tkinter]
+        Diag[Diagnostic Notebooks]
+    end
+
+    Sim -.-> Viz
+```
+
 This README covers:
 
 - `utils/node.py`
