@@ -1,9 +1,3 @@
-"""
-local_search.py
-
-Flow: routes + pheromones + demand gaps -> local edits -> improved route layout.
-"""
-
 import math
 import random
 from typing import Any, Optional
@@ -76,7 +70,7 @@ class ACOLocalSearch:
         """Stable identity key for an edge, robust to missing __eq__/__hash__."""
         return getattr(edge, 'id', id(edge))
 
-    def strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> Optional[Route]:
+    def strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]:
         """
         Operator: Demand-Driven Attraction (Coverage).
 
@@ -95,6 +89,7 @@ class ACOLocalSearch:
           properly connected loop path[i].end == path[i+1].start always, so saved == 0 always.
           The score is simply d_entry + d_exit.
         """
+        gaps = pheromones.gaps
         if not routes or not gaps: return None
 
         positive_gaps = {e: gap for e, gap in gaps.items() if gap > 0}
@@ -148,7 +143,7 @@ class ACOLocalSearch:
 
         return None
 
-    def strategy_redundancy_repulsion(self, routes: list[Route], gaps: dict, intensity: float = 1.0) -> Optional[Route]:
+    def strategy_redundancy_repulsion(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]:
         """
         Operator: Oversupply Repulsion (Efficiency).
 
@@ -163,6 +158,7 @@ class ACOLocalSearch:
           half a short route. The ascending-sort nearby candidates then can't bridge the gap,
           causing consistent fallthrough despite the sort fix.
         """
+        gaps = pheromones.gaps
         if not routes or not gaps: return None
 
         e_overserved = min(gaps, key=gaps.get)
@@ -218,46 +214,69 @@ class ACOLocalSearch:
 
         return None
 
-    def strategy_tortuosity_pruning(self, routes: list[Route], intensity: float = 1.0) -> tuple[int, Optional[Route]]:
+    def strategy_tortuosity_pruning(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> tuple[int, Optional[Route]]:
         """
-        Operator: Tortuosity Pruning (Directness).
+        Operator: Demand-Aware Tortuosity Pruning (Gap-Immune).
 
         A robust network relies on a simple structure with clearly defined corridors rather than a highly
-        diffuse, complex mesh (Ceder & Wilson, 1986). Trimming tortuosity directly reduces the generalized
-        travel cost (ride time penalty) for passengers (Guillen et al., 2013).
+        diffuse, complex mesh (Ceder & Wilson, 1986). This implementation executes a targeted amputation
+        by mathematically evaluating the ratio of a segment's geometric inefficiency against its local
+        passenger demand.
 
-        Fix (v1): Threshold relaxed from 0.8 to 0.95. On a Manhattan/grid network A* already
-          returns near-optimal paths, so the direct/current ratio hovers close to 1.0 and 0.8
-          was structurally unreachable. 0.95 fires whenever a 5%+ shortcut exists. Window
-          clamped to 30 to avoid scanning degenerate segments on short routes.
+        Fix (v3): Added gap immunity. The pheromone-weighted score (distance / utility) correctly
+          prioritizes low-pheromone detours for pruning — but underserved edges have low pheromone
+          by definition, since nothing routes through them yet. This caused pruning to
+          preferentially target exactly the detours that attraction added to serve those edges,
+          creating a generational feedback loop where attraction's coverage gains were continuously
+          erased. Segments containing any positive-gap (underserved) edge are now skipped entirely
+          as pruning candidates, making the two operators orthogonal rather than antagonistic.
         """
+        if not routes or not pheromones: return 0, None
+
         prunes       = 0
         target_route = None
         window = max(3, min(int(self.base_window_size * intensity), 30))
 
+        tau_by_id       = {self._edge_id(k): v for k, v in pheromones.tau.items()}
+        gaps            = pheromones.gaps
+        underserved_ids = {self._edge_id(e) for e, g in gaps.items() if g > 0} if gaps else set()
+
         for r in routes:
             if len(r.path) <= window: continue
-            best_reduction = 0
-            best_path      = None
 
+            candidates = []
             for i in range(len(r.path) - window):
-                segment_start = r.path[i].start
-                segment_end   = r.path[i + window - 1].end
+                current_segment = r.path[i:i + window]
+
+                # Gap immunity: never prune a window that covers underserved demand.
+                # These detours exist to serve edges that attraction is actively trying
+                # to reach; shortcutting them would undo coverage work across generations.
+                if any(self._edge_id(e) in underserved_ids for e in current_segment):
+                    continue
+
+                current_distance = sum(e.getLength() for e in current_segment)
+                local_utility    = sum(tau_by_id.get(self._edge_id(e), 1.0) for e in current_segment)
+                safe_utility     = max(1.0, local_utility)
+                score            = current_distance / safe_utility
+                candidates.append((score, i, current_segment, current_distance))
+
+            candidates.sort(key=lambda x: x[0], reverse=True)
+
+            best_path = None
+            for score, i, current_segment, current_distance in candidates:
+                segment_start = current_segment[0].start
+                segment_end   = current_segment[-1].end
 
                 direct_path = self._get_shortest_path_edges(segment_start, segment_end)
                 if not direct_path: continue
 
-                current_segment  = r.path[i:i + window]
-                current_distance = sum(e.getLength() for e in current_segment)
-                direct_distance  = sum(e.getLength() for e in direct_path)
+                direct_distance = sum(e.getLength() for e in direct_path)
 
                 if direct_distance < current_distance * 0.95:
-                    reduction = current_distance - direct_distance
-                    if reduction > best_reduction:
-                        candidate_path = self._safe_splice(r.path, i, i + window, direct_path)
-                        if candidate_path:
-                            best_reduction = reduction
-                            best_path      = candidate_path
+                    candidate_path = self._safe_splice(r.path, i, i + window, direct_path)
+                    if candidate_path:
+                        best_path = candidate_path
+                        break
 
             if best_path:
                 r.path = best_path
@@ -267,12 +286,12 @@ class ACOLocalSearch:
 
         return prunes, target_route
 
-    def optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> dict:
+    def optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> dict:
         actions = {"attraction": False, "repulsion": False, "prunes": 0}
         if random.random() < self.p_local:
-            actions["attraction"] = self.strategy_spatial_attraction(routes, pheromones, gaps, intensity) is not None
+            actions["attraction"] = self.strategy_spatial_attraction(routes, pheromones, intensity) is not None
         if random.random() < self.p_local:
-            actions["repulsion"] = self.strategy_redundancy_repulsion(routes, gaps, intensity) is not None
+            actions["repulsion"] = self.strategy_redundancy_repulsion(routes, pheromones, intensity) is not None
         if random.random() < (self.p_local * 1.5):
-            actions["prunes"], _ = self.strategy_tortuosity_pruning(routes, intensity)
+            actions["prunes"], _ = self.strategy_tortuosity_pruning(routes, pheromones, intensity)
         return actions

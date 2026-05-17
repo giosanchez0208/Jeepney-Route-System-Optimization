@@ -222,7 +222,7 @@ class Simulation:
         incomplete = self.passenger_generator.passengers
         
         completed_times = [p.despawn_tick - p.spawn_tick for p in completed if p.despawn_tick is not None]
-        incomplete_penalties = [self.current_tick - p.spawn_tick + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
+        incomplete_penalties = [self.passenger_generator.simulated_time - p.spawn_tick + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
         
         n_completed = len(completed_times)
         if n_completed > 0:
