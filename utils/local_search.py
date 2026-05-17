@@ -1,12 +1,7 @@
-"""Flow: routes + pheromones + demand gaps -> local edits -> improved route layout.
+"""
+local_search.py
 
-ACOLocalSearch(cg: Any, p_local: float = 0.5, base_window_size: int = 15) -> None owns the Phase C route refinement logic.
-calculate_route_similarity(self, route_a: Route, route_b: Route) -> float compares route shapes.
-strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> Optional[Route], strategy_redundancy_repulsion(self, routes: list[Route], gaps: dict, intensity: float = 1.0) -> Optional[Route], strategy_tortuosity_pruning(self, routes: list[Route], intensity: float = 1.0) -> tuple[int, Optional[Route]], and optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> dict are the public search methods.
-
-Inputs: CityGraph access, routes, pheromone matrix, demand gaps, and intensity.
-Outputs: optional route replacements plus an action summary from optimize_system().
-Imported modules used: Route and PheromoneMatrix, plus math and random helpers.
+Flow: routes + pheromones + demand gaps -> local edits -> improved route layout.
 """
 
 import math
@@ -14,6 +9,7 @@ import random
 from typing import Any, Optional
 from .route import Route
 from .pheromone import PheromoneMatrix
+
 
 class ACOLocalSearch:
     def __init__(self, cg: Any, p_local: float = 0.5, base_window_size: int = 15):
@@ -39,26 +35,36 @@ class ACOLocalSearch:
     def _get_shortest_path_edges(self, start_node: Any, end_node: Any) -> list[Any]:
         if start_node == end_node: return []
         try:
-            path = self.cg.findShortestPath(start_node, end_node)
+            path = self.cg.find_shortest_path(start_node, end_node)
             return path if path else []
-        except:
+        except Exception:
             return []
 
     def _stitch_path(self, raw_edges: list) -> Optional[list]:
         if not raw_edges: return None
+
         stitched = [raw_edges[0]]
         for i in range(1, len(raw_edges)):
             prev_edge = stitched[-1]
             next_edge = raw_edges[i]
+
             if prev_edge.end != next_edge.start:
                 bridge = self._get_shortest_path_edges(prev_edge.end, next_edge.start)
-                if not bridge: return None 
-                stitched.extend(bridge)
-            stitched.append(next_edge)
-        if stitched[-1].end != stitched[0].start:
+                if not bridge: return None
+                for e in bridge:
+                    if not stitched or stitched[-1].id != e.id:
+                        stitched.append(e)
+
+            if not stitched or stitched[-1].id != next_edge.id:
+                stitched.append(next_edge)
+
+        if stitched and stitched[-1].end != stitched[0].start:
             loop_bridge = self._get_shortest_path_edges(stitched[-1].end, stitched[0].start)
             if not loop_bridge: return None
-            stitched.extend(loop_bridge)
+            for e in loop_bridge:
+                if not stitched or stitched[-1].id != e.id:
+                    stitched.append(e)
+
         return stitched
 
     def _safe_splice(self, path: list, start_idx: int, end_idx: int, new_segment: list) -> Optional[list]:
@@ -66,144 +72,199 @@ class ACOLocalSearch:
         raw_path = path[:start_idx] + new_segment + path[end_idx:]
         return self._stitch_path(raw_path)
 
+    def _edge_id(self, edge: Any) -> Any:
+        """Stable identity key for an edge, robust to missing __eq__/__hash__."""
+        return getattr(edge, 'id', id(edge))
+
     def strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> Optional[Route]:
+        """
+        Operator: Demand-Driven Attraction (Coverage).
+
+        Transit networks must adapt to underserved demand hotspots to maximize coverage and market capture
+        (Nielsen et al., 2005). Demand-based node insertion is the primary local search operator in TNDP
+        metaheuristics to capture unserved market share (Iliopoulou et al., 2019).
+
+        Fix 1 (v1): Removed the inverted pheromone gate that blocked the best candidate routes.
+        Fix 2 (v1): Replaced closest-edge proximity with cheapest-insertion cost scoring.
+        Fix 3 (v2): Corrected splice from window-based replacement to a true zero-width insertion.
+          The v1 code excised a window of existing edges around the insertion point and replaced
+          them with just the target edge — deleting coverage, not adding it. A pure insertion
+          uses path[:idx] + [target_edge] + path[idx:] before stitching, preserving all existing
+          edges.
+        Fix 4 (v2): Removed the dead `saved` term from the cheapest-insertion score. On a
+          properly connected loop path[i].end == path[i+1].start always, so saved == 0 always.
+          The score is simply d_entry + d_exit.
+        """
         if not routes or not gaps: return None
 
-        route_pheromones = {r: sum(pheromones.tau.get(e, 0) for e in r.path) for r in routes}
-        r_star = min(route_pheromones, key=route_pheromones.get)
-        
-        path_len = len(r_star.path)
-        if path_len < 2: 
-            return None
+        positive_gaps = {e: gap for e, gap in gaps.items() if gap > 0}
+        if not positive_gaps: return None
 
-        # Clamp window to the current path length
-        window = min(path_len, max(2, int(self.base_window_size * intensity)))
-        
-        best_idx = 0
-        lowest_segment_tau = float('inf')
-        
-        # Ensure the loop runs even if path_len == window
-        search_range = max(1, path_len - window + 1)
-        for i in range(search_range):
-            seg_tau = sum(pheromones.tau.get(e, 0) for e in r_star.path[i:i+window])
-            if seg_tau < lowest_segment_tau:
-                lowest_segment_tau = seg_tau
-                best_idx = i
+        sorted_gaps = sorted(positive_gaps.items(), key=lambda x: x[1], reverse=True)
+        candidate_targets = sorted_gaps[:max(1, int(len(sorted_gaps) * 0.3))]
+        random.shuffle(candidate_targets)
 
-        # Guard against index overflow
-        node_center_idx = min(path_len - 1, best_idx + window // 2)
-        node_center = r_star.path[node_center_idx].start
-        
-        max_radius = 0.02 * intensity
-        
-        candidate_edges = []
-        for e, gap in gaps.items():
-            if gap > 0:
-                dist = math.sqrt((e.start.lat - node_center.lat)**2 + (e.start.lon - node_center.lon)**2)
-                if dist <= max_radius:
-                    candidate_edges.append((e, gap))
-        
-        if not candidate_edges:
-            e_star = max(gaps, key=gaps.get)
-        else:
-            e_star = max(candidate_edges, key=lambda x: x[1])[0]
+        for target_edge, _ in candidate_targets:
+            target_id = self._edge_id(target_edge)
 
-        healed_raw = r_star.path[:best_idx] + r_star.path[best_idx + window:]
-        if not healed_raw: return None
-        healed_path = self._stitch_path(healed_raw)
-        if not healed_path: return None
+            best_route      = None
+            best_insert_idx = -1
+            min_detour_cost = float('inf')
 
-        insert_idx = 0
-        min_dist = float('inf')
-        for i, edge in enumerate(healed_path):
-            dist = (edge.end.lat - e_star.start.lat)**2 + (edge.end.lon - e_star.start.lon)**2
-            if dist < min_dist:
-                min_dist = dist
-                insert_idx = i
+            for r in routes:
+                route_edge_ids = {self._edge_id(e) for e in r.path}
+                if target_id in route_edge_ids:
+                    continue  # route already serves this edge
 
-        raw_new = healed_path[:insert_idx+1] + [e_star] + healed_path[insert_idx+1:]
-        final_path = self._stitch_path(raw_new)
+                n = len(r.path)
+                for i in range(n):
+                    # Cheapest-insertion: cost of opening the seam between edge i and i+1
+                    # and routing through target_edge before closing it again.
+                    entry_node = r.path[i].end
+                    exit_node  = r.path[(i + 1) % n].start
 
-        if final_path:
-            r_star.path = final_path
-            return r_star
+                    d_entry = math.sqrt(
+                        (entry_node.lat - target_edge.start.lat) ** 2 +
+                        (entry_node.lon - target_edge.start.lon) ** 2
+                    )
+                    d_exit = math.sqrt(
+                        (target_edge.end.lat - exit_node.lat) ** 2 +
+                        (target_edge.end.lon - exit_node.lon) ** 2
+                    )
+                    detour_cost = d_entry + d_exit
+
+                    if detour_cost < min_detour_cost:
+                        min_detour_cost = detour_cost
+                        best_route      = r
+                        best_insert_idx = i + 1  # insert *after* seam edge i
+
+            if best_route is not None and best_insert_idx != -1:
+                # Pure insertion — no existing edges removed, _stitch_path bridges any gaps.
+                raw_path   = best_route.path[:best_insert_idx] + [target_edge] + best_route.path[best_insert_idx:]
+                final_path = self._stitch_path(raw_path)
+                if final_path:
+                    best_route.path = final_path
+                    return best_route
+
         return None
 
     def strategy_redundancy_repulsion(self, routes: list[Route], gaps: dict, intensity: float = 1.0) -> Optional[Route]:
+        """
+        Operator: Oversupply Repulsion (Efficiency).
+
+        Operator viability requires minimizing redundant vehicle kilometers and deadhead trips. If multiple
+        lines overlap entirely, parallel corridors are starved (Silva, 2024). Informal transit networks
+        naturally cluster on main arterials, creating hyper-redundancy (Global Network for Popular Transportation & UNDP, 2024).
+
+        Fix 1 (v1): Detour candidates sorted ascending — short, reachable detours tried first.
+        Fix 2 (v1): Overserved-edge exclusion uses stable IDs instead of object identity.
+        Fix 3 (v2): Excision window clamped to at most 20% of route length. The old formula
+          (base_window_size/2 * intensity) at intensity=3 gave window ~22, large enough to excise
+          half a short route. The ascending-sort nearby candidates then can't bridge the gap,
+          causing consistent fallthrough despite the sort fix.
+        """
         if not routes or not gaps: return None
 
         e_overserved = min(gaps, key=gaps.get)
         if gaps[e_overserved] >= 0: return None
 
-        overlapping_routes = [r for r in routes if e_overserved in r.path]
-        if len(overlapping_routes) < 2: return None 
+        overserved_id      = self._edge_id(e_overserved)
+        overlapping_routes = [r for r in routes if any(self._edge_id(e) == overserved_id for e in r.path)]
+        if len(overlapping_routes) < 2: return None
 
         r_target = random.choice(overlapping_routes)
-        idx = r_target.path.index(e_overserved)
-        
-        window = max(1, int((self.base_window_size / 2) * intensity))
-        start_idx = max(0, idx - window // 2)
-        end_idx = min(len(r_target.path), idx + window // 2 + 1)
-        
-        node_before = r_target.path[start_idx].start
-        node_after = r_target.path[end_idx - 1].end
 
-        target_radius = 0.015 * intensity
+        idx = next((i for i, e in enumerate(r_target.path) if self._edge_id(e) == overserved_id), None)
+        if idx is None: return None
+
+        # Clamp window to 20% of route length so we never excise more than a small corridor.
+        raw_window = max(1, int((self.base_window_size / 2) * intensity))
+        max_window = max(1, len(r_target.path) // 5)
+        window     = min(raw_window, max_window)
+
+        start_idx = max(0, idx - window // 2)
+        end_idx   = min(len(r_target.path), idx + window // 2 + 1)
+
+        node_before = r_target.path[start_idx].start
+        node_after  = r_target.path[end_idx - 1].end
+
+        target_radius   = 0.015 * intensity
         candidate_nodes = [n for n in self.cg.nodes if n != node_before and n != node_after]
-        
+
         valid_detours = []
         for n in candidate_nodes:
-            dist_start = math.sqrt((n.lat - node_before.lat)**2 + (n.lon - node_before.lon)**2)
-            dist_end = math.sqrt((n.lat - node_after.lat)**2 + (n.lon - node_after.lon)**2)
+            dist_start = math.sqrt((n.lat - node_before.lat) ** 2 + (n.lon - node_before.lon) ** 2)
+            dist_end   = math.sqrt((n.lat - node_after.lat)  ** 2 + (n.lon - node_after.lon)  ** 2)
             if dist_start < target_radius and (dist_start + dist_end) < (target_radius * 3):
                 valid_detours.append((n, dist_start + dist_end))
-        
-        valid_detours.sort(key=lambda x: x[1], reverse=True)
-        
+
+        # Ascending: prefer the shortest geometric detour — most likely to be pathfindable.
+        valid_detours.sort(key=lambda x: x[1])
+
         for detour_node, _ in valid_detours[:20]:
-            bridge_in = self._get_shortest_path_edges(node_before, detour_node)
+            bridge_in  = self._get_shortest_path_edges(node_before, detour_node)
             if not bridge_in: continue
             bridge_out = self._get_shortest_path_edges(detour_node, node_after)
             if not bridge_out: continue
-            
-            if e_overserved in bridge_in or e_overserved in bridge_out:
+
+            bridge_ids = {self._edge_id(e) for e in bridge_in + bridge_out}
+            if overserved_id in bridge_ids:
                 continue
-            
+
             new_path = self._safe_splice(r_target.path, start_idx, end_idx, bridge_in + bridge_out)
             if new_path:
                 r_target.path = new_path
                 return r_target
+
         return None
 
     def strategy_tortuosity_pruning(self, routes: list[Route], intensity: float = 1.0) -> tuple[int, Optional[Route]]:
-        prunes = 0
+        """
+        Operator: Tortuosity Pruning (Directness).
+
+        A robust network relies on a simple structure with clearly defined corridors rather than a highly
+        diffuse, complex mesh (Ceder & Wilson, 1986). Trimming tortuosity directly reduces the generalized
+        travel cost (ride time penalty) for passengers (Guillen et al., 2013).
+
+        Fix (v1): Threshold relaxed from 0.8 to 0.95. On a Manhattan/grid network A* already
+          returns near-optimal paths, so the direct/current ratio hovers close to 1.0 and 0.8
+          was structurally unreachable. 0.95 fires whenever a 5%+ shortcut exists. Window
+          clamped to 30 to avoid scanning degenerate segments on short routes.
+        """
+        prunes       = 0
         target_route = None
-        window = max(3, int(self.base_window_size * intensity))
-        
+        window = max(3, min(int(self.base_window_size * intensity), 30))
+
         for r in routes:
             if len(r.path) <= window: continue
             best_reduction = 0
-            best_path = None
-            
+            best_path      = None
+
             for i in range(len(r.path) - window):
-                if i + window >= len(r.path): break
                 segment_start = r.path[i].start
-                segment_end = r.path[i + window - 1].end
+                segment_end   = r.path[i + window - 1].end
+
                 direct_path = self._get_shortest_path_edges(segment_start, segment_end)
-                
-                if direct_path and len(direct_path) < window:
-                    reduction = window - len(direct_path)
+                if not direct_path: continue
+
+                current_segment  = r.path[i:i + window]
+                current_distance = sum(e.getLength() for e in current_segment)
+                direct_distance  = sum(e.getLength() for e in direct_path)
+
+                if direct_distance < current_distance * 0.95:
+                    reduction = current_distance - direct_distance
                     if reduction > best_reduction:
                         candidate_path = self._safe_splice(r.path, i, i + window, direct_path)
                         if candidate_path:
                             best_reduction = reduction
-                            best_path = candidate_path
-            
+                            best_path      = candidate_path
+
             if best_path:
                 r.path = best_path
-                prunes += 1
+                prunes      += 1
                 target_route = r
-                break 
+                break
+
         return prunes, target_route
 
     def optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, gaps: dict, intensity: float = 1.0) -> dict:

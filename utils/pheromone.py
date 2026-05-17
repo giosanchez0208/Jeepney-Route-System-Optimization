@@ -196,6 +196,10 @@ class _TauView:
     def __iter__(self):
         return iter(self._repr.values())
 
+    def get(self, edge, default=None):
+        from utils.pheromone import _edge_key
+        return self._tau.get(_edge_key(edge), default)
+
     def items(self):
         return ((self._repr[k], v) for k, v in self._tau.items())
 
@@ -204,6 +208,9 @@ class _TauView:
 
     def keys(self):
         return self._repr.values()
+
+    def __len__(self):
+        return len(self._tau)
 
     def __contains__(self, edge) -> bool:
         from utils.pheromone import _edge_key
