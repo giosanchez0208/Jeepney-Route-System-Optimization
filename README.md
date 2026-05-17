@@ -16,9 +16,17 @@ This README covers:
 - `utils/visualization.py`
 - `utils/pheromone.py`
 - `utils/local_search.py`
+- `utils/genetic.py`
+- `utils/optimizer_config.py`
+- `utils/optimizer_adaptive.py`
+- `utils/optimizer_telemetry.py`
+- `utils/optimizer_orchestrator_io.py`
+- `utils/optimizer_engine.py`
+- `utils/optimizer.py`
 - `diagnostic_core.ipynb`
 - `diagnostic_sim.ipynb`
 - `diagnostic_mutation.ipynb`
+- `diagnostic_optimization.ipynb`
 - `configs/iligan_configs.yaml`
 
 ## Module notes
@@ -352,6 +360,141 @@ Errors:
 
 - Returns `None` if route systems or pheromones are missing, or if topological constraints (like loop contiguity) prevent a valid mutation from firing.
 
+### `genetic.py`
+
+`Chromosome` and `MemeticAlgorithm` implement the Phase D Lamarckian Memetic Algorithm.
+
+- **Chromosome**: Encapsulates a candidate route system configuration, active fleet allocations, cost metrics, and an epigenetic pheromone matrix.
+- **Topological Crossover**: Offspring inherit a high-density topological hub cluster from Parent A. Remaining routes are inherited from Parent B, filtered using a geometric similarity constraint to prevent duplicate overlapping loops (inspired by the Best Cost Route Crossover (BCRC) in vehicle routing, Ombuki et al., 2006).
+- **Epigenetic Pheromone Inheritance**: Pheromone matrices are merged using a fitness-weighted arithmetic crossover (Michalewicz, 1992):
+  $$\tau_{child}(e) = \left( \frac{f_B}{f_A + f_B} \right) \tau_A(e) + \left( \frac{f_A}{f_A + f_B} \right) \tau_B(e)$$
+  where $f$ is candidate system cost. This allows offspring to directly inherit the parents' spatial demand memory (analogous to the "Belief Space" in Cultural Algorithms, Reynolds, 1994), giving the fleet allocator an immediate high-value starting point.
+- **Lamarckian Mutation**: Proposal routes are mutated toward unserved demand hotspots using localized search operators (attraction, repulsion, pruning) and evaluated under the surrogate model. If cost decreases, changes are committed (Lamarckian adaptation); otherwise, they are discarded.
+
+#### Epigenetic Memory & Blended Pheromone Maps
+
+Below is the visualization showing how parent pheromone matrices are mathematically blended to construct the child's initial demand surface, and the corresponding semantic difference maps (Dorigo & Stützle, 2004):
+
+| Parent A Pheromone Map | Parent B Pheromone Map | Blended Offspring Child Pheromone Map |
+| :---: | :---: | :---: |
+| ![Parent A Pheromone Map](documentation/sample_pheromone_map_parent_a.png) | ![Parent B Pheromone Map](documentation/sample_pheromone_map_parent_b.png) | ![Child Pheromone Map](documentation/sample_pheromone_map_child.png) |
+
+| Parent A vs Parent B (MSE Difference) | Parent A vs Child (MSE Difference) | Parent B vs Child (MSE Difference) |
+| :---: | :---: | :---: |
+| ![Parent A vs Parent B](documentation/sample_pheromone_map_parent_a_vs_parent_b.png) | ![Parent A vs Child](documentation/sample_pheromone_map_parent_a_vs_child.png) | ![Parent B vs Child](documentation/sample_pheromone_map_parent_b_vs_child.png) |
+
+#### Topological Crossover Hub Layouts
+
+Below is the spatial showcase illustrating how the top 10% highest-intensity edges forming the parent topological hubs (Eiter & Mannila, 1994) are preserved and combined to form the offspring child's hub configuration:
+
+| Parent A Topological Hub | Parent B Topological Hub | Offspring Child Topological Hub |
+| :---: | :---: | :---: |
+| ![Parent A Topological Hub](documentation/sample_topological_hub_parent_a.png) | ![Parent B Topological Hub](documentation/sample_topological_hub_parent_b.png) | ![Child Topological Hub](documentation/sample_topological_hub_child.png) |
+
+Errors:
+
+- Raises `ValueError` on missing or empty parent systems, negative fleet sizes, or unconfigured CityGraph engines.
+
+### `optimizer_config.py`
+
+`ExperimentConfig` and `OptimizationState` manage the parameters and live execution state of the optimization run.
+
+- **ExperimentConfig**: An immutable dataclass containing all GA hyperparameters, cost weights, simulation constraints, and travel graph penalty weights loaded from YAML.
+- **OptimizationState**: Tracks active generations, stagnation counter values, global best fitness, population list, and the master pheromone matrix.
+
+Errors:
+
+- Raises exceptions on missing configuration attributes or malformed bounding box formats.
+
+### `optimizer_adaptive.py`
+
+`AdaptiveController` dynamically scales mutation probabilities using stagnation metrics to assist search loops in escaping local optima.
+
+- **Dynamic Parameter Control**: Monitors generation stagnation. If progress slows, mutation rate scales quadratically toward a hard cap of `0.8` to force exploration (Eiben et al., 1999).
+- **Exploitation Reset**: Instantly resets the mutation probability to baseline once a new best system cost is registered, returning the algorithm to localized soft-body exploitation.
+
+### `optimizer_telemetry.py`
+
+`TelemetryEngine` maintains execution records, genealogies, and network state snapshots.
+
+- Logs generational fitness parameters (best cost, average cost, stagnation) to `history.csv`.
+- Syncs ancestor-offspring relationships and UIDs to `lineage.csv`.
+- Exports high-fidelity, client-ready JSON files containing routes geometry, pheromone intensity coordinates, and high-demand chokepoints for GIS clients.
+
+### `optimizer_orchestrator_io.py`
+
+`StatePreservationEngine` and `OptimizerBuilder` coordinate run serialization and setup.
+
+- **StatePreservationEngine**: Saves generational progress using an atomic write pattern (writing to `.tmp` before renaming), protecting checkpoint pickle files from corruption on forced exits.
+- **OptimizerBuilder**: Copies YAML files to new timestamped run folders for exact replication and loads past runs.
+
+### `optimizer_engine.py`
+
+`MemeticEngine` coordinates the evolutionary optimization pipeline.
+
+- Generates initial decoupled populations, applies tournament selection, preserves elite chromosomes, triggers crossover operations, and manages mutation step calls.
+
+### `optimizer.py`
+
+`Optimizer` is the main, user-facing coordinator for the entire evolutionary search loop.
+
+- **OSM & Synthetic Routing**: Seamlessly handles OSM real-city graphs and toy grid configurations, building demand samplers, preservation engines, and visual overlays.
+- **Surrogate-Guided Search**: Bypasses the expensive full agent-based simulation by executing evaluations using the `StaticSurrogateEvaluator`.
+- **Mohring & Ceder Resource Balancing**: The evaluation pipeline allocates vehicle frequencies according to the Mohring effect (Mohring, 1972; Ceder, 2007) via square root scaling:
+  $$F_i = F_{total} \times \frac{\sqrt{\tau_i}}{\sum \sqrt{\tau}}$$
+  where $\tau_i$ is the route's accumulated pheromone density. This mathematically balances operating costs against passenger waiting times.
+- **Unified Custom Evaluate Gate**: Overrides evolutionary evaluations to perform generational pheromone evaporation ($\rho$) and deposition ($Q / C(\pi_p)$) along candidate corridors, and recalculates unserved demand gaps to guide subsequent local mutations.
+- **Fail-Safe Interrupt Handlers**: Catches manual KeyboardInterrupt calls, gracefully halting execution and saving serialized state checkpoints atomically.
+
+#### The Generational Memetic Lamarckian Loop
+
+The diagram below outlines the main execution pipeline, tracing tournament selection, crossover, arithmetic pheromone blending, surrogate evaluation, local search mutation, and the Lamarckian gate filter:
+
+```mermaid
+flowchart TD
+    Start([Start Generation]) --> Select[Tournament Selection k=3]
+    Select --> Crossover[Topological Crossover]
+    Select --> PheroInherit[Epigenetic Pheromone Blending]
+    Crossover & PheroInherit --> BuildChild[Assemble Child Chromosome]
+    BuildChild --> EvalSurr[Surrogate Evaluation]
+    EvalSurr --> DecideMut{Decide Mutation?}
+    DecideMut -- Yes --> LocalSearch[ACO Local Search]
+    LocalSearch --> EvalMut[Evaluate Mutated Candidate]
+    EvalMut --> LamarckGate{Lamarckian Gate: Cost < Parent?}
+    LamarckGate -- Yes (Accept) --> SaveChild[Keep Mutated Geometry]
+    LamarckGate -- No (Reject) --> RestoreChild[Restore Parent Geometry]
+    DecideMut -- No --> SaveChild
+    RestoreChild & SaveChild --> ElitePreserve[Elite Preservation & Replacement]
+    ElitePreserve --> EndGen([End Generation])
+```
+
+#### The Telemetry & State Preservation Pipeline
+
+The flowchart below traces how active optimization states are saved via atomic file operations, lineage CSV lists are appended, and high-fidelity JSON snapshot payloads are generated:
+
+```mermaid
+flowchart LR
+    State[Active OptimizationState] --> Checkpoint{Is Checkpoint?}
+    Checkpoint -- Yes --> Serial[StatePreservationEngine]
+    Serial --> TempFile["Write state_gen_G.pkl.tmp"]
+    TempFile --> AtomicReplace["Rename to state_gen_G.pkl"]
+    AtomicReplace --> Saved[Safe State Checkpoint]
+    Checkpoint -- No --> Telemetry{Is Telemetry?}
+    Telemetry -- Yes --> Logging[TelemetryEngine]
+    Logging --> Lineage["Append lineage lineage.csv"]
+    Logging --> History["Append best & mean history.csv"]
+    Logging --> Snapshot["Export network_state_gen_G.json"]
+    Telemetry -- No --> Continue[Continue Search]
+```
+
+#### Optimization Framework Maps
+
+Below is the visual overview of the optimization system flow and the initial traffic flow demand layout:
+
+| Optimization Loop Pipeline | Direct Demand Surface Model |
+| :---: | :---: |
+| ![Optimization Pipeline](documentation/sample_optimization_pipeline.png) | ![DDM Map](documentation/sample_optimization_pipeline_ddm_map.png) |
+
 ### `diagnostic_core.ipynb`
 
 This notebook is the reasoning log and validation harness for the core spatial modules.
@@ -381,15 +524,31 @@ This notebook serves as the reasoning log, validation harness, and high-performa
 
 ![ACO Local Search Operator Showcase](documentation/aco_local_search_operator_showcase.png)
 
-### `configs/iligan_configs.yaml`
+### `diagnostic_optimization.ipynb`
 
-This file is the Iligan City baseline configuration.
+This notebook validates the complete unified evolutionary search loop and provides continuous high-performance visual GIS telemetry.
 
-- Fixes the city footprint and landmarks.
-- Stores the DDM, travel graph weights, and simulation parameters.
-- Documents why traffic is weighted more heavily than centrality.
+- Runs the end-to-end genetic optimizer under both lightweight surrogate estimations and full agent-based simulations.
+- Features a Light Mode multi-row GIS visualization grid displaying the optimization progress:
+  - **Column 1:** Fittest candidate route systems overlaid on the city street grid.
+  - **Column 2:** Real-time, non-uniform passenger pheromone density maps.
+  - **Column 3:** Highlighted non-rectangular topological hub clusters.
+- Performs final route health checking, verifying connectivity, membership, and U-turn limits.
 
-The `travel_graph` weights are generalized-cost penalties, while the `simulation` section controls route count, fleet size, capacity, speeds, and spawn rate.
+**Example output:**
+
+![Jeepney Route Optimization Progress Grid](/C:/Users/lifei/.gemini/antigravity/brain/fc74b087-ddee-42e0-a583-81e16862c1c3/artifacts/lifecycle_visualization.png)
+
+### Configuration and Parameter Files (YAML)
+
+The optimization engine is configured using a standardized YAML file structure loaded by `ExperimentConfig` to ensure absolute mathematical reproducibility.
+
+- **Direct Demand Surface (DDM)**: Dictates how sparse TomTom data is combined with network centrality to seed passenger origins and destinations.
+- **Genetic Algorithm Params**: Sets the population sizes, max search generations, stagnation limits, crossover coefficient ($\gamma$), and mutation probabilities.
+- **Local Search & Pheromone Params**: Dictates base pheromones ($\tau_{init}$), evaporation ($\rho$), deposition scale ($Q$), default fleet allocations, and regional search attraction/repulsion parameters.
+- **System Cost Weighting**: Establishes alpha and beta weights to penalize vehicle headway variance and extreme passenger underservice.
+- **Travel Graph Weights**: Defines wait, walk, ride, and transfer generalized-cost coefficients to power passenger pathfinding.
+- **Simulation Constraints**: Configures vehicle capacity, speed limits, passenger spawn rates, dispatch timings, and dispatch equidistant spacing rules.
 
 ## Design rationale
 
@@ -408,6 +567,15 @@ The `travel_graph` weights are generalized-cost penalties, while the `simulation
 3. Global Network for Popular Transportation & UNDP. (2024). *A Closer Look at Informal (Popular) Transportation: An Emerging Portrait*. United Nations Development Programme.
 4. Vongpraseuth, T., et al. (2025). *Acceptance and Demand Estimation of Demand Responsive Transit (DRT) in a Least Developed Country: The Case of Paratransit*. **International Journal of Connected Transportation**.
 5. Cochran, W. G. (1977). *Sampling Techniques* (3rd ed.). John Wiley & Sons.
+6. Ceder, A. (2007). *Public Transit Planning and Operation: Theory, Modeling and Practice*. Butterworth-Heinemann.
+7. Mohring, H. (1972). *Optimization and Scale Economies in Urban Bus Transportation*. *The American Economic Review*, 62(4), 591-604.
+8. Ombuki, B., Ross, B. J., & Hanshar, F. (2006). *Multi-Objective Genetic Algorithms for Vehicle Routing Problem with Time Windows*. *Applied Intelligence*, 24(1), 17-30.
+9. Middendorf, M., Reischle, F., & Schmeck, H. (2002). *Multi-Colony Ant Algorithms: An Application to the Multi-Mode Resource-Constrained Project Scheduling Problem*. *IEEE Transactions on Evolutionary Computation*, 6(3), 300-314.
+10. Reynolds, R. G. (1994). *An Introduction to Cultural Algorithms*. *Proceedings of the Third Annual Conference on Evolutionary Programming*, 131-139.
+11. Michalewicz, Z. (1992). *Genetic Algorithms + Data Structures = Evolution Programs*. Springer-Verlag.
+12. Eiter, T., & Mannila, H. (1994). *Computing Discrete Fréchet Distance*. Technical Report CD-TR 94/64, Technical University of Vienna.
+13. Dorigo, M., & Stützle, T. (2004). *Ant Colony Optimization*. MIT Press.
+14. Eiben, A. E., Hinterding, R., & Michalewicz, Z. (1999). *Parameter Control in Evolutionary Algorithms*. *IEEE Transactions on Evolutionary Computation*, 3(2), 124-141.
 
 ### In-repo rationale note without a full bibliographic entry
 
