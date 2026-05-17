@@ -26,18 +26,21 @@ class ExperimentConfig:
     gamma_crossover: float
     
     # Local Search & Pheromone Params
-    initial_pheromone: float
-    rho_evaporation: float
-    q_pheromone_intensity: float
-    p_local_search: float
-    
+    initial_tau: float
+    rho: float
+    q: float
+    p_ls_attraction: float
+    p_ls_repulsion: float
+    p_ls_pruning: float
+    default_jeep_weight: float
+
     # System Cost Penalties
     alpha_std_penalty: float
     beta_penalty: float
 
     # System Definition
-    k_routes: int
-    total_fleet: int
+    num_routes: int
+    total_allocatable_jeeps: int
     city_bounds: tuple[float, float, float, float]
     
     # Travel Graph Weights
@@ -90,16 +93,19 @@ class ExperimentConfig:
             p_mutation=float(opt.get("p_mutation", 0.2)),
             gamma_crossover=float(opt.get("gamma_crossover", 0.5)),
             
-            initial_pheromone=float(opt.get("initial_tau", 1.0)),
-            rho_evaporation=float(opt.get("rho", 0.1)),
-            q_pheromone_intensity=float(opt.get("q", 1000.0)),
-            p_local_search=float(opt.get("p_local_search", 0.5)),
+            initial_tau=float(opt.get("initial_tau", 1.0)),
+            rho=float(opt.get("rho", 0.1)),
+            q=float(opt.get("q", 1000.0)),
+            p_ls_attraction=float(opt.get("p_ls_attraction", 0.4)),
+            p_ls_repulsion=float(opt.get("p_ls_repulsion", 0.4)),
+            p_ls_pruning=float(opt.get("p_ls_pruning", 0.6)),
+            default_jeep_weight=float(opt.get("default_jeep_weight", 1.0)),
             
             alpha_std_penalty=float(opt.get("alpha_std_penalty", 0.5)),
             beta_penalty=float(opt.get("beta_penalty", 2.0)),
             
-            k_routes=int(sim.get("num_routes", 5)),
-            total_fleet=int(sim.get("total_allocatable_jeeps", 20)),
+            num_routes=int(sim.get("num_routes", 5)),
+            total_allocatable_jeeps=int(sim.get("total_allocatable_jeeps", 20)),
             city_bounds=bbox,
             
             walk_wt=float(tg.get("walk_wt", 0.0142)),
