@@ -367,3 +367,64 @@ class SimulationEvaluator:
         result.jeep_system = None
         
         return result
+    
+class StaticSurrogateEvaluator:
+    """
+    A persistent factory for rapidly evaluating multiple route configurations 
+    against a static OD demand matrix. Designed to replace full agent simulations 
+    during the metaheuristic search phase.
+    
+    The transfer penalty is explicitly overridden to 2.5 times the base transfer weight. 
+    This integrates empirical behavioral routing penalties directly into the evaluation layer (Iseki & Taylor, 2009). 
+    The evaluator returns a standard SimulationResult object to maintain existing module API compatibility.
+    """
+    def __init__(self, config: dict, city_graph: CityGraph, demand_sampler: DirectDemandSampler, num_samples: int = 500) -> None:
+        self.config = config
+        self.city_graph = city_graph
+        self.demand_sampler = demand_sampler
+        self.num_samples = num_samples
+        
+        self.od_pairs = []
+        for _ in range(self.num_samples):
+            start = self.demand_sampler.get_point(only_drivable=False)
+            end = self.demand_sampler.get_point(only_drivable=False)
+            if start and end and start != end:
+                self.od_pairs.append((start, end))
+
+    def evaluate(self, routes: list['Route'], verbose: bool = False) -> SimulationResult:
+        tg_cfg = self.config.get("travel_graph", {}).copy()
+        base_transfer = tg_cfg.get("transfer_wt", 5.0)
+        tg_cfg["transfer_wt"] = base_transfer * 2.5 
+        
+        tg = TravelGraph(
+            cg=self.city_graph, 
+            config=tg_cfg, 
+            routes=routes
+        )
+        
+        total_weight = 0.0
+        completed = 0
+        unreachable_penalty = 100000.0
+        
+        for start, end in self.od_pairs:
+            weight = tg.calculateJourneyWeight(start, end)
+            if weight > 0 and weight != float("inf"):
+                total_weight += weight
+                completed += 1
+            else:
+                total_weight += unreachable_penalty
+
+        fleet_operational_cost = sum(sum(e.getLength() for e in r.path) for r in routes)
+
+        return SimulationResult(
+            fitness_score=total_weight,
+            metrics={
+                "passenger_routing_cost": total_weight,
+                "fleet_operational_cost": fleet_operational_cost,
+                "surrogate_samples": len(self.od_pairs),
+                "completed_routes": completed
+            },
+            recorded_paths=[],
+            jeep_system=None,
+            sim_id=f"SURR{uuid.uuid4().hex[:8]}"
+        )
