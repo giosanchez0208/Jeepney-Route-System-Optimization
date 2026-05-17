@@ -223,6 +223,10 @@ class RouteSystem:
             x1, y1 = self._get_screen_coords(start_node, context, image.width, image.height)
             x2, y2 = self._get_screen_coords(end_node, context, image.width, image.height)
             
+            if dash_length <= 0:
+                draw.line([(x1, y1), (x2, y2)], fill=colors[0], width=line_width)
+                continue
+
             if len(colors) == 1:
                 draw.line([(x1, y1), (x2, y2)], fill=colors[0], width=line_width)
                 continue
