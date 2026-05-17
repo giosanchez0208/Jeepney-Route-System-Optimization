@@ -3,12 +3,15 @@ import random
 from typing import Any, Optional
 from .route import Route
 from .pheromone import PheromoneMatrix
+from .directed_edge import DirEdge
 
 
 class ACOLocalSearch:
-    def __init__(self, cg: Any, p_local: float = 0.5, base_window_size: int = 15):
+    def __init__(self, cg: Any, p_attraction: float = 0.4, p_repulsion: float = 0.4, p_pruning: float = 0.6, base_window_size: int = 15):
         self.cg = cg
-        self.p_local = p_local
+        self.p_attraction = p_attraction
+        self.p_repulsion = p_repulsion
+        self.p_pruning = p_pruning
         self.base_window_size = base_window_size
 
     def calculate_route_similarity(self, route_a: Route, route_b: Route) -> float:
@@ -70,6 +73,22 @@ class ACOLocalSearch:
         """Stable identity key for an edge, robust to missing __eq__/__hash__."""
         return getattr(edge, 'id', id(edge))
 
+    def _finalize_path(self, raw_path: list) -> list:
+        """Upgrades a mixed-layer path into a strictly compliant Layer 2 transit loop."""
+        if not raw_path: return []
+        l2_path = []
+        for e in raw_path:
+            l2_e = DirEdge(e.start, e.end, weight=e.weight)
+            setattr(l2_e, 'layer', 2)
+            if hasattr(e, 'id'):
+                l2_e.id = e.id
+            l2_path.append(l2_e)
+            
+        for i in range(len(l2_path)):
+            l2_path[i].next_edges = [l2_path[(i + 1) % len(l2_path)]]
+            
+        return l2_path
+
     def strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]:
         """
         Operator: Demand-Driven Attraction (Coverage).
@@ -109,12 +128,10 @@ class ACOLocalSearch:
             for r in routes:
                 route_edge_ids = {self._edge_id(e) for e in r.path}
                 if target_id in route_edge_ids:
-                    continue  # route already serves this edge
+                    continue  
 
                 n = len(r.path)
                 for i in range(n):
-                    # Cheapest-insertion: cost of opening the seam between edge i and i+1
-                    # and routing through target_edge before closing it again.
                     entry_node = r.path[i].end
                     exit_node  = r.path[(i + 1) % n].start
 
@@ -131,14 +148,13 @@ class ACOLocalSearch:
                     if detour_cost < min_detour_cost:
                         min_detour_cost = detour_cost
                         best_route      = r
-                        best_insert_idx = i + 1  # insert *after* seam edge i
+                        best_insert_idx = i + 1  
 
             if best_route is not None and best_insert_idx != -1:
-                # Pure insertion — no existing edges removed, _stitch_path bridges any gaps.
                 raw_path   = best_route.path[:best_insert_idx] + [target_edge] + best_route.path[best_insert_idx:]
                 final_path = self._stitch_path(raw_path)
                 if final_path:
-                    best_route.path = final_path
+                    best_route.path = self._finalize_path(final_path)
                     return best_route
 
         return None
@@ -173,7 +189,6 @@ class ACOLocalSearch:
         idx = next((i for i, e in enumerate(r_target.path) if self._edge_id(e) == overserved_id), None)
         if idx is None: return None
 
-        # Clamp window to 20% of route length so we never excise more than a small corridor.
         raw_window = max(1, int((self.base_window_size / 2) * intensity))
         max_window = max(1, len(r_target.path) // 5)
         window     = min(raw_window, max_window)
@@ -194,7 +209,6 @@ class ACOLocalSearch:
             if dist_start < target_radius and (dist_start + dist_end) < (target_radius * 3):
                 valid_detours.append((n, dist_start + dist_end))
 
-        # Ascending: prefer the shortest geometric detour — most likely to be pathfindable.
         valid_detours.sort(key=lambda x: x[1])
 
         for detour_node, _ in valid_detours[:20]:
@@ -209,7 +223,7 @@ class ACOLocalSearch:
 
             new_path = self._safe_splice(r_target.path, start_idx, end_idx, bridge_in + bridge_out)
             if new_path:
-                r_target.path = new_path
+                r_target.path = self._finalize_path(new_path)
                 return r_target
 
         return None
@@ -248,9 +262,6 @@ class ACOLocalSearch:
             for i in range(len(r.path) - window):
                 current_segment = r.path[i:i + window]
 
-                # Gap immunity: never prune a window that covers underserved demand.
-                # These detours exist to serve edges that attraction is actively trying
-                # to reach; shortcutting them would undo coverage work across generations.
                 if any(self._edge_id(e) in underserved_ids for e in current_segment):
                     continue
 
@@ -279,7 +290,7 @@ class ACOLocalSearch:
                         break
 
             if best_path:
-                r.path = best_path
+                r.path = self._finalize_path(best_path)
                 prunes      += 1
                 target_route = r
                 break
@@ -288,10 +299,10 @@ class ACOLocalSearch:
 
     def optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> dict:
         actions = {"attraction": False, "repulsion": False, "prunes": 0}
-        if random.random() < self.p_local:
+        if random.random() < self.p_attraction:
             actions["attraction"] = self.strategy_spatial_attraction(routes, pheromones, intensity) is not None
-        if random.random() < self.p_local:
+        if random.random() < self.p_repulsion:
             actions["repulsion"] = self.strategy_redundancy_repulsion(routes, pheromones, intensity) is not None
-        if random.random() < (self.p_local * 1.5):
+        if random.random() < self.p_pruning:
             actions["prunes"], _ = self.strategy_tortuosity_pruning(routes, pheromones, intensity)
         return actions

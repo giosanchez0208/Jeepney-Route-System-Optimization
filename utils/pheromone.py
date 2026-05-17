@@ -157,26 +157,24 @@ class PheromoneMatrix:
             t = (tau_val - min_tau) / tau_range  # 0.0 = lowest demand, 1.0 = highest
 
             # Four-stop ramp: purple → blue → green → yellow
-            # Each stop covers one third of the [0, 1] range.
-            # Stops: purple=(128,0,128), blue=(0,0,255), green=(0,200,0), yellow=(255,255,0)
             if t < 1/3:
-                s = t * 3                              # 0→1 within segment
-                r_ch = int(128 * (1 - s))              # 128 → 0
+                s = t * 3                              
+                r_ch = int(128 * (1 - s))              
                 g_ch = 0
-                b_ch = int(128 + 127 * s)              # 128 → 255
+                b_ch = int(128 + 127 * s)              
             elif t < 2/3:
-                s = (t - 1/3) * 3                      # 0→1 within segment
+                s = (t - 1/3) * 3                      
                 r_ch = 0
-                g_ch = int(200 * s)                    # 0 → 200
-                b_ch = int(255 * (1 - s))              # 255 → 0
+                g_ch = int(200 * s)                    
+                b_ch = int(255 * (1 - s))              
             else:
-                s = (t - 2/3) * 3                      # 0→1 within segment
-                r_ch = int(255 * s)                    # 0 → 255
-                g_ch = int(200 + 55 * s)               # 200 → 255
+                s = (t - 2/3) * 3                      
+                r_ch = int(255 * s)                    
+                g_ch = int(200 + 55 * s)               
                 b_ch = 0
-            alpha = 140 + int(115 * t)  # low-demand edges more transparent
+            alpha = 140 + int(115 * t)  
             color = (r_ch, g_ch, b_ch, alpha)
-            width = 2 + int(8 * (t ** 2))  # 2 px baseline, up to 10 px at peak
+            width = 2 + int(8 * (t ** 2))  
 
             x1 = (edge.start.lon - tl_lon) / lon_range * img.width
             y1 = (tl_lat - edge.start.lat) / lat_range * img.height
@@ -186,6 +184,66 @@ class PheromoneMatrix:
             draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
 
         return img
+
+    def draw_pheromone_difference(
+            self, 
+            other: 'PheromoneMatrix', 
+            context: tuple[tuple[float, float], tuple[float, float]], 
+            image: Image.Image,
+            global_max: float = None
+        ) -> Image.Image:
+            """
+            Renders the absolute delta between this matrix and another.
+            Color gradient: Translucent Gray (minimal shift) -> Solid Red (maximum shift).
+            """
+            draw = ImageDraw.Draw(image, "RGBA")
+            
+            diffs = {}
+            all_keys = set(self._tau.keys()).union(other._tau.keys())
+            
+            for k in all_keys:
+                val_self = self._tau.get(k, 0.0)
+                val_other = other._tau.get(k, 0.0)
+                diffs[k] = abs(val_self - val_other)
+                
+            if global_max is not None:
+                max_diff = global_max
+            else:
+                max_diff = max(diffs.values()) if diffs else 1.0
+                
+            if max_diff <= 0: max_diff = 1.0
+            
+            (c_min_lon, c_max_lat), (c_max_lon, c_min_lat) = context
+            img_w, img_h = image.size
+            
+            def to_px(lon, lat):
+                x = (lon - c_min_lon) / (c_max_lon - c_min_lon) * img_w
+                y = (c_max_lat - lat) / (c_max_lat - c_min_lat) * img_h
+                return x, y
+                
+            for k, diff in diffs.items():
+                if diff < 0.1:
+                    continue 
+                    
+                ratio = diff / max_diff
+                ratio = min(1.0, ratio)
+                
+                r = int(180 + (75 * ratio))
+                g = int(180 - (180 * ratio))
+                b = int(180 - (180 * ratio))
+                alpha = int(100 + (155 * ratio))
+                width = max(1, int(8 * ratio))
+                
+                edge = self._edge_repr.get(k) or other._edge_repr.get(k)
+                if not edge:
+                    continue
+                    
+                x0, y0 = to_px(edge.start.lon, edge.start.lat)
+                x1, y1 = to_px(edge.end.lon, edge.end.lat)
+                
+                draw.line([(x0, y0), (x1, y1)], fill=(r, g, b, alpha), width=width)
+                
+            return image
 
 
 # ---------------------------------------------------------------------------
