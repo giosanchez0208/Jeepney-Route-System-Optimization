@@ -53,14 +53,16 @@ class MemeticEngine:
                 routes = [rg.generate(n_points=4) for _ in range(self.config.num_routes)]
             else:
                 routes = self._generate_random_routes()  # fallback method
-            chrom = Chromosome(routes=routes, allocation={}, pheromones=pheromones, generation=0)
+            # Instantiate a fresh, decoupled PheromoneMatrix for each chromosome
+            chrom_phero = PheromoneMatrix(all_edges=self.cg.graph, config=phero_config)
+            chrom = Chromosome(routes=routes, allocation={}, pheromones=chrom_phero, generation=0)
             self.algo.evaluate_chromosome(chrom, self.config.total_allocatable_jeeps)
             population.append(chrom)
 
         population.sort(key=lambda c: c.cost)
         return OptimizationState(
             population=population,
-            pheromones=pheromones,
+            pheromones=population[0].pheromones,
             best_fitness=population[0].cost
         )
 
@@ -104,4 +106,5 @@ class MemeticEngine:
             state.stagnation_counter += 1
             
         state.population = next_gen
+        state.pheromones = next_gen[0].pheromones
         return state

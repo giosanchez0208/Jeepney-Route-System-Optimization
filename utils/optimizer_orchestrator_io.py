@@ -14,6 +14,8 @@ class StatePreservationEngine:
 
     def save_state(self, state: OptimizationState):
         """Serializes the optimization state using an atomic write pattern."""
+        import sys
+        sys.setrecursionlimit(25000)
         filepath = self.checkpoints_dir / f"state_gen_{state.generation}.pkl"
         tmp_filepath = filepath.with_suffix(".tmp")
         
@@ -25,6 +27,8 @@ class StatePreservationEngine:
 
     def load_state(self, filepath: Path) -> OptimizationState:
         """Deserializes a state file to resume execution."""
+        import sys
+        sys.setrecursionlimit(25000)
         with open(filepath, 'rb') as f:
             return pickle.load(f)
 
