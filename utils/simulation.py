@@ -405,12 +405,18 @@ class StaticSurrogateEvaluator:
         total_weight = 0.0
         completed = 0
         unreachable_penalty = 100000.0
+        recorded_paths = []
         
         for start, end in self.od_pairs:
-            weight = tg.calculateJourneyWeight(start, end)
-            if weight > 0 and weight != float("inf"):
-                total_weight += weight
-                completed += 1
+            path = tg.findShortestJourney(start, end)
+            if path:
+                weight = sum(e.weight for e in path)
+                if weight > 0 and weight != float("inf"):
+                    total_weight += weight
+                    completed += 1
+                    recorded_paths.append((path, weight))
+                else:
+                    total_weight += unreachable_penalty
             else:
                 total_weight += unreachable_penalty
 
@@ -424,7 +430,7 @@ class StaticSurrogateEvaluator:
                 "surrogate_samples": len(self.od_pairs),
                 "completed_routes": completed
             },
-            recorded_paths=[],
+            recorded_paths=recorded_paths,
             jeep_system=None,
             sim_id=f"SURR{uuid.uuid4().hex[:8]}"
         )

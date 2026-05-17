@@ -89,7 +89,7 @@ class PheromoneMatrix:
                 # we only track physical road segments.
 
     # ------------------------------------------------------------------
-    def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem') -> dict['DirEdge', float]:
+    def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route']) -> dict['DirEdge', float]:
         """
         Computes the Demand-Service Gap for all tracked corridors.
 
@@ -102,8 +102,18 @@ class PheromoneMatrix:
         """
         supply: dict[_CoordKey, float] = {k: 0.0 for k in self._tau}
 
-        fleet_counts: dict = {r: 0 for r in jeep_system.routes}
-        for j in jeep_system.jeeps:
+        if hasattr(jeep_system, "routes"):
+            routes = jeep_system.routes
+            jeeps = jeep_system.jeeps
+        elif isinstance(jeep_system, list):
+            routes = jeep_system
+            jeeps = []
+        else:
+            routes = []
+            jeeps = []
+
+        fleet_counts: dict = {r: 0 for r in routes}
+        for j in jeeps:
             if j.route in fleet_counts:
                 fleet_counts[j.route] += 1
 

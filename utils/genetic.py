@@ -132,7 +132,15 @@ class MemeticAlgorithm:
         if parent_a is None or parent_b is None:
             raise ValueError("[MEMETIC ALGO] Parents cannot be None for inheritance.")
 
-        child_phero = PheromoneMatrix(all_edges=self.cg.graph, config={})
+        parent_cfg = {
+            "optimization": {
+                "initial_tau": parent_a.pheromones.initial_tau,
+                "rho": parent_a.pheromones.rho,
+                "q": parent_a.pheromones.q,
+                "default_jeep_weight": parent_a.pheromones.default_jeep_weight,
+            }
+        }
+        child_phero = PheromoneMatrix(all_edges=self.cg.graph, config=parent_cfg)
         
         total_cost: float = parent_a.cost + parent_b.cost
         if total_cost == 0.0:
