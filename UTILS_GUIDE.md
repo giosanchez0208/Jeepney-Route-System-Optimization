@@ -1482,7 +1482,324 @@ A threaded Tkinter GUI class for real-time simulation playback.
 
 ---
 
-## 8. Operational Workflow: How to Get Started
+## 8. Genetic and Evolutionary Optimization Utilities
+
+### genetic.py
+
+#### Chromosome
+A data structure representing a candidate route system and fleet allocation configuration within the genetic algorithm.
+
+- **Attributes**
+  - `uid` (str): A unique identifier string generated using uuid.
+  - `generation` (int): The evolutionary generation index at which the chromosome was born.
+  - `parents` (list[str]): A list of parent chromosome UIDs if bred from a crossover, else empty.
+  - `routes` (list[Route]): The list of closed transit Route objects in this candidate solution.
+  - `allocation` (dict[Route, int]): The optimal fleet allocation mapping each Route to its assigned number of jeepneys.
+  - `pheromones` (PheromoneMatrix): The localized epigenetic PheromoneMatrix instance mapped to this chromosome.
+  - `cost` (float): The calculated overall system fitness cost (lower is better).
+
+- **Methods**
+  - `__init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix, generation: int = 0, parents: Optional[list[str]] = None) -> None`
+    - Parameters:
+      - `routes` (list[Route]): Target candidate route paths.
+      - `allocation` (dict[Route, int]): Fleet allocation map.
+      - `pheromones` (PheromoneMatrix): Decoupled pheromone database.
+      - `generation` (int): Evolutionary birth index, defaults to 0.
+      - `parents` (Optional[list[str]]): List of parent chromosome UIDs, defaults to None.
+    - Outputs: None.
+    - Primary Purpose: Instantiates a candidate solution chromosome with a unique identifier and tracks lineage relationships.
+  - `__str__(self) -> str`
+    - Parameters: None.
+    - Outputs: str.
+    - Primary Purpose: Returns a summary string including UID, generation, cost, and number of routes.
+
+#### MemeticAlgorithm
+The class executing Lamarckian evolutionary operations on candidate Chromosome systems.
+
+- **Attributes**
+  - `cg` (Any): The active CityGraph instance.
+  - `local_search` (ACOLocalSearch): The local search operator engine.
+  - `target_route_count` (int): The required number of routes per candidate system.
+  - `verbose` (bool): Verbosity flag for standard out.
+
+- **Methods**
+  - `__init__(self, cg: Any, local_search: ACOLocalSearch, target_route_count: int, verbose: bool = False) -> None`
+    - Parameters:
+      - `cg` (Any): Base spatial graph database.
+      - `local_search` (ACOLocalSearch): Heuristic local search operator.
+      - `target_route_count` (int): Target number of route tracks.
+      - `verbose` (bool): Console reporting verbosity flag.
+    - Outputs: None.
+    - Primary Purpose: Instantiates and configures the Lamarckian operator suite, checking parameters for valid bounds.
+  - `_get_hub_edges(self, routes: list[Route], pheromones: PheromoneMatrix) -> set[Any]`
+    - Parameters:
+      - `routes` (list[Route]): Route system.
+      - `pheromones` (PheromoneMatrix): Edge pheromone density matrix.
+    - Outputs: set[Any].
+    - Primary Purpose: Identifies the high-value topological corridor sub-graph consisting of the top 10% highest demand edges.
+  - `crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route]`
+    - Parameters:
+      - `parent_a` (Chromosome): Fitter parent candidate.
+      - `parent_b` (Chromosome): Less fit parent candidate.
+    - Outputs: list[Route].
+    - Primary Purpose: Generates offspring routes by extracting high-demand hub corridors from Parent A and completing remaining slots using distinct, non-overlapping routes from Parent B.
+  - `inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix`
+    - Parameters:
+      - `parent_a` (Chromosome): Parent A candidate.
+      - `parent_b` (Chromosome): Parent B candidate.
+    - Outputs: PheromoneMatrix.
+    - Primary Purpose: Blends parent pheromone databases using a fitness-weighted arithmetic crossover to construct the child's epigenetic matrix.
+  - `evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float`
+    - Parameters:
+      - `chrom` (Chromosome): Candidate system to evaluate.
+      - `total_fleet` (int): Total allocatable fleet size.
+    - Outputs: float (system cost).
+    - Primary Purpose: Allocates fleet across routes using Mohring square-root fractions, calculates distance and headway metrics, applies structural penalties for unallocated fleets, and sets the chromosome's cost.
+  - `apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool`
+    - Parameters:
+      - `child` (Chromosome): Candidate chromosome to mutate.
+      - `target_cost` (float): Cost threshold that must be surpassed for acceptance.
+      - `total_fleet` (int): Total vehicle fleet size.
+    - Outputs: bool (whether mutation succeeded in lowering cost and was retained).
+    - Primary Purpose: Calculates unserved demand corridors, applies heuristic local searches (attraction, repulsion, pruning) on route geometries, evaluates results, and retains improvements.
+
+---
+
+### optimizer_config.py
+
+#### ExperimentConfig
+A frozen, immutable dataclass containing all system, travel-graph, genetic, local search, and simulation parameters.
+
+- **Attributes**
+  - `output_root` (Path): Path to store telemetry and checkpoints.
+  - `telemetry_interval` (int): Generational interval for exporting lineage and snapshots.
+  - `checkpoint_interval` (int): Generational interval for saving serialized states.
+  - `n_population` (int): Chromosome population size.
+  - `g_max` (int): Maximum evolutionary generations.
+  - `n_stagnation` (int): Generations before search termination due to stagnation.
+  - `n_elite` (int): Number of top chromosomes preserved directly across generations.
+  - `k_tournament` (int): Tournament selection size.
+  - `p_mutation` (float): Base probability of mutation.
+  - `gamma_crossover` (float): Crossover blending coefficient.
+  - `initial_tau` (float): Base pheromone concentration value.
+  - `rho` (float): Generational pheromone evaporation rate.
+  - `q` (float): Pheromone deposition scaling factor.
+  - `p_ls_attraction` (float): Local search attraction probability.
+  - `p_ls_repulsion` (float): Local search repulsion probability.
+  - `p_ls_pruning` (float): Local search pruning probability.
+  - `default_jeep_weight` (float): Fleet allocator default weight.
+  - `alpha_std_penalty` (float): Headway variance penalty coefficient.
+  - `beta_penalty` (float): Underservice penalty coefficient.
+  - `num_routes` (int): Required routes in route systems.
+  - `total_allocatable_jeeps` (int): Total jeepney count.
+  - `city_bounds` (tuple): Geographical bounding box.
+  - `walk_wt` (float): Travel graph walking weight penalty.
+  - `ride_wt` (float): Travel graph riding weight penalty.
+  - `wait_wt` (float): Travel graph waiting weight penalty.
+  - `transfer_wt` (float): Travel graph transfer weight penalty.
+  - `max_ticks` (int): Simulation run duration ticks.
+  - `passenger_speed` (float): Walking speed in km/h.
+  - `jeep_speed` (float): Vehicle movement speed in km/h.
+  - `jeep_capacity` (int): Maximum passengers per vehicle.
+  - `spawn_rate_per_hour` (float): Base passenger spawn rate.
+  - `spawn_stdev` (float): Passenger spawn normal distribution standard deviation.
+  - `weight_tolerance` (float): Waiting tolerance limit.
+  - `equidistant_spawn` (bool): Dispatch spacing flag.
+
+- **Methods**
+  - `from_yaml(cls, path: str | Path) -> ExperimentConfig`
+    - Parameters:
+      - `path` (str | Path): Config file path.
+    - Outputs: ExperimentConfig.
+    - Primary Purpose: Instantiates an immutable config dataclass, loading parameters and parsing fallback bounding boxes for synthetic toy cities and real OSM cities.
+
+#### OptimizationState
+A mutable dataclass tracking live generational state.
+
+- **Attributes**
+  - `generation` (int): Active generation index.
+  - `stagnation_counter` (int): Generations passed without fitness improvements.
+  - `best_fitness` (float): Fittest score registered so far.
+  - `population` (list[Chromosome]): Fittest chromosomes in active generation.
+  - `pheromones` (PheromoneMatrix): Master pheromone database.
+
+---
+
+### optimizer_adaptive.py
+
+#### AdaptiveController
+A controller dynamically scaling mutation probability using stagnation metrics to assist search loops in escaping local optima.
+
+- **Attributes**
+  - `base_mutation` (float): Base mutation rate.
+  - `stagnation_limit` (int): Stagnation threshold.
+  - `max_mutation` (float): Maximum mutation cap limit.
+  - `current_mutation` (float): Active scaling mutation rate.
+
+- **Methods**
+  - `__init__(self, base_mutation: float, stagnation_limit: int, max_mutation: float = 0.8) -> None`
+    - Parameters:
+      - `base_mutation` (float): Minimum mutation rate.
+      - `stagnation_limit` (int): Maximum stagnation generation length.
+      - `max_mutation` (float): Maximum cap, defaults to 0.8.
+    - Outputs: None.
+    - Primary Purpose: Instantiates the controller, verifying bounds are correct.
+  - `update(self, stagnation_counter: int) -> float`
+    - Parameters:
+      - `stagnation_counter` (int): Live stagnation counter.
+    - Outputs: float (scaled mutation rate).
+    - Primary Purpose: Scales mutation intensity quadratically as stagnation persists, and resets instantly to baseline once improvements occur.
+
+---
+
+### optimizer_telemetry.py
+
+#### TelemetryEngine
+The engine responsible for metric logging, lineage tracking, and continuous JSON state exports.
+
+- **Attributes**
+  - `run_dir` (Path): Path to output workspace.
+  - `bounds` (tuple): Geographical bounding box boundary.
+  - `history_file` (Path): Path to history.csv log.
+  - `lineage_file` (Path): Path to lineage.csv log.
+  - `snapshots_dir` (Path): Subdirectory for JSON snapshots.
+
+- **Methods**
+  - `__init__(self, run_dir: Path, bounds: tuple[float, float, float, float]) -> None`
+    - Parameters:
+      - `run_dir` (Path): Target outputs directory.
+      - `bounds` (tuple): Bounding box bounds.
+    - Outputs: None.
+    - Primary Purpose: Prepares directory paths, creates snapshots folder, and initializes tracking files.
+  - `_init_csvs(self) -> None`
+    - Parameters: None.
+    - Outputs: None.
+    - Primary Purpose: Initializes csv logs with headers only if they do not exist, protecting data on resumes.
+  - `log_generation(self, gen: int, best_cost: float, mean_cost: float, mut_rate: float, stag: int) -> None`
+    - Parameters: Generation, best fitness, mean cost, active mutation rate, stagnation.
+    - Outputs: None.
+    - Primary Purpose: Appends overall generational fitness telemetry to history.csv.
+  - `log_lineage(self, population: list[Chromosome]) -> None`
+    - Parameters: Active population list.
+    - Outputs: None.
+    - Primary Purpose: Appends genealogical parent-child relationships and chromosome costs to lineage.csv.
+  - `export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, population: list[Chromosome]) -> None`
+    - Parameters: Generation, best cost, mean cost, active population.
+    - Outputs: None.
+    - Primary Purpose: Exports high-fidelity, client-compatible JSON files containing routes geometry, high-intensity pheromone coordinates, and demand chokepoints.
+
+---
+
+### optimizer_orchestrator_io.py
+
+#### StatePreservationEngine
+The engine handling binary pickling and serialization of evolutionary state checkpoints.
+
+- **Attributes**
+  - `run_dir` (Path): Workspace root path.
+  - `checkpoints_dir` (Path): Checkpoint file storage directory.
+
+- **Methods**
+  - `__init__(self, run_dir: Path) -> None`
+    - Parameters: Workspace root.
+    - Outputs: None.
+    - Primary Purpose: Instantiates the engine and creates checkpoints folder.
+  - `save_state(self, state: OptimizationState) -> None`
+    - Parameters: Active state object.
+    - Outputs: None.
+    - Primary Purpose: Serializes optimization state using an atomic write pattern (writing to `.tmp` first, then replacing), preventing corruptions from sudden interrupts.
+  - `load_state(self, filepath: Path) -> OptimizationState`
+    - Parameters: Pickled file path.
+    - Outputs: OptimizationState.
+    - Primary Purpose: Deserializes the pickling stream to restore optimization execution.
+
+#### OptimizerBuilder
+A static builder factory to construct new runs or resume existing ones.
+
+- **Methods**
+  - `build_new_run(config_path: str | Path) -> tuple[ExperimentConfig, Path]`
+    - Parameters:
+      - `config_path` (str | Path): Config file path.
+    - Outputs: tuple[ExperimentConfig, Path] (parsed config and run workspace path).
+    - Primary Purpose: Creates a new timestamped output directory and copies the configuration YAML for absolute reproducibility.
+  - `resume_run(run_dir: str | Path) -> tuple[ExperimentConfig, OptimizationState, Path]`
+    - Parameters:
+      - `run_dir` (str | Path): Path to a past run workspace.
+    - Outputs: tuple[ExperimentConfig, OptimizationState, Path] (loaded config, deserialized state, workspace path).
+    - Primary Purpose: Reconstructs runtime state, locating the most recent valid pickle checkpoint.
+
+---
+
+### optimizer_engine.py
+
+#### MemeticEngine
+The core engine coordinating Phases A through D of the memetic optimization algorithm.
+
+- **Attributes**
+  - `config` (ExperimentConfig): Immutable experiment configurations.
+  - `cg` (CityGraph): Drivable city network.
+  - `sampler` (Optional[Any]): Passenger demand sampler.
+  - `current_generation` (int): Generation counter index.
+  - `local_search` (ACOLocalSearch): Heuristic local search operator database.
+  - `algo` (MemeticAlgorithm): High-level genetic operator suite.
+
+- **Methods**
+  - `__init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None) -> None`
+    - Parameters: Immutable configurations, city graph, optional demand sampler.
+    - Outputs: None.
+    - Primary Purpose: Instantiates engines and configures the local search and genetic classes.
+  - `initialize_state(self) -> OptimizationState`
+    - Parameters: None.
+    - Outputs: OptimizationState.
+    - Primary Purpose: Generates the initial population of chromosomes, instantiating fresh, decoupled PheromoneMatrix objects for each, evaluating initial costs, and loading the fittest.
+  - `step_generation(self, state: OptimizationState, current_mutation_rate: float) -> OptimizationState`
+    - Parameters:
+      - `state` (OptimizationState): Active optimization state.
+      - `current_mutation_rate` (float): Scaled mutation rate.
+    - Outputs: OptimizationState (the next generational state).
+    - Primary Purpose: Implements elitism (directly retaining the fittest), executes tournament selection, triggers crossover and epigenetic inheritance, performs Lamarckian local search mutations, and increments generation counters.
+
+---
+
+### optimizer.py
+
+#### Optimizer
+The master user-facing orchestrator class coordinating the entire memetic search process, handling keyboard interrupts, and managing telemetry systems.
+
+- **Attributes**
+  - `config` (ExperimentConfig): System configuration settings.
+  - `state` (OptimizationState): Evolutionary search state.
+  - `run_dir` (Path): Output run folder.
+  - `cg` (CityGraph): Underlying drivable street network.
+  - `sampler` (DirectDemandSampler): Demand distribution model.
+  - `raw_config` (dict): raw YAML parsed dictionary.
+  - `engine` (MemeticEngine): Main algorithm engine.
+  - `surrogate` (StaticSurrogateEvaluator): Fast surrogate evaluator database.
+  - `preservation` (StatePreservationEngine): State checkpointing engine.
+  - `telemetry` (TelemetryEngine): Telemetry logger engine.
+  - `adaptive` (AdaptiveController): Stagnation mutation scaler.
+
+- **Methods**
+  - `__init__(self, run_dir: Path) -> None`
+    - Parameters: Past run folder to resume.
+    - Outputs: None.
+    - Primary Purpose: Instantiates the optimizer by loading the configuration and deserializing checkpoint data.
+  - `create(cls, config_path: str | Path) -> Optimizer`
+    - Parameters: YAML config path.
+    - Outputs: Optimizer instance.
+    - Primary Purpose: Instantiates a fresh optimizer run, creating standard workspace outputs.
+  - `_init_engines(self) -> None`
+    - Parameters: None.
+    - Outputs: None.
+    - Primary Purpose: Initializes components, maps synthetic and real city geometries, configures surrogate evaluators, and injects a custom, high-fidelity evaluate override that evaporates and deposits pheromones during the genetic search.
+  - `start(self) -> None`
+    - Parameters: None.
+    - Outputs: None.
+    - Primary Purpose: Executes the main generational search loop. Monitors stagnation counts, updates adaptive mutation rates, logs lineage csv and JSON snapshot telemetry, saves periodic checkpoints, and guarantees atomic state serialization upon manual keyboard interrupts.
+
+---
+
+## 9. Operational Workflow: How to Get Started
 
 To build and run a simulation from scratch, modules must be instantiated in the following dependency order.
 
