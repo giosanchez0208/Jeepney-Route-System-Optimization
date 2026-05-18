@@ -7,6 +7,16 @@ from pathlib import Path
 from .optimizer_config import ExperimentConfig, OptimizationState
 
 class StatePreservationEngine:
+    """
+    State Preservation Engine
+
+    Function: 
+        Handles the Pause/Play mechanics and serialization of the optimization loop.
+    Utility: 
+        Dumps the Population, PheromoneMatrix, and configuration states to a serialized .pkl 
+        checkpoint file at regular intervals. This ensures that runs can be safely halted 
+        (e.g., via interrupt signals) and resumed identically without loss of generational progress.
+    """
     def __init__(self, run_dir: Path):
         self.run_dir = Path(run_dir)
         self.checkpoints_dir = self.run_dir / "checkpoints"

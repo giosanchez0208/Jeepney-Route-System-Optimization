@@ -1,5 +1,8 @@
 # Jeepney Route System Optimization
 
+Academic framework:
+Transit Network Design and Frequencies Setting Problem (TNDFSP)
+
 OVERVIEW:
 
 ```mermaid

@@ -27,6 +27,21 @@ class FleetAllocator:
         tg: 'TravelGraph', 
         mohring_sample_size: int = 2000
     ) -> dict[Route, int]:
+        """
+        Post-Pheromone Allocation:
+        Apply the Mohring Effect via square root scaling. Pheromones represent empirical demand. 
+        Linear allocation starves low-demand transfer routes and destroys network cooperation. 
+        Square root scaling flattens the distribution curve. It subsidizes long routes while 
+        adequately serving dense corridors.
+
+        Formula:
+            F_i = F_total * (sqrt(tau_i) / sum(sqrt(tau)))
+
+        Academic Basis: 
+            Mohring, H. (1972), Optimization and Scale Economies in Urban Bus Transportation. 
+            The American Economic Review, 62(4), 591-604. 
+            This mathematical principle balances fleet operating costs against aggregate passenger wait times.
+        """
         if not routes:
             raise ValueError("[FLEET ALLOCATOR] Routes list cannot be empty.")
         if total_fleet <= 0:
@@ -65,6 +80,29 @@ class FleetAllocator:
 
     @classmethod
     def evaluate_allocation(cls, allocation: dict[Route, int], sampler: 'DirectDemandSampler') -> dict[Route, dict[str, float]]:
+        """
+        Evaluates the efficiency and headway of the allocated vehicle distribution.
+
+        Metrics Calculated:
+        1. Route Load Factor (Demand per Jeep):
+           Measures operator efficiency and passenger crowding. It divides the total pheromone
+           accumulation (demand) on a route by the number of assigned jeeps:
+               Load = sum(tau_route) / F_route
+           A high value indicates overcrowding and missed revenue. A low value indicates empty
+           vehicles and operator financial loss.
+
+        2. Estimated Headway (Distance per Jeep):
+           Primary metric for passenger wait times. Since baseline speed is constant, route
+           distance is directly proportional to cycle time:
+               Headway proportional to sum(L_route) / F_route
+           Quantifies the spatial gap between jeeps. High headway degrades connectivity.
+
+        Demand-Service Parity (Equity Ratio) Note:
+           Theoretical Formula: 
+               Parity = (F_route / F_total) / (tau_route / tau_total)
+           A ratio below 1.0 means the route is underserved relative to its demand, which the 
+           Mohring effect naturally causes to subsidize longer, lower-demand routes.
+        """
         total_fleet = sum(allocation.values())
         if total_fleet == 0: 
             return {}
