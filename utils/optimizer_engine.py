@@ -13,6 +13,16 @@ from .city_graph import CityGraph
 from .optimizer_config import ExperimentConfig, OptimizationState
 
 class MemeticEngine:
+    """
+    The Memetic Engine
+
+    Function: 
+        Executes the main optimization pipeline coordinating the evolutionary phases.
+    Utility: 
+        Manages population initialization, step-generation loops (tournament selection, 
+        crossover, local search, and generational replacement), and updates system states 
+        by routing information directly between genetic and local search operators.
+    """
     def __init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None):
         self.config = config
         self.cg = cg

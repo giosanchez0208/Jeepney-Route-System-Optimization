@@ -1,3 +1,13 @@
+"""
+JUSTIFICATION FOR STILL BEING A "HYBRID GA WITH ACO-INSPIRED LOCAL SEARCH":
+
+Three pillars met:
+1. Path-Cost Deposition: Pheromones are deposited inversely proportional to path cost (Q / C(πp)).
+2. Generational Evaporation: Pheromones decay over time (ρ) to prevent search stagnation.
+3. Probabilistic Biasing: The algorithm uses the pheromone matrix to weight its decisions (in your case, crossover and mutation probabilities) rather than making purely random choices.
+
+"""
+
 from __future__ import annotations
 from typing import Iterable, Optional, TYPE_CHECKING
 from PIL import Image, ImageDraw
@@ -7,9 +17,6 @@ if TYPE_CHECKING:
     from .simulation import SimulationResult
     from .jeep_system import JeepSystem
 
-# Coordinate-pair key so that different DirEdge objects covering the
-# same road segment (e.g. route.path edges vs travel-graph edges) are
-# treated as the same corridor in the pheromone table.
 _CoordKey = tuple[tuple[float, float], tuple[float, float]]
 
 def _edge_key(edge: 'DirEdge') -> _CoordKey:

@@ -91,11 +91,17 @@ class ACOLocalSearch:
 
     def strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]:
         """
-        Operator: Demand-Driven Attraction (Coverage).
+        Operator: Demand-Driven Attraction (Coverage / Spatial Attraction Heuristic).
 
-        Transit networks must adapt to underserved demand hotspots to maximize coverage and market capture
-        (Nielsen et al., 2005). Demand-based node insertion is the primary local search operator in TNDP
-        metaheuristics to capture unserved market share (Iliopoulou et al., 2019).
+        Academic Justification:
+            Gravity-Based Local Search / Spatial Attraction Heuristic.
+            Transit networks must adapt to underserved demand hotspots to maximize coverage and market capture
+            (Nielsen et al., 2005). Demand-based node insertion is the primary local search operator in TNDP
+            metaheuristics to capture unserved market share (Iliopoulou et al., 2019).
+            Instead of replacing an entire route, this operator identifies contiguous sequences of low-pheromone 
+            (underutilized) edges, computes the proximity to high Demand-Service Gap (delta_e) clusters, and 
+            probabilistically bends the route toward those hotspots via cheapest-insertion path stitching,
+            extending coverage without destroying existing connectivity.
 
         Fix 1 (v1): Removed the inverted pheromone gate that blocked the best candidate routes.
         Fix 2 (v1): Replaced closest-edge proximity with cheapest-insertion cost scoring.
@@ -161,11 +167,18 @@ class ACOLocalSearch:
 
     def strategy_redundancy_repulsion(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]:
         """
-        Operator: Oversupply Repulsion (Efficiency).
+        Operator: Oversupply Repulsion (Efficiency / Dispersion Routing).
 
-        Operator viability requires minimizing redundant vehicle kilometers and deadhead trips. If multiple
-        lines overlap entirely, parallel corridors are starved (Silva, 2024). Informal transit networks
-        naturally cluster on main arterials, creating hyper-redundancy (Global Network for Popular Transportation & UNDP, 2024).
+        Academic Justification:
+            Dispersion Routing / Route Overlap Minimization.
+            Operator viability requires minimizing redundant vehicle kilometers and deadhead trips. If multiple
+            lines overlap entirely, parallel corridors are starved (Silva, 2024). Informal transit networks
+            naturally cluster on main arterials, creating hyper-redundancy (Global GNPT & UNDP, 2024).
+            Moving a highly useful segment away from a low-served area provides no mathematical benefit. If a
+            segment is highly useful, it is exactly where passengers need it to be. However, if multiple routes
+            share the same segment, they create fleet redundancy. This operator isolates one of the overlapping 
+            routes and "repels" its segment to a parallel street, maintaining general directional utility 
+            while expanding spatial coverage to adjacent blocks.
 
         Fix 1 (v1): Detour candidates sorted ascending — short, reachable detours tried first.
         Fix 2 (v1): Overserved-edge exclusion uses stable IDs instead of object identity.
@@ -230,12 +243,16 @@ class ACOLocalSearch:
 
     def strategy_tortuosity_pruning(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> tuple[int, Optional[Route]]:
         """
-        Operator: Demand-Aware Tortuosity Pruning (Gap-Immune).
+        Operator: Demand-Aware Tortuosity Pruning (Gap-Immune / Tortuosity Reduction).
 
-        A robust network relies on a simple structure with clearly defined corridors rather than a highly
-        diffuse, complex mesh (Ceder & Wilson, 1986). This implementation executes a targeted amputation
-        by mathematically evaluating the ratio of a segment's geometric inefficiency against its local
-        passenger demand.
+        Academic Justification:
+            Tortuosity Reduction / Route Directness Optimization.
+            A robust network relies on a simple structure with clearly defined corridors rather than a highly
+            diffuse, complex mesh (Ceder & Wilson, 1986). Circuity or tortuosity penalizes passengers and wastes
+            fleet travel time. This operator identifies low-pheromone segments that meander meander between two
+            high-demand hubs, amputates the detour entirely, and bridges the gap using the strictly shortest-path 
+            calculation available on the city graph. This straightens the route, converting detour cycles into
+            high-frequency service along direct corridors.
 
         Fix (v3): Added gap immunity. The pheromone-weighted score (distance / utility) correctly
           prioritizes low-pheromone detours for pruning — but underserved edges have low pheromone

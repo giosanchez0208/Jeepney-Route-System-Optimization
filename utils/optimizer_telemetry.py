@@ -21,6 +21,17 @@ class _DummySystem:
         self.jeeps = [_DummyJeep(r) for r, count in allocation.items() for _ in range(count)]
 
 class TelemetryEngine:
+    """
+    Telemetry and Export Module
+
+    Function: 
+        Handles all metric logging, lineage tracking, and JSON topology exports.
+    Utility: 
+        Dumps generational metrics (Best Cost, Mean Cost, Stagnation Counter) to CSV, 
+        tracks parentage lineages, and generates continuous JSON network snapshots (containing
+        routes, pheromones, and high demand-service gap chokepoints) at user-defined intervals 
+        for dashboard visualization.
+    """
     def __init__(self, run_dir: Path, bounds: tuple[float, float, float, float]):
         self.run_dir = Path(run_dir)
         self.bounds = bounds

@@ -11,6 +11,15 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ExperimentConfig:
+    """
+    Configuration Manager
+
+    Function: 
+        Ingests strict YAML configuration files and exposes validated parameter properties.
+    Utility: 
+        Enables queuing multiple experiments with different target route counts, fleet sizes,
+        and pheromone parameters without altering source code.
+    """
     # Orchestrator IO
     output_root: Path
     telemetry_interval: int
