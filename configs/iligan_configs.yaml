@@ -61,7 +61,26 @@ simulation:
 ########## OPTIMIZATION PARAMETERS ########################
 # [TODO] RESEARCH AND JUSTIFY THESE VALUES
 optimization:
+  output_root: "outputs/iligan_runs"
+  telemetry_interval: 2
+  checkpoint_interval: 5
+  
+  n_population: 10
+  g_max: 30
+  n_stagnation: 8
+  n_elite: 2
+  k_tournament: 3
+  p_mutation: 0.25
+  gamma_crossover: 0.5
+  
   initial_tau: 1.0
   rho: 0.1
   q: 1000.0
+  
+  p_ls_attraction: 0.4
+  p_ls_repulsion: 0.4
+  p_ls_pruning: 0.6
+  
   default_jeep_weight: 1.0
+  alpha_std_penalty: 0.5
+  beta_penalty: 2.0
