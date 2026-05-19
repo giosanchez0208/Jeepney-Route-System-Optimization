@@ -1726,6 +1726,35 @@ Automated post-optimization comparison class responsible for proving solution co
 
 ---
 
+### sensitivity_testing.py
+
+#### SensitivitySuite
+Post-optimization sensitivity testing and validation suite responsible for evaluating final optimized paratransit solutions under demand disruptions, speed variations, and behavioral sweeps.
+
+- **Methods**
+  - `calculate_operator_fleet_variance(chromosome: Any) -> float`
+    - Parameters: Candidate Chromosome object.
+    - Outputs: float (Variance of the route path lengths).
+    - Primary Purpose: Computes operator fleet/length variance of the active paratransit system.
+  - `run_demand_perturbation(cls, evaluator: Any, chromosome: Any, sigma2: float) -> dict`
+    - Parameters: Surrogate evaluator, Chromosome under test, noise variance $\sigma^2$.
+    - Outputs: Dict of commute cost, operator variance, and unserved demand under Gaussian demand perturbations.
+    - Primary Purpose: Evaluates spatial network robustness under stochastic demand shifts.
+  - `run_congestion_scaling(cls, evaluator: Any, chromosome: Any, gamma: float) -> dict`
+    - Parameters: Surrogate evaluator, Chromosome, congestion scaling factor $\gamma$.
+    - Outputs: Dict of metrics under scaled jeepney speeds ($v_{jeep} \times \gamma$).
+    - Primary Purpose: Simulates systemic commute impact of uniform traffic congestion shifts.
+  - `run_behavioral_sweep(cls, evaluator: Any, chromosome: Any, epsilon: float, transfer_wt: float) -> dict`
+    - Parameters: Evaluator, Chromosome, boarding tolerance ($\epsilon$), transfer penalty ($w_{transfer\_wt}$).
+    - Outputs: Dict of sweep outcomes.
+    - Primary Purpose: Analyzes passenger modal sensitivity to transfer frictions and boarding decision margins.
+  - `execute_sensitivity_suite(cls, evaluator: Any, chromosome: Any, output_plot_path: str) -> dict`
+    - Parameters: Surrogate evaluator, Chromosome, target 3D scatter plot output file path.
+    - Outputs: Dictionary summarizing all run metrics and output plot path.
+    - Primary Purpose: Runs the complete multi-scenario sensitivity suite and exports the 3D Pareto frontier plot.
+
+---
+
 ### optimizer_orchestrator_io.py
 
 #### StatePreservationEngine
