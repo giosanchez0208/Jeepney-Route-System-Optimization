@@ -320,6 +320,21 @@ $$\text{CosineSimilarity}(\mathbf{d}_A, \mathbf{d}_B) = \frac{\mathbf{d}_A \cdot
 
 This metric measures structural alignment in paratransit flow distribution, validating that key junctions and transfer hubs emerge consistently across different search trajectories.
 
+### 7.8. Sensitivity Testing, Multi-Scenario Sweeps, and 3D Pareto Frontier Analysis
+To mathematically establish the systemic resilience of the optimized paratransit network design under operating uncertainties, we execute a post-optimization multi-scenario sensitivity suite. The optimized network is evaluated against three distinct stress vectors:
+1. **Demand Surface Perturbations:** Stochastic demand shocks are simulated by injecting additive Gaussian noise directly into the Direct Demand Model (DDM) probability distribution. For each node $v_i$, the DDM spatial probability $P_i$ is perturbed:
+
+$$P'_i = \max\left(10^{-9}, P_i + \mathcal{N}(0, \sigma^2)\right), \quad \sigma^2 \in \{0.05, 0.10, 0.20\}$$
+
+The perturbed probabilities are subsequently re-normalized and re-compiled into the O(1) Walker's Alias tables. This test validates spatial network stability under unpredictable structural demand migrations (Vongpraseuth et al., 2025).
+2. **Congestion Scaling:** Uniform traffic congestion is simulated by scaling nominal paratransit speeds:
+
+$$v_{jeep}' = v_{jeep} \times \gamma, \quad \gamma \in \{0.5, 1.0, 1.5\}$$
+
+To reflect travel time increases in surrogate graph evaluations, the ride edge weight cost coefficient is scaled by $1/\gamma$ (e.g., $w_{ride\_wt}' = w_{ride\_wt} / \gamma$).
+3. **Behavioral Parameter Sweeps:** To capture passenger modal split elasticities, we perform multi-step sweep analyses over boarding decision tolerance boundaries ($\epsilon \in \{25.0, 50.0, 100.0\}$) and graph transfer penalty frictions ($w_{transfer\_wt} \in \{5.0, 10.0, 20.0\}$).
+4. **3D Pareto Frontier Analysis:** All sweep configurations are mapped into a 3D coordinate space defined by the primary conflicting system objectives: **Passenger Commute Cost** (total journey weight), **Operator Fleet Variance** (variance of route path lengths $\sigma^2_{length}$), and **Unserved Demand** (count of unreachable OD pairs).
+
 ---
 
 ## 8. ACO-Inspired Local Search Operators (Spatial Mutation)

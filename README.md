@@ -580,6 +580,15 @@ Errors:
 - **Degree Distribution Cosine Similarity**: Compares structural route topology alignment by calculating the cosine similarity of node degree vectors across identical active node spaces.
 - **Automated Validation Gate**: Enforces that the mean topological Jaccard similarity across varying behavioral parameters must remain $\ge 0.80$ to establish mathematical solution consistency and structural stability.
 
+### `sensitivity_testing.py`
+
+`SensitivitySuite` automates post-optimization multi-scenario parameter sweeps to validate network design resilience.
+
+- **Demand Surface Perturbations**: Simulates demand shifts by injecting Gaussian noise ($\sigma^2 \in \{0.05, 0.10, 0.20\}$) into the Direct Demand Model.
+- **Congestion Scaling**: Simulates vehicle speed degradation under congestion ($v_{jeep} \times \gamma, \gamma \in \{0.5, 1.0, 1.5\}$).
+- **Behavioral Parameter Sweeps**: Evaluates passenger sensitivities to transfer penalty frictions ($w_{transfer\_wt}$) and boarding decision tolerance margins ($\epsilon$).
+- **3D Pareto Frontier Generator**: Compiles results and exports a 3D scatter plot of Passenger Commute Cost vs. Operator Fleet Variance vs. Unserved Demand to identify system-wide optimal tradeoffs.
+
 ### `optimizer_orchestrator_io.py`
 
 `StatePreservationEngine` and `OptimizerBuilder` coordinate run serialization and setup.
