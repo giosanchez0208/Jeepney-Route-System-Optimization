@@ -169,23 +169,32 @@ class SensitivitySuite:
         """
         Runs the full paratransit sensitivity testing pipeline and plots the 3D Pareto frontier.
         """
-        results = []
-        
+        # Build all scenarios to run
+        scenarios_to_run = []
         # 1. Demand Surface Perturbations (Gaussian Noise variance in {0.05, 0.10, 0.20})
         for var in [0.05, 0.10, 0.20]:
-            res = cls.run_demand_perturbation(evaluator, chromosome, var)
-            results.append(res)
+            scenarios_to_run.append(("demand", var))
             
         # 2. Congestion Scaling (gamma in {0.5, 1.0, 1.5})
         for gamma in [0.5, 1.0, 1.5]:
-            res = cls.run_congestion_scaling(evaluator, chromosome, gamma)
-            results.append(res)
+            scenarios_to_run.append(("congestion", gamma))
             
         # 3. Behavioral Parameter Sweeps
         for eps in [25.0, 50.0, 100.0]:
             for trans_wt in [5.0, 10.0, 20.0]:
+                scenarios_to_run.append(("behavioral", (eps, trans_wt)))
+                
+        # Execute with progress bar
+        from tqdm import tqdm
+        for s_type, s_val in tqdm(scenarios_to_run, desc="Sensitivity Scenario Sweeps"):
+            if s_type == "demand":
+                res = cls.run_demand_perturbation(evaluator, chromosome, s_val)
+            elif s_type == "congestion":
+                res = cls.run_congestion_scaling(evaluator, chromosome, s_val)
+            elif s_type == "behavioral":
+                eps, trans_wt = s_val
                 res = cls.run_behavioral_sweep(evaluator, chromosome, eps, trans_wt)
-                results.append(res)
+            results.append(res)
                 
         # 4. Generate 3D Pareto Frontier Plot
         os.makedirs(os.path.dirname(output_plot_path), exist_ok=True)
