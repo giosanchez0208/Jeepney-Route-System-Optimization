@@ -21,6 +21,13 @@ where:
 2. $U_{unserved}(\Pi)$ is a heavy penalty coefficient $\beta = 2.0$ applied to passengers whose journey time exceeds a simulated ceiling (representing unserved demand or market starvation).
 3. $\text{Var}(F)$ is an operator equity penalty $\alpha = 0.5$ penalizing excessive variance in vehicle headway and fleet allocation across lines to prevent competitive starvation and promote balanced service frequencies.
 
+### 1.2. Academic Contribution & Comparative Evaluation Paradigm
+A persistent challenge in informal paratransit network design is the absolute sparsity of historical municipal baselines, centralized scheduling registries, or static transit matrices. Traditional public transit design methods rely heavily on real-world reference datasets to formulate comparative metrics (Nielsen et al., 2005; Iliopoulou et al., 2019). We reframe this paradigm by constructing our optimization framework as an **independent, self-contained comparative evaluator**. 
+
+Rather than assuming the existence of or querying for a real-world baseline dataset, the system natively evaluates and ranks synthetic candidate topologies against one another under varied structural configurations to mathematically prove relative dominance. This comparative evaluator paradigm offers three distinct methodological contributions:
+1. **Zero-Baseline Independent Ranking:** By modeling passenger commutes across synthesized travel graphs ($\mathcal{G}_{travel}$) under stochastic spatial prior matrices, candidate networks are evaluated in closed-loop comparative sets. A system's efficiency is proved by showing its relative mathematical dominance (Pareto dominance) over alternative generated layouts under identical demand envelopes.
+2. **Topological Pareto Profiling:** By sweeping structural configurations—such as varying fleet capacities, vehicle speeds, transfer penalties, or spatial attraction coefficients—the framework traces out a self-contained Pareto frontier. Candidate designs are directly ranked based on their relative resilience and Pareto-efficiency without requiring empirical calibration against pre-existing operational benchmarks.
+3. **Decentralized Validation Capacity:** The framework establishes a mathematically rigorous methodology for paratransit planning in high-sparsity developing regions, offering an objective comparative standard to evaluate competing operator syndicate proposals before physical deployment.
 
 ---
 
