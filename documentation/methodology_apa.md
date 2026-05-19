@@ -284,6 +284,11 @@ $$\text{Cost} = \sum_{i=1}^M \left( w_{headway} \cdot \text{Headway}_i + w_{leng
 
 where $\text{Headway}_i = \text{Length}_i / f_i$. If route allocation $f_i = 0$, a severe penalty of $10,000.0$ is applied.
 
+### 7.5. Deterministic Auditing and Pause/Resume State Preservation
+To support high-fidelity paratransit research auditing and guarantee absolute reproducibility across interrupted runs, we formulate a deterministic state-preservation paradigm. Standard metaheuristic executions are susceptible to pseudorandom state drift upon interruption and resumption. To prevent this, our serialization framework implements a two-tier preservation shield:
+1. **Atomic State Serialization:** The active evolutionary state $\mathbf{S}_g = \langle g, \mathbf{Pop}_g, \mathcal{T}_g, \Theta_{rand} \rangle$ at generation $g$ is written atomically. The state is first serialized to a temporary swapfile (`.tmp`) using Python's high-performance object serialization pickle protocol (with `sys.setrecursionlimit` scaled to $25,000$ to accommodate recursive Directed Graph pointer maps). An OS-level atomic replace operation then replaces the active checkpoint `state_gen_g.pkl`. This isolates checkpoints from disk-write saturation or sudden process termination.
+2. **Entropy Drift Resolution ($\Theta_{rand}$):** The active pseudorandom number generator state is captured dynamically at the moment of serialization using `random.getstate()` and appended to the optimization state. Upon run resumption, road graph builders, coordinate samplers, and simulation allocators consume pseudorandom entropy during class instantiation in the initialization phase. Restoring the seed *before* instantiation results in immediate state corruption and trajectory drift. To resolve this, our model caches the state tuple and explicitly executes a post-initialization seed restoration using `random.setstate(\Theta_{rand})` strictly *after* all static engines and synthetic networks finish setup. This guarantees $100\%$ bit-wise identical execution tracing and mathematical parity, enabling researchers to replay failed runs with bit-wise exactness.
+
 ---
 
 ## 8. ACO-Inspired Local Search Operators (Spatial Mutation)
@@ -320,6 +325,24 @@ Circuity and geometric wiggles penalize passengers and waste travel time (Ceder 
 1. Calculates a route segment's tortuosity ratio: $\text{score} = \text{Length} / \max(1.0, \text{Utility})$.
 2. Bypasses highly tortuous, low-pheromone segments with straight-line shortest-path segments.
 3. **Gap Immunity:** To prevent pruning from erases attraction's coverage gains, segments containing any positive-gap (underserved) edge are strictly immune to pruning. This ensures attraction and pruning act orthogonally rather than antagonistically.
+
+### 8.4. Adaptive Parameter Control: Linear Local Search Decay and Dynamic Radius Tightening
+To solve the fundamental exploration-exploitation trade-off and prevent premature convergence during the epigenetic pheromone blending phase, we implement an adaptive parameter control framework (Eiben et al., 1999).
+1. **Linear Mutation Decay:** Instead of utilizing static, hand-tuned operator probabilities, the local search mutation probability is governed by a deterministic parameter controller that decays linearly as a function of the active generation $g$ relative to the maximum generation ceiling $G_{max}$:
+
+$$P_{local}(g) = P_{min} + (P_{max} - P_{min}) \times \left(1 - \frac{g}{G_{max}}\right)$$
+
+where $P_{max} = 0.8$ represents the maximum initial local search probability, and $P_{min} = 0.05$ represents the minimum probability baseline. This ensures high structural exploration in early evolutionary generations, which decays smoothly to highly focused exploitation near convergence.
+2. **Stagnation-Triggered Adaptive Boosting:** When evolutionary search registers stagnation (progress counter $s > 0$ without global cost improvement), the controller dynamically boosts the active local search probability to assist the system in escaping local optima:
+
+$$P_{local}^{active}(g) = \min\left( P_{local}(g) + \Delta_{boost}(s), 0.95 \right)$$
+
+where $\Delta_{boost}(s)$ scales quadratically based on the stagnation duration relative to the stagnation limit.
+3. **Localized Search Radius Tightening:** Simultaneously, the search window size and coordinate repulsion search radius are scaled stochastically by a dynamic intensity multiplier $I(g)$ that decays from $I_{max} = 1.0$ to $I_{min} = 0.1$ as a function of the evolutionary timeline:
+
+$$I(g) = I_{min} + (I_{max} - I_{min}) \times \left(1 - \frac{g}{G_{max}}\right)$$
+
+As $g \to G_{max}$, the mutation operators mathematically shrink their localized search radii ($R = 0.015 \cdot I(g)$), transitioning the mutation behavior from coarse macro-detours to hyper-localized street adjustments. This is strictly backed by the literature on parameter control in evolutionary computation (Eiben, Hinterding, & Michalewicz, 1999).
 
 ---
 
