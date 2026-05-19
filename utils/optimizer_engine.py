@@ -76,7 +76,7 @@ class MemeticEngine:
             best_fitness=population[0].cost
         )
 
-    def step_generation(self, state: OptimizationState, current_mutation_rate: float) -> OptimizationState:
+    def step_generation(self, state: OptimizationState, current_mutation_rate: float, intensity: float = 1.0) -> OptimizationState:
         self.current_generation += 1
         population = state.population
         next_gen = population[:self.config.n_elite]
@@ -102,7 +102,7 @@ class MemeticEngine:
             self.algo.evaluate_chromosome(child, target_fleet)
             
             if random.random() < current_mutation_rate:
-                self.algo.apply_lamarckian_mutation(child, parent_a.cost, target_fleet)
+                self.algo.apply_lamarckian_mutation(child, parent_a.cost, target_fleet, intensity=intensity)
                 
             next_gen.append(child)
 

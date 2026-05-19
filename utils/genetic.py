@@ -224,14 +224,14 @@ class MemeticAlgorithm:
         chrom.cost = system_cost
         return system_cost
 
-    def apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool:
+    def apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int, intensity: float = 1.0) -> bool:
         if child is None:
             raise ValueError("[MEMETIC ALGO] Child chromosome cannot be None.")
 
         original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
         
         child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
-        self.local_search.optimize_system(child.routes, child.pheromones, intensity=1.0)
+        self.local_search.optimize_system(child.routes, child.pheromones, intensity=intensity)
         
         hard_cost: float = self.evaluate_chromosome(child, total_fleet)
 

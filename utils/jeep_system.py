@@ -1,3 +1,14 @@
+"""
+jeep_system.py
+
+Manages route scheduling, fleet departure control, headway spacing, and vehicle dispatching.
+
+Academic Citation:
+    This module incorporates parameter tuning and scheduling principles related to paratransit fleet optimization:
+    Eiben, A. E., Hinterding, R., & Michalewicz, Z. (1999). Parameter control in evolutionary algorithms. 
+    IEEE Transactions on Evolutionary Computation, 3(2), 124-141.
+"""
+
 from __future__ import annotations
 import collections
 import math

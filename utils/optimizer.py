@@ -104,10 +104,16 @@ class Optimizer:
                     print(f"[OPTIMIZER] Stagnation limit reached at generation {self.state.generation}. Terminating.")
                     break
 
-                mut_rate = self.adaptive.update(self.state.stagnation_counter)
+                p_local = self.adaptive.get_local_search_prob(self.state.generation, self.config.g_max)
+                intensity = self.adaptive.get_local_search_intensity(self.state.generation, self.config.g_max)
+                
+                # Scale up to escape local optima if stagnation is active
+                if self.state.stagnation_counter > 0:
+                    stagnation_boost = self.adaptive.update(self.state.stagnation_counter) - self.config.p_mutation
+                    p_local = min(p_local + max(0.0, stagnation_boost), 0.95)
                 
                 # Advance optimization generation
-                self.state = self.engine.step_generation(self.state, mut_rate)
+                self.state = self.engine.step_generation(self.state, p_local, intensity=intensity)
                 self.state.generation += 1
 
                 mean_cost = sum(c.cost for c in self.state.population) / len(self.state.population)
