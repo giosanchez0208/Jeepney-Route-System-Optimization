@@ -41,14 +41,14 @@ optimization:
   telemetry_interval: 1
   checkpoint_interval: 2
   
-  n_population: 4
-  g_max: 2
-  n_stagnation: 5
+  n_population: 10             # Production-grade population size
+  g_max: 30                    # Full 30 generations
+  n_stagnation: 30             # Stagnation ceiling
   n_elite: 1
   k_tournament: 3
   p_mutation: 0.45             # P5: Radical exploratory mutation
   gamma_crossover: 0.5
-  jaccard_patience: 2
+  jaccard_patience: 30         # 30-generation phenotypic convergence window
   
   initial_tau: 1.0
   rho: 0.1
