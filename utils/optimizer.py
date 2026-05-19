@@ -142,59 +142,76 @@ class Optimizer:
         self.jaccard_patience_counter = 0
 
         print(f"[OPTIMIZER] Launching optimization search loop. Max generations: {self.config.g_max}")
+        from tqdm import tqdm
         try:
-            while self.state.generation <= self.config.g_max:
-                if self.state.stagnation_counter >= self.config.n_stagnation:
-                    print(f"[OPTIMIZER] Stagnation limit reached at generation {self.state.generation}. Terminating.")
-                    break
+            # Nested tqdm bar tracking generations with live telemetry updates
+            with tqdm(
+                total=self.config.g_max, 
+                initial=self.state.generation, 
+                desc="Memetic Generations", 
+                leave=False
+            ) as pbar:
+                while self.state.generation <= self.config.g_max:
+                    if self.state.stagnation_counter >= self.config.n_stagnation:
+                        print(f"[OPTIMIZER] Stagnation limit reached at generation {self.state.generation}. Terminating.")
+                        break
 
-                p_local = self.adaptive.get_local_search_prob(self.state.generation, self.config.g_max)
-                intensity = self.adaptive.get_local_search_intensity(self.state.generation, self.config.g_max)
-                
-                # Scale up to escape local optima if stagnation is active
-                if self.state.stagnation_counter > 0:
-                    stagnation_boost = self.adaptive.update(self.state.stagnation_counter) - self.config.p_mutation
-                    p_local = min(p_local + max(0.0, stagnation_boost), 0.95)
-                
-                # Advance optimization generation
-                self.state = self.engine.step_generation(self.state, p_local, intensity=intensity)
-                self.state.generation += 1
+                    p_local = self.adaptive.get_local_search_prob(self.state.generation, self.config.g_max)
+                    intensity = self.adaptive.get_local_search_intensity(self.state.generation, self.config.g_max)
+                    
+                    # Scale up to escape local optima if stagnation is active
+                    if self.state.stagnation_counter > 0:
+                        stagnation_boost = self.adaptive.update(self.state.stagnation_counter) - self.config.p_mutation
+                        p_local = min(p_local + max(0.0, stagnation_boost), 0.95)
+                    
+                    # Advance optimization generation
+                    self.state = self.engine.step_generation(self.state, p_local, intensity=intensity)
+                    self.state.generation += 1
+                    pbar.update(1)
 
-                mean_cost = sum(c.cost for c in self.state.population) / len(self.state.population)
-                
-                # Synchronously log lineage relationships and parentage UIDs
-                self.telemetry.log_lineage(self.state.population)
+                    mean_cost = sum(c.cost for c in self.state.population) / len(self.state.population)
+                    
+                    # Synchronously log lineage relationships and parentage UIDs
+                    self.telemetry.log_lineage(self.state.population)
 
-                # Calculate multi-dimensional phenotypic & fitness convergence metrics
-                elite_jaccard = self.calculate_elite_jaccard(self.state.population)
-                fitness_variance = self.calculate_fitness_variance(self.state.population)
+                    # Calculate multi-dimensional phenotypic & fitness convergence metrics
+                    elite_jaccard = self.calculate_elite_jaccard(self.state.population)
+                    fitness_variance = self.calculate_fitness_variance(self.state.population)
 
-                print(f"[OPTIMIZER] Generation {self.state.generation} metrics: Elite Jaccard = {elite_jaccard:.4f}, Fitness Variance = {fitness_variance:.4e}")
+                    # Update progress bar statistics in real-time
+                    pbar.set_postfix({
+                        "best_fit": f"{self.state.best_fitness:.2f}",
+                        "jaccard": f"{elite_jaccard:.2f}",
+                        "variance": f"{fitness_variance:.2e}",
+                        "stagnation": self.state.stagnation_counter
+                    })
 
-                if elite_jaccard >= 0.95:
-                    self.jaccard_patience_counter += 1
-                else:
-                    self.jaccard_patience_counter = 0
+                    print(f"[OPTIMIZER] Generation {self.state.generation} metrics: Elite Jaccard = {elite_jaccard:.4f}, Fitness Variance = {fitness_variance:.4e}")
 
-                if self.jaccard_patience_counter >= self.config.jaccard_patience:
-                    print(f"[OPTIMIZER] Phenotypic convergence reached (Elite Jaccard >= 0.95 for {self.config.jaccard_patience} consecutive generations) at generation {self.state.generation}. Terminating.")
-                    break
+                    if elite_jaccard >= 0.95:
+                        self.jaccard_patience_counter += 1
+                    else:
+                        self.jaccard_patience_counter = 0
 
-                if fitness_variance < 1e-6:
-                    print(f"[OPTIMIZER] Genotypic convergence reached (Fitness Variance < 1e-6) at generation {self.state.generation}. Terminating.")
-                    break
+                    if self.jaccard_patience_counter >= self.config.jaccard_patience:
+                        print(f"[OPTIMIZER] Phenotypic convergence reached (Elite Jaccard >= 0.95 for {self.config.jaccard_patience} consecutive generations) at generation {self.state.generation}. Terminating.")
+                        break
 
-                if self.state.generation % self.config.telemetry_interval == 0:
-                    self.telemetry.log_generation(
-                        self.state.generation, self.state.best_fitness, mean_cost, p_local, self.state.stagnation_counter
-                    )
-                    self.telemetry.export_json_snapshot(
-                        self.state.generation, self.state.best_fitness, mean_cost, self.state.population
-                    )
+                    if fitness_variance < 1e-6:
+                        print(f"[OPTIMIZER] Genotypic convergence reached (Fitness Variance < 1e-6) at generation {self.state.generation}. Terminating.")
+                        break
 
-                if self.state.generation % self.config.checkpoint_interval == 0:
-                    print(f"[OPTIMIZER] Saving checkpoint at generation {self.state.generation}...")
-                    self.preservation.save_state(self.state)
+                    if self.state.generation % self.config.telemetry_interval == 0:
+                        self.telemetry.log_generation(
+                            self.state.generation, self.state.best_fitness, mean_cost, p_local, self.state.stagnation_counter
+                        )
+                        self.telemetry.export_json_snapshot(
+                            self.state.generation, self.state.best_fitness, mean_cost, self.state.population
+                        )
+
+                    if self.state.generation % self.config.checkpoint_interval == 0:
+                        print(f"[OPTIMIZER] Saving checkpoint at generation {self.state.generation}...")
+                        self.preservation.save_state(self.state)
 
         except KeyboardInterrupt:
             print("\n[OPTIMIZER] Execution interrupted by user. Saving final state...")
