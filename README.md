@@ -556,9 +556,11 @@ Errors:
 
 ### `optimizer_adaptive.py`
 
-`AdaptiveController` dynamically scales mutation probabilities using stagnation metrics to assist search loops in escaping local optima.
+`AdaptiveController` dynamically scales mutation probabilities to escape local optima and decays local search intensities.
 
 - **Dynamic Parameter Control**: Monitors generation stagnation. If progress slows, mutation rate scales quadratically toward a hard cap of `0.8` to force exploration (Eiben et al., 1999).
+- **Linear Parameter Decay**: Linearly decays the local search mutation probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) * (1 - g / G_{max})$ to prevent premature convergence in the epigenetic pheromone blending phase.
+- **Dynamic Radius Tightening**: Shrinks the localized search intensity/radius parameter stochastically from $I_{max} = 1.0$ down to $I_{min} = 0.1$ as generations approach the limit, tightening optimization focus.
 - **Exploitation Reset**: Instantly resets the mutation probability to baseline once a new best system cost is registered, returning the algorithm to localized soft-body exploitation.
 
 ### `optimizer_telemetry.py`
@@ -574,6 +576,8 @@ Errors:
 `StatePreservationEngine` and `OptimizerBuilder` coordinate run serialization and setup.
 
 - **StatePreservationEngine**: Saves generational progress using an atomic write pattern (writing to `.tmp` before renaming), protecting checkpoint pickle files from corruption on forced exits.
+- **Deterministic Auditing**: Captures the standard pseudorandom state using `random.getstate()` and serializes it with the `OptimizationState` checkpoint.
+- **Auditable Resume Safety**: On resumption, restores the captured pseudorandom state using `random.setstate()` *after* all static engines and synthetic networks finish setup, guaranteeing 100% bit-wise identical execution tracing.
 - **OptimizerBuilder**: Copies YAML files to new timestamped run folders for exact replication and loads past runs.
 
 ### `optimizer_engine.py`

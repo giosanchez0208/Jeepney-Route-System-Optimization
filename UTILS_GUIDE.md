@@ -1100,7 +1100,7 @@ Applies demand-driven mutations and spatial heuristics to optimize route systems
 ### optimizer_adaptive.py
 
 #### AdaptiveController
-Dynamically scales mutation probabilities to escape local optima.
+Dynamically scales mutation probabilities to escape local optima and decays local search intensities.
 
 - **Attributes**
   - `base_mutation` (float): Baseline mutation probability.
@@ -1118,6 +1118,10 @@ Dynamically scales mutation probabilities to escape local optima.
       - `stagnation_counter` (int): Generations without improvement.
     - Outputs: float (updated mutation probability).
     - Primary Purpose: Non-linearly scales mutation intensity as stagnation increases, resetting to base immediately upon improvement.
+  - `get_local_search_prob(self, generation: int, g_max: int, p_min: float = 0.05, p_max: float = 0.8) -> float`
+    - Primary Purpose: Computes the linearly decaying local search mutation probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) * (1 - g / G_{max})$.
+  - `get_local_search_intensity(self, generation: int, g_max: int, i_min: float = 0.1, i_max: float = 1.0) -> float`
+    - Primary Purpose: Computes the dynamically tightening local search intensity/radius: $I_{local}(g) = I_{min} + (I_{max} - I_{min}) * (1 - g / G_{max})$.
 
 ---
 
@@ -1170,6 +1174,7 @@ Structured state tracker.
   - `best_fitness` (float): Best fitness score.
   - `population` (list): Live Chromosome population.
   - `pheromones` (PheromoneMatrix): Active pheromone matrix.
+  - `random_state` (Optional[tuple]): Captured pseudorandom state (`random.getstate()`) for deterministic Pause/Resume recovery.
 
 ---
 
@@ -1622,13 +1627,14 @@ A mutable dataclass tracking live generational state.
   - `best_fitness` (float): Fittest score registered so far.
   - `population` (list[Chromosome]): Fittest chromosomes in active generation.
   - `pheromones` (PheromoneMatrix): Master pheromone database.
+  - `random_state` (Optional[tuple]): Captured state tuple for deterministic auditing.
 
 ---
 
 ### optimizer_adaptive.py
 
 #### AdaptiveController
-A controller dynamically scaling mutation probability using stagnation metrics to assist search loops in escaping local optima.
+A controller dynamically scaling mutation probability using stagnation metrics to assist search loops in escaping local optima and decaying local search parameters.
 
 - **Attributes**
   - `base_mutation` (float): Base mutation rate.
@@ -1649,6 +1655,10 @@ A controller dynamically scaling mutation probability using stagnation metrics t
       - `stagnation_counter` (int): Live stagnation counter.
     - Outputs: float (scaled mutation rate).
     - Primary Purpose: Scales mutation intensity quadratically as stagnation persists, and resets instantly to baseline once improvements occur.
+  - `get_local_search_prob(self, generation: int, g_max: int, p_min: float = 0.05, p_max: float = 0.8) -> float`
+    - Primary Purpose: Computes the linearly decaying local search mutation probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) * (1 - g / G_{max})$.
+  - `get_local_search_intensity(self, generation: int, g_max: int, i_min: float = 0.1, i_max: float = 1.0) -> float`
+    - Primary Purpose: Computes the dynamically tightening local search intensity/radius: $I_{local}(g) = I_{min} + (I_{max} - I_{min}) * (1 - g / G_{max})$.
 
 ---
 
