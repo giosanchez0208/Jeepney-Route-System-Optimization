@@ -1586,6 +1586,7 @@ A frozen, immutable dataclass containing all system, travel-graph, genetic, loca
   - `k_tournament` (int): Tournament selection size.
   - `p_mutation` (float): Base probability of mutation.
   - `gamma_crossover` (float): Crossover blending coefficient.
+  - `jaccard_patience` (int): Number of consecutive generations that elite Jaccard similarity must remain >= 0.95 to trigger phenotypic convergence termination.
   - `initial_tau` (float): Base pheromone concentration value.
   - `rho` (float): Generational pheromone evaporation rate.
   - `q` (float): Pheromone deposition scaling factor.
@@ -1805,7 +1806,15 @@ The master user-facing orchestrator class coordinating the entire memetic search
   - `start(self) -> None`
     - Parameters: None.
     - Outputs: None.
-    - Primary Purpose: Executes the main generational search loop. Monitors stagnation counts, updates adaptive mutation rates, logs lineage csv and JSON snapshot telemetry, saves periodic checkpoints, and guarantees atomic state serialization upon manual keyboard interrupts.
+    - Primary Purpose: Executes the main generational search loop. Tracks stagnation, evaluates multi-dimensional Jaccard phenotypic convergence and fitness variance, logs lineage history and JSON snapshot telemetry, saves periodic checkpoints, and guarantees atomic state serialization upon manual keyboard interrupts.
+  - `calculate_elite_jaccard(self, population: list) -> float`
+    - Parameters: Active population list.
+    - Outputs: float.
+    - Primary Purpose: Computes the average Jaccard similarity of route edge sets among the top 10% elite chromosomes (Goldberg, 1989).
+  - `calculate_fitness_variance(self, population: list) -> float`
+    - Parameters: Active population list.
+    - Outputs: float.
+    - Primary Purpose: Computes the variance of chromosome costs to detect genetic convergence.
 
 ---
 

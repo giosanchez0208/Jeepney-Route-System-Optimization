@@ -29,6 +29,7 @@ N_ELITE: 5                # Preserves top 10% of the population
 K_TOURNAMENT: 5           
 P_MUTATION: 0.3           # Increased for broader exploration in short runs
 GAMMA_CROSSOVER: 0.5      
+JACCARD_PATIENCE: 30      
 
 # ==========================================
 # PHASES B & C: ACO & LOCAL SEARCH

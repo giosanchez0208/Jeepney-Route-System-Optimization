@@ -33,6 +33,7 @@ class ExperimentConfig:
     k_tournament: int
     p_mutation: float
     gamma_crossover: float
+    jaccard_patience: int
     
     # Local Search & Pheromone Params
     initial_tau: float
@@ -101,6 +102,7 @@ class ExperimentConfig:
             k_tournament=int(opt.get("k_tournament", 3)),
             p_mutation=float(opt.get("p_mutation", 0.2)),
             gamma_crossover=float(opt.get("gamma_crossover", 0.5)),
+            jaccard_patience=int(opt.get("jaccard_patience", opt.get("JACCARD_PATIENCE", data.get("JACCARD_PATIENCE", data.get("jaccard_patience", 30))))),
             
             initial_tau=float(opt.get("initial_tau", 1.0)),
             rho=float(opt.get("rho", 0.1)),
