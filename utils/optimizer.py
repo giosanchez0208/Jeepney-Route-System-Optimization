@@ -21,6 +21,7 @@ class Optimizer:
     def __init__(self, run_dir: Path):
         self.config, self.state, self.run_dir = OptimizerBuilder.resume_run(run_dir)
         self._init_engines()
+        self._reconstruct_state_references()
         
         # Synchronize engine's generation state to prevent lineage numbering resets on resume
         if self.state:
@@ -28,6 +29,46 @@ class Optimizer:
             if hasattr(self.state, 'random_state') and self.state.random_state is not None:
                 import random
                 random.setstate(self.state.random_state)
+
+    def _reconstruct_state_references(self):
+        if not self.state:
+            return
+            
+        edge_lookup = {((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)): e for e in self.cg.graph}
+        
+        # 1. Reconstruct main pheromones
+        if self.state.pheromones:
+            from utils.pheromone import _TauView
+            self.state.pheromones._edge_repr = {}
+            for k in self.state.pheromones._tau.keys():
+                repr_edge = edge_lookup.get(k)
+                if repr_edge:
+                    self.state.pheromones._edge_repr[k] = repr_edge
+            self.state.pheromones.tau = _TauView(self.state.pheromones._tau, self.state.pheromones._edge_repr)
+            
+        # 2. Reconstruct each Chromosome in the population
+        if self.state.population:
+            for chrom in self.state.population:
+                # Reconstruct chromosome's routes
+                for route in chrom.routes:
+                    route.cg = self.cg
+                    route.path = [edge_lookup[k] for k in route.path_keys if k in edge_lookup]
+                    
+                # Reconstruct route keys in allocation dictionary
+                new_alloc = {}
+                for r, val in chrom.allocation.items():
+                    new_alloc[r] = val
+                chrom.allocation = new_alloc
+                
+                # Reconstruct chromosome's pheromones
+                if chrom.pheromones:
+                    from utils.pheromone import _TauView
+                    chrom.pheromones._edge_repr = {}
+                    for k in chrom.pheromones._tau.keys():
+                        repr_edge = edge_lookup.get(k)
+                        if repr_edge:
+                            chrom.pheromones._edge_repr[k] = repr_edge
+                    chrom.pheromones.tau = _TauView(chrom.pheromones._tau, chrom.pheromones._edge_repr)
 
     @classmethod
     def create(cls, config_path: str | Path):

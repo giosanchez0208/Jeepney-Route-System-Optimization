@@ -63,6 +63,26 @@ class PheromoneMatrix:
         if sim_result:
             self.update_pheromones(sim_result)
 
+    def __getstate__(self):
+        return {
+            "initial_tau": self.initial_tau,
+            "rho": self.rho,
+            "q": self.q,
+            "default_jeep_weight": self.default_jeep_weight,
+            "_tau": self._tau,
+            "gaps": self.gaps
+        }
+
+    def __setstate__(self, state):
+        self.initial_tau = state["initial_tau"]
+        self.rho = state["rho"]
+        self.q = state["q"]
+        self.default_jeep_weight = state["default_jeep_weight"]
+        self._tau = state["_tau"]
+        self.gaps = state["gaps"]
+        self._edge_repr = {}
+        self.tau = None
+
     # ------------------------------------------------------------------
     def _get(self, edge: 'DirEdge') -> Optional[float]:
         return self._tau.get(_edge_key(edge))
