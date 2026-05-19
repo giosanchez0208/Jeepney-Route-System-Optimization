@@ -24,6 +24,9 @@ class Optimizer:
         # Synchronize engine's generation state to prevent lineage numbering resets on resume
         if self.state:
             self.engine.current_generation = self.state.generation - 1
+            if hasattr(self.state, 'random_state') and self.state.random_state is not None:
+                import random
+                random.setstate(self.state.random_state)
 
     @classmethod
     def create(cls, config_path: str | Path):

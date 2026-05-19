@@ -139,3 +139,4 @@ class OptimizationState:
     best_fitness: float = float('inf')
     population: list[Any] = None
     pheromones: Any = None
+    random_state: Any = None
