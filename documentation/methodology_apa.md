@@ -289,6 +289,24 @@ To support high-fidelity paratransit research auditing and guarantee absolute re
 1. **Atomic State Serialization:** The active evolutionary state $\mathbf{S}_g = \langle g, \mathbf{Pop}_g, \mathcal{T}_g, \Theta_{rand} \rangle$ at generation $g$ is written atomically. The state is first serialized to a temporary swapfile (`.tmp`) using Python's high-performance object serialization pickle protocol (with `sys.setrecursionlimit` scaled to $25,000$ to accommodate recursive Directed Graph pointer maps). An OS-level atomic replace operation then replaces the active checkpoint `state_gen_g.pkl`. This isolates checkpoints from disk-write saturation or sudden process termination.
 2. **Entropy Drift Resolution ($\Theta_{rand}$):** The active pseudorandom number generator state is captured dynamically at the moment of serialization using `random.getstate()` and appended to the optimization state. Upon run resumption, road graph builders, coordinate samplers, and simulation allocators consume pseudorandom entropy during class instantiation in the initialization phase. Restoring the seed *before* instantiation results in immediate state corruption and trajectory drift. To resolve this, our model caches the state tuple and explicitly executes a post-initialization seed restoration using `random.setstate(\Theta_{rand})` strictly *after* all static engines and synthetic networks finish setup. This guarantees $100\%$ bit-wise identical execution tracing and mathematical parity, enabling researchers to replay failed runs with bit-wise exactness.
 
+### 7.6. Multi-Dimensional Phenotypic and Genotypic Convergence Criteria
+To optimize computational resources and prevent unnecessary search iterations once population stagnation occurs, we introduce a multi-dimensional convergence checker replacing static generational search caps (Goldberg, 1989). Rather than relying on simple stagnation limits or raw fitness curves, the optimizer evaluates both phenotypic and genotypic diversity:
+1. **Phenotypic Convergence (Elite Jaccard Similarity):** We measure the geometric similarity of transit route layouts among the elite population. Let $\mathbf{Pop}_{elite} \subset \mathbf{Pop}$ denote the top $10\%$ fittest chromosomes in the active generation $g$ (where $|\mathbf{Pop}_{elite}| \ge 2$). For each elite chromosome $C_i$, we extract its total route edge set $E_i = \{ \text{edge.id} \mid \text{edge} \in \pi \text{ for } \pi \in \Pi_i \}$. For every unique pair of elite chromosomes $C_i, C_j$, we compute the Jaccard similarity coefficient:
+
+$$J(E_i, E_j) = \frac{|E_i \cap E_j|}{|E_i \cup E_j|}$$
+
+The average Jaccard similarity across the elite pool is defined as:
+
+$$\bar{J}_{elite} = \frac{2}{K(K-1)} \sum_{i=1}^{K-1} \sum_{j=i+1}^K J(E_i, E_j)$$
+
+where $K = |\mathbf{Pop}_{elite}|$. If $\bar{J}_{elite} \ge 0.95$ consecutively for a patience window of $G_{patience}$ generations (loaded dynamically from the configuration parameter `jaccard_patience`, defaulting to 30), the population is deemed phenotypically saturated (i.e., the best route structures have converged on identical spatial corridors), and execution terminates.
+2. **Genotypic Convergence (Fitness Variance Tracking):** To capture system-wide optimization stability, we monitor the variance of the candidate fitness cost scores across the entire live population:
+
+$$\sigma^2_{fitness} = \frac{1}{N_{pop}} \sum_{c \in \mathbf{Pop}} \left( \text{cost}(c) - \bar{\mathcal{C}} \right)^2$$
+
+where $\bar{\mathcal{C}}$ is the average cost of the population. If $\sigma^2_{fitness} < 10^{-6}$, the system has converged to a uniform cost basin, and execution is safely halted. This robust convergence framework is academically grounded in:
+- **Genetic Algorithms Convergence Theory (Goldberg, 1989):** Population variance and Jaccard-based diversity metrics are classical, statistically sound indicators of search termination.
+
 ---
 
 ## 8. ACO-Inspired Local Search Operators (Spatial Mutation)

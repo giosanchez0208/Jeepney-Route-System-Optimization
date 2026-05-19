@@ -597,6 +597,9 @@ Errors:
   where $\tau_i$ is the route's accumulated pheromone density. This mathematically balances operating costs against passenger waiting times.
 - **Unified Custom Evaluate Gate**: Overrides evolutionary evaluations to perform generational pheromone evaporation ($\rho$) and deposition ($Q / C(\pi_p)$) along candidate corridors, and recalculates unserved demand gaps to guide subsequent local mutations.
 - **Fail-Safe Interrupt Handlers**: Catches manual KeyboardInterrupt calls, gracefully halting execution and saving serialized state checkpoints atomically.
+- **Multi-Dimensional Convergence Criteria**: Replaces fixed generation loops with phenotypic and genotypic convergence tracking:
+  - **Elite Jaccard Similarity**: Calculates the average Jaccard similarity of route edge sets among the top $10\%$ elite chromosomes (Goldberg, 1989). If similarity remains $\ge 0.95$ for a configurable number of consecutive generations (`jaccard_patience` parameter, defaulting to 30), execution halts due to phenotypic saturation.
+  - **Fitness Variance Tracking**: If population fitness variance falls below $10^{-6}$, execution terminates due to genotypic convergence.
 
 #### The Generational Memetic Lamarckian Loop
 

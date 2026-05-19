@@ -6,6 +6,7 @@ Main orchestrator. Controls execution flow, handles interrupts, and manages sub-
 
 from pathlib import Path
 import yaml
+import math
 from utils.city_graph import CityGraph
 from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
 from utils.toy_city import toy_setup_from_yaml
@@ -97,6 +98,8 @@ class Optimizer:
             self.state = self.engine.initialize_state()
             self.telemetry.log_lineage(self.state.population)
 
+        self.jaccard_patience_counter = 0
+
         print(f"[OPTIMIZER] Launching optimization search loop. Max generations: {self.config.g_max}")
         try:
             while self.state.generation <= self.config.g_max:
@@ -121,9 +124,28 @@ class Optimizer:
                 # Synchronously log lineage relationships and parentage UIDs
                 self.telemetry.log_lineage(self.state.population)
 
+                # Calculate multi-dimensional phenotypic & fitness convergence metrics
+                elite_jaccard = self.calculate_elite_jaccard(self.state.population)
+                fitness_variance = self.calculate_fitness_variance(self.state.population)
+
+                print(f"[OPTIMIZER] Generation {self.state.generation} metrics: Elite Jaccard = {elite_jaccard:.4f}, Fitness Variance = {fitness_variance:.4e}")
+
+                if elite_jaccard >= 0.95:
+                    self.jaccard_patience_counter += 1
+                else:
+                    self.jaccard_patience_counter = 0
+
+                if self.jaccard_patience_counter >= self.config.jaccard_patience:
+                    print(f"[OPTIMIZER] Phenotypic convergence reached (Elite Jaccard >= 0.95 for {self.config.jaccard_patience} consecutive generations) at generation {self.state.generation}. Terminating.")
+                    break
+
+                if fitness_variance < 1e-6:
+                    print(f"[OPTIMIZER] Genotypic convergence reached (Fitness Variance < 1e-6) at generation {self.state.generation}. Terminating.")
+                    break
+
                 if self.state.generation % self.config.telemetry_interval == 0:
                     self.telemetry.log_generation(
-                        self.state.generation, self.state.best_fitness, mean_cost, mut_rate, self.state.stagnation_counter
+                        self.state.generation, self.state.best_fitness, mean_cost, p_local, self.state.stagnation_counter
                     )
                     self.telemetry.export_json_snapshot(
                         self.state.generation, self.state.best_fitness, mean_cost, self.state.population
@@ -138,3 +160,43 @@ class Optimizer:
         finally:
             self.preservation.save_state(self.state)
             print(f"[OPTIMIZER] State successfully saved to {self.run_dir}. Exiting.")
+
+    def calculate_elite_jaccard(self, population) -> float:
+        """
+        Calculates the average Jaccard similarity of route edge sets among the top 10% elite chromosomes.
+
+        Literature Citation:
+            This convergence checker is grounded in traditional population diversity metrics:
+            Goldberg, D. E. (1989). Genetic Algorithms in Search, Optimization, and Machine Learning. Addison-Wesley.
+        """
+        sorted_pop = sorted(population, key=lambda c: c.cost)
+        elite_count = max(2, int(math.ceil(0.1 * len(population))))
+        elites = sorted_pop[:elite_count]
+        
+        edge_sets = []
+        for chrom in elites:
+            chrom_edges = set()
+            for r in chrom.routes:
+                for edge in r.path:
+                    chrom_edges.add(edge.id)
+            edge_sets.append(chrom_edges)
+            
+        similarities = []
+        for i in range(len(edge_sets)):
+            for j in range(i + 1, len(edge_sets)):
+                u = edge_sets[i].union(edge_sets[j])
+                if not u:
+                    similarities.append(1.0)
+                else:
+                    similarities.append(len(edge_sets[i].intersection(edge_sets[j])) / len(u))
+                    
+        return sum(similarities) / len(similarities) if similarities else 0.0
+
+    def calculate_fitness_variance(self, population) -> float:
+        """
+        Calculates the population fitness variance.
+        """
+        costs = [c.cost for c in population]
+        mean_cost = sum(costs) / len(costs)
+        variance = sum((x - mean_cost) ** 2 for x in costs) / len(costs)
+        return variance

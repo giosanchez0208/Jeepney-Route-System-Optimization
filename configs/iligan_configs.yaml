@@ -72,6 +72,7 @@ optimization:
   k_tournament: 3
   p_mutation: 0.25
   gamma_crossover: 0.5
+  jaccard_patience: 30
   
   initial_tau: 1.0
   rho: 0.1
