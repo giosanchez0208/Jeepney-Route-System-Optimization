@@ -181,8 +181,11 @@ class Simulation:
 
     def run(self) -> SimulationResult:
         """Executes the headless simulation loop until max_ticks is reached."""
-        while not self.is_complete: 
-            self.update()
+        from tqdm import tqdm
+        with tqdm(total=self.max_ticks, desc="Microscopic Simulation Ticks", leave=False) as pbar:
+            while not self.is_complete:
+                self.update()
+                pbar.update(1)
         return self._calculate_results()
 
     def run_until_drained(self, safety_cap: int = 100_000) -> SimulationResult:
