@@ -39,3 +39,26 @@ class AdaptiveController:
         self.current_mutation = self.base_mutation + (self.max_mutation - self.base_mutation) * (progress ** 2)
         
         return self.current_mutation
+
+    def get_local_search_prob(self, generation: int, g_max: int, p_min: float = 0.05, p_max: float = 0.8) -> float:
+        """
+        Computes the linearly decayed local search mutation probability to prevent premature convergence.
+        
+        Formula:
+            P_local(g) = P_min + (P_max - P_min) * (1 - g / G_max)
+        """
+        p_max = max(p_max, self.base_mutation)
+        g_max = max(1, g_max)
+        ratio = min(max(generation / g_max, 0.0), 1.0)
+        return p_min + (p_max - p_min) * (1.0 - ratio)
+
+    def get_local_search_intensity(self, generation: int, g_max: int, i_min: float = 0.1, i_max: float = 1.0) -> float:
+        """
+        Computes the dynamically tightened localized search radius (intensity parameter).
+        
+        Formula:
+            I_local(g) = I_min + (I_max - I_min) * (1 - g / G_max)
+        """
+        g_max = max(1, g_max)
+        ratio = min(max(generation / g_max, 0.0), 1.0)
+        return i_min + (i_max - i_min) * (1.0 - ratio)
