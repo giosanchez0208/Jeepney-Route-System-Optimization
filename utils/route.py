@@ -45,6 +45,20 @@ class Route:
         self._validate_layer()
         self._validate_branching()
 
+    def __getstate__(self):
+        return {
+            "id": self.id,
+            "designated_color": self.designated_color,
+            "path_keys": [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in self.path]
+        }
+
+    def __setstate__(self, state):
+        self.id = state["id"]
+        self.designated_color = state["designated_color"]
+        self.path_keys = state["path_keys"]
+        self.cg = None
+        self.path = []
+
     def _validate_loop(self) -> None:
         if self.path[-1].end is not self.path[0].start:
             raise ValueError("[ROUTE] Path fails to loop. Terminal edge must connect to initial edge.")
