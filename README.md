@@ -571,6 +571,15 @@ Errors:
 - Syncs ancestor-offspring relationships and UIDs to `lineage.csv`.
 - Exports high-fidelity, client-ready JSON files containing routes geometry, pheromone intensity coordinates, and high-demand chokepoints for GIS clients.
 
+### `consistency_engine.py`
+
+`ConsistencyEngine` is the post-optimization graph comparison suite that mathematically validates solution consistency across distinct configuration profiles.
+
+- **Topological Edge Jaccard Similarity**: Calculates the Jaccard similarity of active edge sets across different configuration runs:
+  $$J(G_A, G_B) = \frac{|\mathcal{E}_A \cap \mathcal{E}_B|}{|\mathcal{E}_A \cup \mathcal{E}_B|}$$
+- **Degree Distribution Cosine Similarity**: Compares structural route topology alignment by calculating the cosine similarity of node degree vectors across identical active node spaces.
+- **Automated Validation Gate**: Enforces that the mean topological Jaccard similarity across varying behavioral parameters must remain $\ge 0.80$ to establish mathematical solution consistency and structural stability.
+
 ### `optimizer_orchestrator_io.py`
 
 `StatePreservationEngine` and `OptimizerBuilder` coordinate run serialization and setup.

@@ -1701,6 +1701,31 @@ The engine responsible for metric logging, lineage tracking, and continuous JSON
 
 ---
 
+### consistency_engine.py
+
+#### ConsistencyEngine
+Automated post-optimization comparison class responsible for proving solution consistency across distinct configuration profiles through topological and degree distribution comparisons.
+
+- **Methods**
+  - `extract_active_elements(chromosome: Any) -> tuple[set[str], dict[str, int]]`
+    - Parameters: Candidate Chromosome object.
+    - Outputs: Tuple of set of active edge IDs, and a dict of active node degree counts.
+    - Primary Purpose: Isolates active spatial edge structures and node degrees for topological analysis.
+  - `calculate_jaccard_similarity(cls, edges_a: set[str], edges_b: set[str]) -> float`
+    - Parameters: Active edge set from profile A, active edge set from profile B.
+    - Outputs: float (Topological edge Jaccard similarity score).
+    - Primary Purpose: Computes edge set overlap similarity: $J(G_A, G_B) = |E_A \cap E_B| / |E_A \cup E_B|$.
+  - `calculate_degree_cosine_similarity(cls, degrees_a: dict[str, int], degrees_b: dict[str, int]) -> float`
+    - Parameters: Node degree map from profile A, node degree map from profile B.
+    - Outputs: float (Degree distribution Cosine similarity score).
+    - Primary Purpose: Projects identical node spaces across different configuration results into vector space and computes cosine alignment.
+  - `analyze_consistency(cls, chromosomes: list[Any]) -> dict`
+    - Parameters: List of optimized Chromosome instances representing varying parameter runs.
+    - Outputs: Dictionary containing the edge Jaccard similarity matrix, degree distribution Cosine similarity matrix, average similarity values, and a success boolean.
+    - Primary Purpose: Evaluates cross-profile consistency, enforcing a success threshold of $\bar{J}_{topological} \ge 0.80$ to establish structural stability.
+
+---
+
 ### optimizer_orchestrator_io.py
 
 #### StatePreservationEngine

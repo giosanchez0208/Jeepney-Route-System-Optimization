@@ -307,6 +307,19 @@ $$\sigma^2_{fitness} = \frac{1}{N_{pop}} \sum_{c \in \mathbf{Pop}} \left( \text{
 where $\bar{\mathcal{C}}$ is the average cost of the population. If $\sigma^2_{fitness} < 10^{-6}$, the system has converged to a uniform cost basin, and execution is safely halted. This robust convergence framework is academically grounded in:
 - **Genetic Algorithms Convergence Theory (Goldberg, 1989):** Population variance and Jaccard-based diversity metrics are classical, statistically sound indicators of search termination.
 
+### 7.7. Topological Consistency & Cross-Profile Comparison Engine
+To validate the spatial robustness of our evolutionary paratransit route optimization and mathematically demonstrate solution consistency, we incorporate a post-optimization cross-profile comparison suite. Given $X$ distinct configuration runs (varying key behavioral parameters such as mutation rate $P_{mutation}$, crossover blending coefficient $\gamma_{crossover}$, or active local search intensities), we extract their respective final elite networks to prove structural stability. Two primary network metrics are calculated pairwise:
+1. **Topological Edge Jaccard Similarity:** For any two optimized route network graphs $G_A$ and $G_B$, let $\mathcal{E}_A$ and $\mathcal{E}_B$ represent their respective sets of active spatial edges (defined as directed graph segments utilized by at least one active paratransit route). The edge Jaccard similarity is formulated as:
+
+$$J(G_A, G_B) = \frac{|\mathcal{E}_A \cap \mathcal{E}_B|}{|\mathcal{E}_A \cup \mathcal{E}_B|}$$
+
+A mean topological Jaccard similarity of $\bar{J}_{topological} \ge 0.80$ across all profile pairs establishes that the optimized networks converge on uniform, robust arterial corridors irrespective of parameter variation.
+2. **Degree Distribution Cosine Similarity:** To analyze structural alignment in flow capacity and junction utilization, we construct node degree vectors across the union of active node spaces. Let $V_{union} = V_A \cup V_B$ denote all unique nodes active in either network. For each node $v_k \in V_{union}$, we extract its degree (the number of active route edge traversals connected to $v_k$) in $G_A$ and $G_B$, constructing the vectors $\mathbf{d}_A$ and $\mathbf{d}_B$. The cosine alignment of these vectors is defined as:
+
+$$\text{CosineSimilarity}(\mathbf{d}_A, \mathbf{d}_B) = \frac{\mathbf{d}_A \cdot \mathbf{d}_B}{\|\mathbf{d}_A\|_2 \|\mathbf{d}_B\|_2} = \frac{\sum_{k} d_{A,k} d_{B,k}}{\sqrt{\sum_{k} d_{A,k}^2} \sqrt{\sum_{k} d_{B,k}^2}}$$
+
+This metric measures structural alignment in paratransit flow distribution, validating that key junctions and transfer hubs emerge consistently across different search trajectories.
+
 ---
 
 ## 8. ACO-Inspired Local Search Operators (Spatial Mutation)
