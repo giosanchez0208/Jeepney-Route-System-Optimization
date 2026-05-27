@@ -283,7 +283,7 @@ class ACOLocalSearch:
                     continue
 
                 current_distance = sum(e.getLength() for e in current_segment)
-                local_utility    = sum(tau_by_id.get(self._edge_id(e), 1.0) for e in current_segment)
+                local_utility    = sum(tau_by_id.get(self._edge_id(e), 0.0) for e in current_segment)
                 safe_utility     = max(1.0, local_utility)
                 score            = current_distance / safe_utility
                 candidates.append((score, i, current_segment, current_distance))
