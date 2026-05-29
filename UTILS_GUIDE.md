@@ -1029,11 +1029,13 @@ Integrates Lamarckian local search with genetic operators to optimize route netw
   - `evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float`
     - Parameters: Chromosome and fleet size.
     - Outputs: float (fitness cost score).
-    - Primary Purpose: Allocates fleet using Mohring's square root rule, evaluates travel headways/lengths, and updates chromosome cost.
-  - `apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool`
-    - Parameters: Child chromosome, target cost threshold, and fleet size.
+    - Primary Purpose: Evaluates the chromosome with the microscopic fitness score used by GA selection and replacement.
+  - `set_fitness_evaluator(self, evaluator: Any) -> None`
+  - `set_surrogate_evaluator(self, evaluator: Any) -> None`
+  - `apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool`
+    - Parameters: Child chromosome, fleet size, and mutation intensity.
     - Outputs: bool (True if mutation was accepted).
-    - Primary Purpose: Triggers local search mutation, accepting it if the mutated route cost improves (Lamarckian inheritance).
+    - Primary Purpose: Triggers local search mutation, using surrogate cost only as a gate before recomputing the full fitness score.
 
 ---
 
@@ -1291,16 +1293,22 @@ Holds performance metrics and passenger path histories.
 
 - **Attributes**
   - `sim_id` (str): Simulation ID.
-  - `fitness_score` (float): Cost score.
-  - `metrics` (dict): Operational metrics.
+  - `score_kind` (str): Either `fitness` or `surrogate`.
+  - `fitness_score` (Optional[float]): Microscopic simulation fitness score.
+  - `surrogate_cost` (Optional[float]): Static surrogate cost.
+  - `metrics` (dict): Operational metrics and fitness breakdown (`completed_count`, `incomplete_count`, `sum_completed_time`, `sum_incomplete_elapsed_time`, `sum_incomplete_remaining_time`, `sum_penalty_time`, `equity_penalty`).
   - `recorded_paths` (list): Passenger travel paths and costs.
   - `jeep_system` (Optional[JeepSystem]): Simulation jeep system state.
 
 - **Methods**
-  - `__init__(self, fitness_score: float, metrics: dict[str, Any], recorded_paths: list[tuple[Any, float]], jeep_system: Optional[JeepSystem] = None, sim_id: Optional[str] = None) -> None`
+  - `__init__(self, fitness_score: Optional[float] = None, metrics: Optional[dict[str, Any]] = None, recorded_paths: Optional[list[tuple[Any, float]]] = None, jeep_system: Optional[JeepSystem] = None, sim_id: Optional[str] = None, surrogate_cost: Optional[float] = None, score_kind: str = "fitness") -> None`
     - Parameters: Costs, metrics, paths, jeep system state, and ID.
     - Outputs: None.
     - Primary Purpose: Instantiates the results container.
+  - `score(self) -> float`
+    - Parameters: None.
+    - Outputs: float.
+    - Primary Purpose: Returns the active scalar score for the result type.
   - `__str__(self) -> str`
     - Parameters: None.
     - Outputs: str.
@@ -1352,10 +1360,14 @@ Headless simulation loop runner and dashboard renderer.
     - Parameters: Ticks safety limit.
     - Outputs: SimulationResult.
     - Primary Purpose: Ticks until all spawned passengers complete their journeys.
+  - `evaluate_fitness(self) -> SimulationResult`
+    - Parameters: None.
+    - Outputs: SimulationResult.
+    - Primary Purpose: Computes the post-simulation fitness score and metric breakdown after a run has completed.
   - `_calculate_results(self) -> SimulationResult`
     - Parameters: None.
     - Outputs: SimulationResult.
-    - Primary Purpose: Internal evaluator summing commute times, incomplete commute penalties, and commute variance to calculate fitness cost.
+    - Primary Purpose: Internal evaluator summing completed commute times, incomplete elapsed-plus-remaining penalties, and commute variance to calculate fitness cost.
   - `draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: PIL.Image.Image, draw_jeeps: bool = True, draw_passengers: bool = True) -> PIL.Image.Image`
     - Parameters: Bounds context, image canvas, vehicle toggle, passenger toggle.
     - Outputs: PIL.Image.Image.
@@ -1407,7 +1419,7 @@ Evaluates route configurations against pre-sampled Origin-Destination pairs to a
   - `evaluate(self, routes: list[Route], verbose: bool = False) -> SimulationResult`
     - Parameters: Routes list to test.
     - Outputs: SimulationResult.
-    - Primary Purpose: Rebuilds travel graphs using inflated transfer weights, solves A* paths for pre-sampled OD coordinates, aggregates path weights, and returns results.
+    - Primary Purpose: Rebuilds travel graphs using inflated transfer weights, solves A* paths for pre-sampled OD coordinates, aggregates path weights, and returns results with `surrogate_cost`.
 
 ---
 
@@ -1558,14 +1570,15 @@ The class executing Lamarckian evolutionary operations on candidate Chromosome s
     - Parameters:
       - `chrom` (Chromosome): Candidate system to evaluate.
       - `total_fleet` (int): Total allocatable fleet size.
-    - Outputs: float (system cost).
-    - Primary Purpose: Allocates fleet across routes using Mohring square-root fractions, calculates distance and headway metrics, applies structural penalties for unallocated fleets, and sets the chromosome's cost.
-  - `apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int) -> bool`
-    - Parameters:
-      - `child` (Chromosome): Candidate chromosome to mutate.
-      - `target_cost` (float): Cost threshold that must be surpassed for acceptance.
-      - `total_fleet` (int): Total vehicle fleet size.
-    - Outputs: bool (whether mutation succeeded in lowering cost and was retained).
+    - Outputs: float (fitness score).
+    - Primary Purpose: Runs the microscopic simulation fitness objective, updates pheromones from the resulting passenger paths, and stores the fitness score on the chromosome.
+   - `apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool`
+     - Parameters:
+       - `child` (Chromosome): Candidate chromosome to mutate.
+       - `total_fleet` (int): Total vehicle fleet size.
+       - `intensity` (float): Local search intensity multiplier.
+     - Outputs: bool (whether mutation succeeded in lowering cost and was retained).
+     - Primary Purpose: Applies ACOLocalSearch mutation on the chromosome's routes, compares surrogate cost before and after the edit, and only then recomputes the full fitness score if the mutation is accepted.
     - Primary Purpose: Calculates unserved demand corridors, applies heuristic local searches (attraction, repulsion, pruning) on route geometries, evaluates results, and retains improvements.
 
 ---
@@ -1839,7 +1852,7 @@ The master user-facing orchestrator class coordinating the entire memetic search
   - `sampler` (DirectDemandSampler): Demand distribution model.
   - `raw_config` (dict): raw YAML parsed dictionary.
   - `engine` (MemeticEngine): Main algorithm engine.
-  - `surrogate` (StaticSurrogateEvaluator): Fast surrogate evaluator database.
+  - `surrogate` (StaticSurrogateEvaluator): Fast surrogate evaluator used only for local-search mutation checks.
   - `preservation` (StatePreservationEngine): State checkpointing engine.
   - `telemetry` (TelemetryEngine): Telemetry logger engine.
   - `adaptive` (AdaptiveController): Stagnation mutation scaler.
@@ -1856,7 +1869,7 @@ The master user-facing orchestrator class coordinating the entire memetic search
   - `_init_engines(self) -> None`
     - Parameters: None.
     - Outputs: None.
-    - Primary Purpose: Initializes components, maps synthetic and real city geometries, configures surrogate evaluators, and injects a custom, high-fidelity evaluate override that evaporates and deposits pheromones during the genetic search.
+    - Primary Purpose: Initializes components, maps synthetic and real city geometries, configures both evaluators, and wires GA scoring to the microscopic fitness score while reserving the surrogate for local-search mutation checks.
   - `start(self) -> None`
     - Parameters: None.
     - Outputs: None.

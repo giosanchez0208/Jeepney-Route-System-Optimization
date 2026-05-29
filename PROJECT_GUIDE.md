@@ -1,4 +1,4 @@
-# Index
+﻿# Index
 
 **Core Modules**
 - [Node](#Node)
@@ -502,9 +502,86 @@ The `simulation.py` module serves as the master controller for the agent-based f
         
     - **Event Handling (Boarding/Alighting):** The loop catches `JeepEvent` reports from the fleet. It queries the Layer 1 wait nodes corresponding to the vehicle's current topological position. If a `Passenger` is waiting and the vehicle has capacity, the simulation transfers the agent from the pedestrian layer to the vehicle layer, updating their Finite State Machine to `RIDING`.
         
-3. **Surrogate Fitness Evaluation**
+3. **Post-Simulation Fitness Evaluation**
     
-    The module exposes a `surrogate_evaluate()` method. Instead of running the full tick-by-tick temporal simulation, this method computes the static A* multi-modal journey cost for a predefined set of Origin-Destination (OD) pairs on the `TravelGraph`. It returns a `SimulationResult` containing the aggregate passenger routing cost and the fleet operational cost (total distance of the route loops).
+    After the simulation stops, `evaluate_fitness()` calls the internal `_calculate_results()` routine to convert the final passenger states into a scalar objective. The score is built from three terms:
+
+    | Component | Formula | Code Reference | Meaning |
+    |-----------|---------|-----------------|---------|
+    | **Term 1: Total User Cost** | $\sum_{i \in \mathcal{C}} T_i$ | `sum_completed_time` | Sum of realized door-to-door travel times for all completed passengers |
+    | **Term 2: Underservice Penalty** | $\sum_{j \in \mathcal{I}} (T_j^{\text{elapsed}} + \beta \cdot \hat{T}_j^{\text{rem}})$ | `sum_penalty_time` | Elapsed time + penalty multiplier × remaining cost for incomplete passengers |
+    | **Term 3: Equity Regularizer** | $\alpha \cdot \sigma(T_i \mid i \in \mathcal{C})$ | `equity_penalty` | Population standard deviation of completed travel times, weighted by α |
+    | **Final Fitness** | $F(\mathbf{R}) = \text{Term 1} + \text{Term 2} + \text{Term 3}$ | `fitness_score` | Lower is better |
+
+    **Parameters:**
+    - $\beta$ (`beta_penalty`, default 2.0): Multiplier for incomplete passenger remaining cost
+    - $\alpha$ (`alpha_std_penalty`, default 0.5): Weight for equity regularizer
+
+    The returned `SimulationResult` keeps the scalar `fitness_score` plus a metric breakdown (`completed_count`, `incomplete_count`, `sum_completed_time`, `sum_incomplete_elapsed_time`, `sum_incomplete_remaining_time`, `sum_penalty_time`, `equity_penalty`) so the final evaluation is auditable.
+
+
+          #### Term 1: Total User Cost — $\sum_{i \in \mathcal{C}} T_i$
+     
+     **What it is.** The aggregate realized travel time across all passengers who successfully completed their journey within the simulation window.
+     
+     **Why this is the correct objective.** The Transit Network Design Problem (TNDP) literature overwhelmingly converges on Total Travel Time (TTT) as the primary user-side objective function. This is not an arbitrary choice — it arises directly from microeconomic theory of time allocation.
+     
+     **Formal derivation.** In the random utility framework underlying discrete transport choice models, the disutility of a trip is dominated by its time cost. Ortúzar & Willumsen (2011, Ch. 5) define the user cost of a transit trip as a generalized cost function:
+     
+     $$C_i^{\text{gen}} = w_{\text{walk}} \cdot t_{i,\text{walk}} + w_{\text{wait}} \cdot t_{i,\text{wait}} + w_{\text{ride}} \cdot t_{i,\text{ride}} + w_{\text{transfer}} \cdot n_{i,\text{transfer}}$$
+     
+     where $w_\cdot$ are perception weights reflecting that passengers experience walking and waiting time as more onerous than in-vehicle time. In our simulation, $T_i$ is already measured in generalized-cost units because the TravelGraph's A* pathfinding assigns weighted edges that encode these perception factors (see travel_graph config: `walk_wt`, `ride_wt`, `wait_wt`, `transfer_wt`). The `despawn_tick - spawn_tick` measurement thus captures the full realized generalized cost including all modal transitions.
+     
+     Summing over all passengers yields the system-level Total User Cost. This is the canonical TNDP objective used by:
+     
+     - **Ceder & Wilson (1986)** — who define the bus network design problem as minimizing total passenger travel time subject to fleet and frequency constraints. Their formulation is the foundational reference for the two-phase TNDP (route design + frequency setting).
+     - **Kepaptsoglou & Karlaftis (2009)** — whose survey of 40+ years of TNDP research confirms that "minimization of total (or average) user travel time" is the most widely adopted single-objective formulation, appearing in the majority of published solution approaches.
+     - **Fan & Machemehl (2006)** — who use total user cost as the fitness function in their Genetic Algorithm for transit route optimization, directly analogous to our metaheuristic architecture.
+     
+     **Why not average travel time?** Averaging would allow the optimizer to improve the score by simply not generating difficult-to-serve passengers (since fewer passengers = lower denominator). The sum penalizes every unserved or poorly-served passenger proportionally, preventing this failure mode.
+     
+     #### Term 2: Underservice Penalty — $\sum_{j \in \mathcal{I}} \left( T_j^{\text{elapsed}} + \beta \cdot \hat{T}_j^{\text{rem}} \right)$
+     
+     **What it is.** For each passenger who has not completed their journey by tick $T$, the penalty adds their elapsed time plus a multiplied estimate of their remaining travel cost. The multiplier $\beta > 1$ inflates the remaining cost to ensure that incomplete journeys are strictly more expensive than completed ones of equivalent length.
+     
+     **Why it's necessary.** Without this term, the optimizer could "game" the fitness by generating route systems that efficiently serve easy-to-reach OD pairs while completely ignoring hard-to-reach neighborhoods. A route system that serves 80% of passengers in 5 minutes each but strands the remaining 20% indefinitely would score better than a system that serves 100% in 8 minutes each — clearly the wrong incentive.
+     
+     **Formal grounding.** This is an instance of the exterior penalty function method for converting constrained optimization into unconstrained optimization, enabling metaheuristic search. The implicit constraint is:
+     
+     $$\text{All passengers must complete their journey: } |\mathcal{I}| = 0$$
+     
+     Since evolutionary algorithms cannot natively handle hard constraints, the standard approach is to relax the constraint into the objective via a penalty term. Coello Coello (2002) provides the definitive survey of constraint-handling techniques in evolutionary computation and classifies our approach as a static penalty — a fixed multiplier $\beta$ that inflates the cost of constraint-violating solutions.
+     
+     The specific penalty structure — `elapsed_time + β × remaining_cost` — has two properties that make it well-behaved for metaheuristic search:
+     
+     - **Monotonicity:** As a passenger gets closer to completion (remaining cost decreases), the penalty decreases smoothly, providing gradient signal to the optimizer.
+     - **Dominance:** Since $\beta > 1$, an incomplete passenger always contributes more to $F(\mathbf{R})$ than an equivalent completed passenger. This guarantees that the optimizer prefers route systems that complete more journeys, all else being equal.
+     
+     The remaining cost estimate $\hat{T}_j^{\text{rem}}$ is computed from the passenger's pre-planned A* journey (`utils/passenger.py:L207–221`). This is a deterministic quantity — the sum of untraversed edge weights in the originally planned path — making it reproducible across evaluations.
+     
+     **Default value:** $\beta = 2.0$. This means an incomplete passenger's remaining journey costs twice what a completed passenger's equivalent segment would cost. The value is set at the lower end of penalty multipliers recommended in the evolutionary optimization literature (Coello Coello reports effective ranges of 1.5–10× depending on constraint severity). A value of 2.0 is conservative: strong enough to prevent the optimizer from ignoring coverage, but not so aggressive that it dominates the fitness landscape and prevents exploration.
+     
+     #### Term 3: Equity Regularizer — $\alpha \cdot \sigma(T_i \mid i \in \mathcal{C})$
+     
+     **What it is.** The population standard deviation of completed travel times, weighted by coefficient $\alpha$. This penalizes route systems where travel time quality is unevenly distributed across passengers.
+     
+     **Why it's necessary.** Consider two route systems both averaging 10-minute commutes. System A delivers everyone in 9–11 minutes. System B delivers half in 3 minutes and half in 17 minutes. By Term 1 alone, both systems are equivalent. The equity regularizer correctly identifies System A as superior because it provides consistent service quality.
+     
+     **Formal grounding.** The inclusion of a variance-based penalty in transit objective functions is grounded in the concept of horizontal equity — the principle that similarly situated individuals should receive similar levels of service.
+     
+     Welch & Mishra (2013) formalize equity metrics for public transit connectivity evaluation and demonstrate that dispersion-based measures (standard deviation, Gini coefficient, coefficient of variation) effectively capture the spatial equity of transit service distribution. They argue that mean-only optimization systematically produces networks with unacceptable service disparities between well-connected and peripheral communities — precisely the failure mode the regularizer prevents.
+     
+     From the transport economics perspective, Jara-Díaz & Gschwender (2003) incorporate travel time variance into their microeconomic model of public transport operations, deriving that the social welfare function for transit includes both the expected travel time and its variance:
+     
+     $$W = -\left(\mathbb{E}[T] + \lambda \cdot \text{Var}(T)\right)$$
+     
+     where $\lambda$ reflects society's risk aversion toward travel time uncertainty. Our formulation uses standard deviation rather than variance, which has the practical advantage of sharing the same units (seconds) as the other terms.
+     
+     **Default value:** $\alpha = 0.5$. This weights one standard deviation of commute time as equivalent to half a second of aggregate travel cost. The relatively modest value ensures the regularizer acts as a tiebreaker rather than dominating the objective — it steers the optimizer toward equitable solutions among configurations with similar total cost, without sacrificing overall efficiency.
+     
+4. **Surrogate Mutation Check**
+    
+    The optimizer's GA search uses the microscopic fitness evaluator. `StaticSurrogateEvaluator.evaluate()` is reserved for local-search mutation checks, where it computes the static multi-modal A* cost for a fixed set of origin-destination pairs and returns a `SimulationResult` with `surrogate_cost`. The full simulation remains the authoritative score for selection, elitism, and replacement.
     
 
 ### On-Event-Driven-State-Transitions
@@ -517,70 +594,11 @@ When a jeepney reaches a node, it does not search for passengers. It simply repo
 
 The framework is designed to optimize jeepney routes using a hybrid GA-ACO algorithm. Evolutionary algorithms require evaluating thousands of candidate solutions (route sets) across multiple generations. Running a full tick-based, micro-level agent simulation to evaluate every single candidate chromosome is computationally prohibitive.
 
-To solve this, the framework implements `surrogate_evaluate()`. In complex combinatorial optimization, surrogate models or approximation functions are utilized to replace computationally expensive objective evaluations during the primary search phases (He et al., 2024). By bypassing the temporal physics engine and directly computing the static multi-modal A* costs for a representative sample of OD pairs, the surrogate evaluation provides a mathematically sound, high-speed objective cost proxy. The algorithm can evaluate thousands of route sets using this $O(1)$ temporal approximation, reserving the expensive, full agent-based simulation strictly for the final validation of the optimal route sets.
+To solve this, the framework implements `StaticSurrogateEvaluator.evaluate()` as a separate mutation-check proxy. In complex combinatorial optimization, surrogate models or approximation functions are useful when a cheaper acceptance test is needed before running the expensive objective. Here, the proxy bypasses the temporal physics engine and directly computes the static multi-modal A* costs for a representative sample of OD pairs, but it is only used to decide whether a Lamarckian local-search mutation should be kept. Its scalar is stored as `surrogate_cost`, while the microscopic run keeps `fitness_score` for the GA objective.
+
+TODO: Prove the direct mathematical correlation between the static surrogate routing cost and the dynamic temporal cost of the full agent-based simulation.
 
 TODO: Modify all instances mentioning surrogate in codebase to avoid pedantic panelists
-
-### Fitness Function: Full Microscopic Simulation
-
-After the agent-based simulation runs for $T$ ticks, the framework computes a scalar fitness score that the evolutionary algorithm minimizes. Let $\mathbf{R}$ denote a candidate route system, $\mathcal{C}$ denote the set of passengers who completed their journey, and $\mathcal{I}$ denote the set of passengers still in transit at tick $T$. Define:
-
-- $T_i$ = realized door-to-door travel time for completed passenger $i$ (measured as `despawn_tick` $-$ `spawn_tick`)
-- $T_j^{\text{elapsed}}$ = wall-clock time already consumed by incomplete passenger $j$
-- $\hat{T}_j^{\text{rem}}$ = estimated remaining generalized cost for passenger $j$ (the sum of untraversed edge weights in their A* journey plan)
-
-The fitness function is:
-
-$$
-F(\mathbf{R}) =
-\underbrace{\sum_{i \in \mathcal{C}} T_i}_{\text{Total User Cost}}
-+
-\underbrace{\sum_{j \in \mathcal{I}} \left( T_j^{\text{elapsed}} + \beta \cdot \hat{T}_j^{\text{rem}} \right)}_{\text{Underservice Penalty}}
-+
-\underbrace{\alpha \cdot \sigma\!\left(\{T_i\}_{i \in \mathcal{C}}\right)}_{\text{Equity Regularizer}}
-$$
-
-where $\sigma(\cdot)$ is the population standard deviation of completed travel times. Lower $F(\mathbf{R})$ is better.
-
-**Term 1: Total User Cost.** The aggregate realized travel time across all completed passengers. This is the canonical Total Travel Time (TTT) objective in the Transit Network Design Problem (TNDP) literature. Kepaptsoglou \& Karlaftis (2009)[^19] identify TTT minimization as the most widely adopted single-objective formulation, and Ceder \& Wilson (1986)[^20] use it as the primary user-cost metric in their foundational bus network design framework. Fan \& Machemehl (2006)[^21] adopt the same objective for their GA-based transit optimization. Each $T_i$ is already measured in generalized-cost units because the `TravelGraph` A* pathfinding assigns weighted edges that encode modal perception factors (see `travel_graph` config: `walk_wt`, `ride_wt`, `wait_wt`, `transfer_wt`), following the generalized cost function formalized by Ortúzar \& Willumsen (2011)[^32]. The sum (rather than average) is used because averaging would allow the optimizer to improve its score by failing to generate difficult-to-serve passengers, since fewer passengers would lower the denominator.
-
-**Term 2: Underservice Penalty.** Passengers who have not completed their journey by tick $T$ represent unsatisfied demand. Rather than discarding these passengers (which would reward systems that ignore hard-to-reach areas), the penalty inflates their cost by $\beta > 1$. This is an instance of the exterior penalty function method for converting constrained optimization (the implicit constraint being $|\mathcal{I}| = 0$, i.e., all passengers must be served) into unconstrained optimization, enabling metaheuristic search. Coello Coello (2002)[^33] provides the definitive survey of constraint-handling techniques in evolutionary computation and classifies this approach as a static penalty — a fixed multiplier that inflates the cost of constraint-violating solutions. The penalty structure has two desirable properties: (1) monotonicity — as a passenger approaches completion, the penalty decreases smoothly, providing gradient signal to the optimizer; and (2) dominance — since $\beta > 1$, an incomplete passenger always contributes more to $F(\mathbf{R})$ than an equivalent completed passenger, guaranteeing that the optimizer prefers route systems with higher completion rates. The remaining cost estimate $\hat{T}_j^{\text{rem}}$ is computed deterministically from the passenger's pre-planned A* journey as the sum of untraversed edge weights.
-
-**Term 3: Equity Regularizer.** The standard deviation of completed travel times penalizes route systems where service quality is unevenly distributed. Two systems with identical average commute times may differ drastically in fairness — one delivering consistent 10-minute trips while another delivers half in 3 minutes and half in 17 minutes. The regularizer encodes horizontal equity: the principle that similarly situated passengers should receive similar service quality. Welch \& Mishra (2013)[^34] formalize equity metrics for public transit connectivity and demonstrate that dispersion-based measures capture the spatial equity of transit service distribution. Jara-Díaz \& Gschwender (2003)[^35] incorporate travel time variance into their microeconomic model of public transport operations, deriving that the social welfare function for transit includes both the expected travel time and its variance. The coefficient $\alpha$ ensures the regularizer acts as a tiebreaker among configurations with similar total cost rather than dominating the objective.
-
-| Symbol | Config Key | Default | Role |
-|--------|------------|---------|------|
-| $\beta$ | `optimization.beta_penalty` | 2.0 | Underservice penalty multiplier |
-| $\alpha$ | `optimization.alpha_std_penalty` | 0.5 | Equity regularization weight |
-
-### Fitness Function: Static Surrogate Evaluator
-
-During the metaheuristic search phase, the framework uses a lightweight surrogate evaluator instead of the full agent-based simulation. Let $\mathcal{S} = \{(o_k, d_k)\}_{k=1}^{N_s}$ be a fixed set of origin-destination pairs sampled once from the Direct Demand Model at initialization. For a candidate route system $\mathbf{R}$, let $\mathcal{T}_\mathbf{R}$ denote the `TravelGraph` constructed from $\mathbf{R}$, and let $c^*(o, d;\, \mathcal{T}_\mathbf{R})$ denote the A*-optimal generalized cost from $o$ to $d$ on $\mathcal{T}_\mathbf{R}$.
-
-$$
-\hat{F}(\mathbf{R}) =
-\sum_{k=1}^{N_s}
-\begin{cases}
-c^*(o_k, d_k;\, \mathcal{T}_\mathbf{R}) & \text{if } (o_k, d_k) \text{ is reachable} \\[4pt]
-M & \text{otherwise}
-\end{cases}
-$$
-
-where $M \gg \max_k c^*$ is a large penalty for unreachable OD pairs. Lower $\hat{F}(\mathbf{R})$ is better.
-
-**Generalized Cost $c^*(o, d)$.** Each A* path traverses a heterogeneous sequence of typed edges — walking (SW/EW), waiting (WA), riding (RI), alighting (AL), transferring (TR), and direct walking (DI) — each weighted by a type-specific perception factor. The total path cost is $c^*(o, d) = \sum_{e \in \text{path}^*} w_e \cdot \ell_e$, where $w_e$ is the perception weight and $\ell_e$ is the edge metric. This is the generalized cost function from discrete choice transport modeling (Ortúzar \& Willumsen, 2011[^32]), encoding the empirical finding that passengers experience walking and waiting time as more onerous than in-vehicle time.
-
-**Transfer Penalty Inflation ($\times 2.5$).** The surrogate multiplies the base `transfer_wt` by a factor of 2.5 before constructing the `TravelGraph`. This compensates for the absence of dynamic waiting and capacity effects that the full simulation captures naturally. Iseki \& Taylor (2009)[^36] conducted a comprehensive review of transfer penalty studies and found that passengers value transfer disutility at approximately 2.0–3.0 times the equivalent in-vehicle time, depending on facility quality, weather exposure, and schedule reliability. The 2.5$\times$ multiplier sits at the midpoint of this empirical range and represents a moderate assumption appropriate for Philippine paratransit, where stops typically lack shelters, schedules, and real-time information.
-
-**Big-M Penalty for Unreachable Pairs.** When no viable path exists between an OD pair, the penalty $M = 10^5$ is applied. This is the standard Big-M method from mathematical programming, converting the hard connectivity constraint (a well-designed route system should connect all demand-weighted locations) into a penalty term. The value is set several orders of magnitude larger than the maximum feasible path cost, ensuring that any route system with unreachable OD pairs is dominated by all fully-connected systems.
-
-**Fixed OD Sample Set.** The surrogate samples $N_s$ OD pairs once at initialization and reuses them for every evaluation. Jin (2005)[^31] identifies that surrogate evaluators in evolutionary computation must provide consistent relative rankings across candidate solutions. If each evaluation used a different random OD sample, two evaluations of the same route system could produce different fitness scores, introducing noise that corrupts selection pressure. By fixing $\mathcal{S}$, the surrogate becomes a deterministic function of $\mathbf{R}$.
-
-| Symbol | Current Value | Role |
-|--------|---------------|------|
-| Transfer $\times 2.5$ | 2.5 | Surrogate transfer inflation (TODO: sensitivity analysis) |
-| $M$ | $10^5$ | Unreachable OD penalty (TODO: sensitivity analysis) |
-| $N_s$ | 100 | Fixed OD sample size (TODO: sensitivity analysis) |
 
 ___
 
@@ -740,9 +758,9 @@ Evaluating every candidate chromosome via a full agent based temporal simulation
 
 **Implementation Strategy:**
 
-The `evaluate_chromosome` method bypasses the tick by tick physics engine. It utilizes the `FleetAllocator` to quickly estimate headways and route lengths via Mohring fractions, generating a heuristic system cost in $O(1)$ time.
+The `evaluate_chromosome` method runs the microscopic fitness evaluator, so every GA decision is scored against the full simulation `fitness_score`. The surrogate is not used for selection or ranking; it is only consulted inside Lamarckian mutation checks before the full fitness is recomputed.
 
-Furthermore, the algorithm actively applies Lamarckian mutation by running the `ACOLocalSearch` operators to physically manipulate the routes. If the resulting surrogate cost is lower than the target, the acquired improvements are permanently locked into the chromosome's genotype. If the mutation degrades the network, the algorithm reverts to the original backup routes, ensuring monotonic generational improvement.
+Furthermore, the algorithm actively applies Lamarckian mutation by running the `ACOLocalSearch` operators to physically manipulate the routes. The mutation step compares surrogate cost before and after the local edit; only if the surrogate improves is the chromosome kept, after which the full fitness score is recomputed for GA use. If the mutation degrades the network, the algorithm reverts to the original backup routes.
 
 **TODO:** Provide a convergence graph in your results chapter comparing the generational cost reduction of this Lamarckian Memetic Algorithm against a standard Darwinian control group to empirically prove the acceleration provided by the Belief Space.
 
@@ -848,7 +866,7 @@ The `MemeticEngine` is the computational core that connects the algorithmic prim
 	The engine generates the initial population of `Chromosome` objects. For each chromosome in `n_population`:
 	- A `RouteGenerator` synthesizes `num_routes` candidate transit loops from the demand distribution.
 	- A **fresh, decoupled** `PheromoneMatrix` is instantiated exclusively for that chromosome. This is a critical design decision explained under [On-Decoupled-Pheromone-Initialization](#On-Decoupled-Pheromone-Initialization).
-	- The chromosome is immediately evaluated via `evaluate_chromosome` to compute its initial surrogate cost.
+	- The chromosome is immediately evaluated via `evaluate_chromosome` to compute its initial fitness score.
 	The population is sorted by cost, and the fittest chromosome's pheromone matrix is promoted to the master state.
 
 3. **Generational Step (`step_generation`)**
@@ -866,7 +884,7 @@ The `MemeticEngine` is the computational core that connects the algorithmic prim
 
 Each chromosome in the initial population receives its own independent `PheromoneMatrix` rather than sharing a single global matrix. This is not a memory optimization — it is an architectural requirement.
 
-If all chromosomes shared one pheromone matrix, the evaporation and deposition operations performed during the evaluation of one chromosome would contaminate the demand signal used to evaluate the next. Because the `evaluate_chromosome` override (see [Optimizer](#Optimizer)) performs pheromone updates as part of evaluation, sharing a matrix would create an order-dependent bias: chromosomes evaluated later would inherit the accumulated demand artifacts of chromosomes evaluated earlier.
+If all chromosomes shared one pheromone matrix, the evaporation and deposition operations performed during the evaluation of one chromosome would contaminate the demand signal used to evaluate the next. Because the fitness evaluator refreshes pheromones as part of evaluation, sharing a matrix would create an order-dependent bias: chromosomes evaluated later would inherit the accumulated demand artifacts of chromosomes evaluated earlier.
 
 By decoupling the matrices, each chromosome maintains a private demand map that reflects exclusively its own route topology and evaluated passenger journeys. When two chromosomes are selected for crossover, their private matrices are blended via `inherit_pheromones`, creating a child matrix that is a mathematically weighted fusion of two independently evolved demand surfaces. This preserves the integrity of the epigenetic inheritance mechanism described under [Genetic](#Genetic).
 
@@ -956,12 +974,12 @@ The `Optimizer` is the user-facing master orchestrator. Every module documented 
 ### Implementation
 
 1. **Unified Infrastructure Initialization (`_init_engines`)**
-	The optimizer loads the stored YAML configuration, detects the city topology (OSM real-city vs. synthetic toy grid), and constructs the complete spatial stack: `CityGraph`, `DirectDemandSampler`, `MemeticEngine`, `StaticSurrogateEvaluator`, `StatePreservationEngine`, `TelemetryEngine`, and `AdaptiveController`.
+	The optimizer loads the stored YAML configuration, detects the city topology (OSM real-city vs. synthetic toy grid), and constructs the complete spatial stack: `CityGraph`, `DirectDemandSampler`, `MemeticEngine`, `SimulationEvaluator`, `StaticSurrogateEvaluator`, `StatePreservationEngine`, `TelemetryEngine`, and `AdaptiveController`.
 
-2. **Custom Evaluate Override**
-	After initialization, the optimizer replaces the `MemeticAlgorithm`'s default `evaluate_chromosome` method with a custom function that fuses three operations into a single evaluation pass:
+2. **Dual Evaluators**
+	After initialization, the optimizer wires the memetic engine with two evaluators: a full fitness evaluator for GA scoring and a separate surrogate evaluator for local-search mutation checks:
 
-	- **Surrogate Cost Computation:** The `StaticSurrogateEvaluator` computes the multi-modal A* routing cost for a fixed set of pre-sampled Origin-Destination pairs against the candidate's route topology.
+	- **Surrogate Cost Computation:** The `StaticSurrogateEvaluator` computes the multi-modal A* routing cost for a fixed set of pre-sampled Origin-Destination pairs against the candidate's route topology during mutation checking only.
 	- **Pheromone Lifecycle:** The evaluated passenger paths are used to perform a full evaporation-deposition cycle on the chromosome's private `PheromoneMatrix`.
 	- **Gap Recalculation:** The chromosome's demand-service gaps are recomputed against its updated route system, preparing the spatial intelligence required by the next generation's local search operators.
 
@@ -981,7 +999,7 @@ The `Optimizer` is the user-facing master orchestrator. Every module documented 
 
 ### On-Unified-Evaluate-Gate
 
-The decision to override `evaluate_chromosome` with a unified custom function is an architectural choice motivated by the interaction between the surrogate evaluator and the pheromone system.
+The GA path always stores the microscopic `fitness_score` in `Chromosome.cost`, while the surrogate remains a private heuristic for mutation acceptance and local-search guidance.
 
 In a naive implementation, evaluation and pheromone updates would be separate operations. The engine would evaluate a chromosome, then separately trigger pheromone evaporation and deposition. This separation creates a timing hazard: between evaluation and pheromone update, the chromosome's demand-service gaps are stale. If the Lamarckian mutation gate triggers in this window, the local search operators would read outdated gap data, potentially directing route mutations toward corridors that are no longer underserved.
 
@@ -1172,6 +1190,8 @@ The mathematical metrics in `evaluation_metrics.py` operate on primitive types �
 
 The `post_evaluation.py` module bridges this gap. It extracts the right data from domain objects (`Route.path` → coordinate sequences, `Chromosome.routes` → aggregate edge sets, `SimulationResult.recorded_paths` → path frequency distributions), calls the appropriate metric, and returns a meaningful result.
 
+It is the post-run analysis layer for answering questions about the final score itself: whether the surrogate ranking matches the full simulation, whether topology changes correlate with fitness improvement, and whether the passenger paths remain diverse after optimization.
+
 ### Implementation
 
 1. **Route Similarity**
@@ -1190,7 +1210,7 @@ The `post_evaluation.py` module bridges this gap. It extracts the right data fro
 	- `compute_path_diversity(recorded_paths)` — Shannon entropy over the passenger path frequency distribution from a simulation result.
 
 4. **Surrogate Fidelity**
-	- `validate_surrogate_ranking(surrogate_scores, true_scores)` — Returns a report containing Spearman $\rho$, Kendall $\tau$, NRMSE, and MAPE. This is the comprehensive surrogate validation suite.
+	- `validate_surrogate_ranking(surrogate_scores, true_scores)` — Compares `surrogate_cost` values against the full simulation `fitness_score` values and returns Spearman $\rho$, Kendall $\tau$, NRMSE, and MAPE. This is the comprehensive surrogate validation suite.
 	- `validate_surrogate_top_k(surrogate_ranking, true_ranking, k)` — Precision/recall of the surrogate's top-$k$ against the true evaluator's top-$k$.
 	- `validate_distribution_consistency(dist_a, dist_b)` — KS-test with a human-readable report.
 

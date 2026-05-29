@@ -98,29 +98,60 @@ class SimulationResult:
     """A lightweight target to extract metrics and paths without holding heavy memory."""
     def __init__(
         self, 
-        fitness_score: float, 
-        metrics: dict[str, Any], 
-        recorded_paths: list[tuple[Any, float]], 
+        fitness_score: Optional[float] = None,
+        metrics: Optional[dict[str, Any]] = None,
+        recorded_paths: Optional[list[tuple[Any, float]]] = None,
         jeep_system: Optional[JeepSystem] = None, 
-        sim_id: Optional[str] = None
+        sim_id: Optional[str] = None,
+        surrogate_cost: Optional[float] = None,
+        score_kind: str = "fitness"
     ) -> None:
+        if score_kind not in {"fitness", "surrogate"}:
+            raise ValueError("[SIMULATION RESULT] score_kind must be 'fitness' or 'surrogate'.")
+        if score_kind == "fitness" and fitness_score is None:
+            raise ValueError("[SIMULATION RESULT] fitness_score is required for fitness results.")
+        if score_kind == "surrogate" and surrogate_cost is None:
+            raise ValueError("[SIMULATION RESULT] surrogate_cost is required for surrogate results.")
+
         self.sim_id: str = sim_id or uuid.uuid4().hex[:8]
-        self.fitness_score: float = float(fitness_score)
-        self.metrics: dict[str, Any] = metrics
-        self.recorded_paths: list[tuple[Any, float]] = recorded_paths
+        self.score_kind: str = score_kind
+        self.fitness_score: Optional[float] = float(fitness_score) if fitness_score is not None else None
+        self.surrogate_cost: Optional[float] = float(surrogate_cost) if surrogate_cost is not None else None
+        self.metrics: dict[str, Any] = metrics or {}
+        self.recorded_paths: list[tuple[Any, float]] = recorded_paths or []
         self.jeep_system: Optional[JeepSystem] = jeep_system
 
+    @property
+    def score(self) -> float:
+        if self.score_kind == "fitness":
+            if self.fitness_score is None:
+                raise ValueError("[SIMULATION RESULT] fitness_score is unavailable.")
+            return self.fitness_score
+        if self.surrogate_cost is None:
+            raise ValueError("[SIMULATION RESULT] surrogate_cost is unavailable.")
+        return self.surrogate_cost
+
     def __str__(self) -> str:
-        return f"SimulationResult({self.sim_id}): fitness={self.fitness_score:.2f}, completed={self.metrics.get('completed_count', 0)}"
+        label = "fitness" if self.score_kind == "fitness" else "surrogate_cost"
+        return f"SimulationResult({self.sim_id}): {label}={self.score:.2f}, completed={self.metrics.get('completed_count', 0)}"
 
     def export_report(self, out_dir: str) -> None:
         out_path = Path(out_dir)
         out_path.mkdir(parents=True, exist_ok=True)
         filename = out_path / f"report_sim_{self.sim_id}.txt"
-        payload = {"sim_id": self.sim_id, "fitness_score": self.fitness_score, "metrics": self.metrics, "routes_count": len(self.jeep_system.routes) if self.jeep_system else 0, "jeeps_count": len(self.jeep_system.jeeps) if self.jeep_system else 0}
+        payload = {
+            "sim_id": self.sim_id,
+            "score_kind": self.score_kind,
+            "fitness_score": self.fitness_score,
+            "surrogate_cost": self.surrogate_cost,
+            "metrics": self.metrics,
+            "routes_count": len(self.jeep_system.routes) if self.jeep_system else 0,
+            "jeeps_count": len(self.jeep_system.jeeps) if self.jeep_system else 0,
+        }
         with open(filename, "w") as f:
             f.write(f"SIMULATION ANNOTATION REPORT\n" + "=" * 40 + "\n")
-            f.write(f"Simulation ID : {self.sim_id}\nTimestamp     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nFitness Score : {self.fitness_score:.4f}\n\n--- METRICS ---\n")
+            score_label = "Fitness Score" if self.score_kind == "fitness" else "Surrogate Cost"
+            f.write(f"Simulation ID : {self.sim_id}\nTimestamp     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{score_label} : {self.score:.4f}\n\n--- METRICS ---\n")
             for k, v in self.metrics.items(): f.write(f"{k:<20}: {v:.4f}\n" if isinstance(v, float) else f"{k:<20}: {v}\n")
             f.write(f"\n--- TOPOLOGY OVERVIEW ---\nTotal Routes : {payload['routes_count']}\nTotal Jeeps  : {payload['jeeps_count']}\n\n\n--- DATA PAYLOAD (DO NOT EDIT) ---\n")
             f.write(json.dumps(payload))
@@ -130,7 +161,16 @@ class SimulationResult:
         with open(filepath, "r") as f: content = f.read()
         try: data = json.loads(content.split("--- DATA PAYLOAD (DO NOT EDIT) ---")[1].strip())
         except: raise ValueError("Failed to parse data payload.")
-        return cls(sim_id=data["sim_id"], fitness_score=data["fitness_score"], metrics=data["metrics"], recorded_paths=[], jeep_system=None)
+        score_kind = data.get("score_kind", "fitness")
+        return cls(
+            sim_id=data["sim_id"],
+            fitness_score=data.get("fitness_score"),
+            surrogate_cost=data.get("surrogate_cost"),
+            metrics=data.get("metrics", {}),
+            recorded_paths=[],
+            jeep_system=None,
+            score_kind=score_kind,
+        )
 
 
 class Simulation:
@@ -186,7 +226,7 @@ class Simulation:
             while not self.is_complete:
                 self.update()
                 pbar.update(1)
-        return self._calculate_results()
+        return self.evaluate_fitness()
 
     def run_until_drained(self, safety_cap: int = 100_000) -> SimulationResult:
         """Runs until every spawned passenger has completed their journey.
@@ -216,16 +256,22 @@ class Simulation:
                 break
 
         self.is_complete = True
+        return self.evaluate_fitness()
+
+    def evaluate_fitness(self) -> SimulationResult:
+        """Computes the post-simulation fitness score and metric breakdown."""
         return self._calculate_results()
 
 
     def _calculate_results(self) -> SimulationResult:
-        """Computes fitness metrics for the Genetic Algorithm."""
+        """Computes the post-simulation fitness metrics for the route system."""
         completed = self.passenger_generator.archived_passengers
         incomplete = self.passenger_generator.passengers
         
         completed_times = [p.despawn_tick - p.spawn_tick for p in completed if p.despawn_tick is not None]
-        incomplete_penalties = [self.passenger_generator.simulated_time - p.spawn_tick + (self.beta_penalty * p.get_remaining_time()) for p in incomplete]
+        incomplete_elapsed = [self.passenger_generator.simulated_time - p.spawn_tick for p in incomplete]
+        incomplete_remaining = [p.get_remaining_time() for p in incomplete]
+        incomplete_penalties = [elapsed + (self.beta_penalty * remaining) for elapsed, remaining in zip(incomplete_elapsed, incomplete_remaining)]
         
         n_completed = len(completed_times)
         if n_completed > 0:
@@ -236,8 +282,11 @@ class Simulation:
             std_commute = 0.0
 
         sum_completed = sum(completed_times)
+        sum_incomplete_elapsed = sum(incomplete_elapsed)
+        sum_incomplete_remaining = sum(incomplete_remaining)
         sum_incomplete = sum(incomplete_penalties)
-        total_fitness = sum_completed + sum_incomplete + (self.alpha_std_penalty * std_commute)
+        equity_penalty = self.alpha_std_penalty * std_commute
+        total_fitness = sum_completed + sum_incomplete + equity_penalty
         
         all_recorded_paths = [(p.journey, p.total_path_cost) for p in (completed + incomplete)]
 
@@ -249,7 +298,10 @@ class Simulation:
                 "mean_commute_time": mean_commute, 
                 "std_commute_time": std_commute, 
                 "sum_completed_time": sum_completed, 
+                "sum_incomplete_elapsed_time": sum_incomplete_elapsed,
+                "sum_incomplete_remaining_time": sum_incomplete_remaining,
                 "sum_penalty_time": sum_incomplete, 
+                "equity_penalty": equity_penalty,
                 "ticks_simulated": self.current_tick
             },
             recorded_paths=all_recorded_paths,
@@ -304,11 +356,12 @@ class SimulationEvaluator:
     A persistent factory for rapidly evaluating multiple route configurations 
     against a static city and demand model. Designed for GA loops.
     """
-    def __init__(self, config: dict, city_graph: CityGraph, travel_graph: TravelGraph, demand_sampler: DirectDemandSampler) -> None:
+    def __init__(self, config: dict, city_graph: CityGraph, travel_graph: Optional[TravelGraph], demand_sampler: DirectDemandSampler) -> None:
         self.config = config
         self.city_graph = city_graph
         self.travel_graph = travel_graph
         self.demand_sampler = demand_sampler
+        self.travel_graph_config = travel_graph.config.copy() if travel_graph is not None else config.get("travel_graph", {}).copy()
         
         self.sim_cfg = config.get("simulation", {})
         self.total_jeeps = self.sim_cfg.get("total_allocatable_jeeps", 25)
@@ -327,6 +380,12 @@ class SimulationEvaluator:
     def evaluate(self, routes: list['Route'], verbose: bool = False) -> SimulationResult:
         jeeps = []
         jeeps_per_route = max(1, self.total_jeeps // len(routes)) if routes else 0
+
+        tg = TravelGraph(
+            cg=self.city_graph,
+            config=self.travel_graph_config.copy(),
+            routes=routes
+        )
         
         for route in routes:
             for _ in range(jeeps_per_route):
@@ -341,7 +400,7 @@ class SimulationEvaluator:
         )
         
         passenger_generator = PassengerGenerator(
-            tg=self.travel_graph,
+            tg=tg,
             sampler=self.demand_sampler,
             rate_per_hour=self.spawn_rate,
             stdev=self.spawn_stdev,
@@ -426,7 +485,7 @@ class StaticSurrogateEvaluator:
         fleet_operational_cost = sum(sum(e.getLength() for e in r.path) for r in routes)
 
         return SimulationResult(
-            fitness_score=total_weight,
+            surrogate_cost=total_weight,
             metrics={
                 "passenger_routing_cost": total_weight,
                 "fleet_operational_cost": fleet_operational_cost,
@@ -435,5 +494,6 @@ class StaticSurrogateEvaluator:
             },
             recorded_paths=recorded_paths,
             jeep_system=None,
-            sim_id=f"SURR{uuid.uuid4().hex[:8]}"
+            sim_id=f"SURR{uuid.uuid4().hex[:8]}",
+            score_kind="surrogate"
         )
