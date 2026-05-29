@@ -326,11 +326,9 @@ class DirectDemandSampler:
             return self.node_list
             
         if self.verbose:
-            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} evenly spaced target nodes for API queries.")
+            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} random target nodes for API queries.")
             
-        sorted_nodes = sorted(self.node_list, key=lambda n: (n.lon, n.lat))
-        step = max(1, self.n // self.api_sample_limit)
-        return sorted_nodes[::step][:self.api_sample_limit]
+        return random.sample(self.node_list, self.api_sample_limit)
 
     def _impute_traffic(self, empirical: dict[Node, float]) -> dict[Node, float]:
         if self.verbose:
@@ -347,6 +345,13 @@ class DirectDemandSampler:
         if self.verbose:
             iterable = tqdm(iterable, desc="Imputing unknown nodes")
 
+        def haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+            lon1, lat1, lon2, lat2 = map(math.radians, [lon1, lat1, lon2, lat2])
+            dlon = lon2 - lon1
+            dlat = lat2 - lat1
+            a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+            return 6371000 * (2 * math.asin(math.sqrt(a)))
+
         for node in iterable:
             if node in empirical:
                 imputed[node] = empirical[node]
@@ -356,7 +361,7 @@ class DirectDemandSampler:
             denominator = 0.0
             
             for k_node in known_nodes:
-                dist = math.hypot(node.lon - k_node.lon, node.lat - k_node.lat)
+                dist = haversine(node.lon, node.lat, k_node.lon, k_node.lat)
                 if dist == 0:
                     dist = 0.0001
                 
