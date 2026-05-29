@@ -33,6 +33,10 @@
 **Configuration**
 - [YAML-Configs](#YAML-Configs)
 
+**Post-Optimization Evaluation**
+- [EvaluationMetrics](#EvaluationMetrics)
+- [PostEvaluation](#PostEvaluation)
+
 ___
 # Core Modules
 ___
@@ -515,9 +519,68 @@ The framework is designed to optimize jeepney routes using a hybrid GA-ACO algor
 
 To solve this, the framework implements `surrogate_evaluate()`. In complex combinatorial optimization, surrogate models or approximation functions are utilized to replace computationally expensive objective evaluations during the primary search phases (He et al., 2024). By bypassing the temporal physics engine and directly computing the static multi-modal A* costs for a representative sample of OD pairs, the surrogate evaluation provides a mathematically sound, high-speed objective cost proxy. The algorithm can evaluate thousands of route sets using this $O(1)$ temporal approximation, reserving the expensive, full agent-based simulation strictly for the final validation of the optimal route sets.
 
-TODO: Prove the direct mathematical correlation between the static surrogate routing cost and the dynamic temporal cost of the full agent-based simulation.
-
 TODO: Modify all instances mentioning surrogate in codebase to avoid pedantic panelists
+
+### Fitness Function: Full Microscopic Simulation
+
+After the agent-based simulation runs for $T$ ticks, the framework computes a scalar fitness score that the evolutionary algorithm minimizes. Let $\mathbf{R}$ denote a candidate route system, $\mathcal{C}$ denote the set of passengers who completed their journey, and $\mathcal{I}$ denote the set of passengers still in transit at tick $T$. Define:
+
+- $T_i$ = realized door-to-door travel time for completed passenger $i$ (measured as `despawn_tick` $-$ `spawn_tick`)
+- $T_j^{\text{elapsed}}$ = wall-clock time already consumed by incomplete passenger $j$
+- $\hat{T}_j^{\text{rem}}$ = estimated remaining generalized cost for passenger $j$ (the sum of untraversed edge weights in their A* journey plan)
+
+The fitness function is:
+
+$$
+F(\mathbf{R}) =
+\underbrace{\sum_{i \in \mathcal{C}} T_i}_{\text{Total User Cost}}
++
+\underbrace{\sum_{j \in \mathcal{I}} \left( T_j^{\text{elapsed}} + \beta \cdot \hat{T}_j^{\text{rem}} \right)}_{\text{Underservice Penalty}}
++
+\underbrace{\alpha \cdot \sigma\!\left(\{T_i\}_{i \in \mathcal{C}}\right)}_{\text{Equity Regularizer}}
+$$
+
+where $\sigma(\cdot)$ is the population standard deviation of completed travel times. Lower $F(\mathbf{R})$ is better.
+
+**Term 1: Total User Cost.** The aggregate realized travel time across all completed passengers. This is the canonical Total Travel Time (TTT) objective in the Transit Network Design Problem (TNDP) literature. Kepaptsoglou \& Karlaftis (2009)[^19] identify TTT minimization as the most widely adopted single-objective formulation, and Ceder \& Wilson (1986)[^20] use it as the primary user-cost metric in their foundational bus network design framework. Fan \& Machemehl (2006)[^21] adopt the same objective for their GA-based transit optimization. Each $T_i$ is already measured in generalized-cost units because the `TravelGraph` A* pathfinding assigns weighted edges that encode modal perception factors (see `travel_graph` config: `walk_wt`, `ride_wt`, `wait_wt`, `transfer_wt`), following the generalized cost function formalized by Ortúzar \& Willumsen (2011)[^32]. The sum (rather than average) is used because averaging would allow the optimizer to improve its score by failing to generate difficult-to-serve passengers, since fewer passengers would lower the denominator.
+
+**Term 2: Underservice Penalty.** Passengers who have not completed their journey by tick $T$ represent unsatisfied demand. Rather than discarding these passengers (which would reward systems that ignore hard-to-reach areas), the penalty inflates their cost by $\beta > 1$. This is an instance of the exterior penalty function method for converting constrained optimization (the implicit constraint being $|\mathcal{I}| = 0$, i.e., all passengers must be served) into unconstrained optimization, enabling metaheuristic search. Coello Coello (2002)[^33] provides the definitive survey of constraint-handling techniques in evolutionary computation and classifies this approach as a static penalty — a fixed multiplier that inflates the cost of constraint-violating solutions. The penalty structure has two desirable properties: (1) monotonicity — as a passenger approaches completion, the penalty decreases smoothly, providing gradient signal to the optimizer; and (2) dominance — since $\beta > 1$, an incomplete passenger always contributes more to $F(\mathbf{R})$ than an equivalent completed passenger, guaranteeing that the optimizer prefers route systems with higher completion rates. The remaining cost estimate $\hat{T}_j^{\text{rem}}$ is computed deterministically from the passenger's pre-planned A* journey as the sum of untraversed edge weights.
+
+**Term 3: Equity Regularizer.** The standard deviation of completed travel times penalizes route systems where service quality is unevenly distributed. Two systems with identical average commute times may differ drastically in fairness — one delivering consistent 10-minute trips while another delivers half in 3 minutes and half in 17 minutes. The regularizer encodes horizontal equity: the principle that similarly situated passengers should receive similar service quality. Welch \& Mishra (2013)[^34] formalize equity metrics for public transit connectivity and demonstrate that dispersion-based measures capture the spatial equity of transit service distribution. Jara-Díaz \& Gschwender (2003)[^35] incorporate travel time variance into their microeconomic model of public transport operations, deriving that the social welfare function for transit includes both the expected travel time and its variance. The coefficient $\alpha$ ensures the regularizer acts as a tiebreaker among configurations with similar total cost rather than dominating the objective.
+
+| Symbol | Config Key | Default | Role |
+|--------|------------|---------|------|
+| $\beta$ | `optimization.beta_penalty` | 2.0 | Underservice penalty multiplier |
+| $\alpha$ | `optimization.alpha_std_penalty` | 0.5 | Equity regularization weight |
+
+### Fitness Function: Static Surrogate Evaluator
+
+During the metaheuristic search phase, the framework uses a lightweight surrogate evaluator instead of the full agent-based simulation. Let $\mathcal{S} = \{(o_k, d_k)\}_{k=1}^{N_s}$ be a fixed set of origin-destination pairs sampled once from the Direct Demand Model at initialization. For a candidate route system $\mathbf{R}$, let $\mathcal{T}_\mathbf{R}$ denote the `TravelGraph` constructed from $\mathbf{R}$, and let $c^*(o, d;\, \mathcal{T}_\mathbf{R})$ denote the A*-optimal generalized cost from $o$ to $d$ on $\mathcal{T}_\mathbf{R}$.
+
+$$
+\hat{F}(\mathbf{R}) =
+\sum_{k=1}^{N_s}
+\begin{cases}
+c^*(o_k, d_k;\, \mathcal{T}_\mathbf{R}) & \text{if } (o_k, d_k) \text{ is reachable} \\[4pt]
+M & \text{otherwise}
+\end{cases}
+$$
+
+where $M \gg \max_k c^*$ is a large penalty for unreachable OD pairs. Lower $\hat{F}(\mathbf{R})$ is better.
+
+**Generalized Cost $c^*(o, d)$.** Each A* path traverses a heterogeneous sequence of typed edges — walking (SW/EW), waiting (WA), riding (RI), alighting (AL), transferring (TR), and direct walking (DI) — each weighted by a type-specific perception factor. The total path cost is $c^*(o, d) = \sum_{e \in \text{path}^*} w_e \cdot \ell_e$, where $w_e$ is the perception weight and $\ell_e$ is the edge metric. This is the generalized cost function from discrete choice transport modeling (Ortúzar \& Willumsen, 2011[^32]), encoding the empirical finding that passengers experience walking and waiting time as more onerous than in-vehicle time.
+
+**Transfer Penalty Inflation ($\times 2.5$).** The surrogate multiplies the base `transfer_wt` by a factor of 2.5 before constructing the `TravelGraph`. This compensates for the absence of dynamic waiting and capacity effects that the full simulation captures naturally. Iseki \& Taylor (2009)[^36] conducted a comprehensive review of transfer penalty studies and found that passengers value transfer disutility at approximately 2.0–3.0 times the equivalent in-vehicle time, depending on facility quality, weather exposure, and schedule reliability. The 2.5$\times$ multiplier sits at the midpoint of this empirical range and represents a moderate assumption appropriate for Philippine paratransit, where stops typically lack shelters, schedules, and real-time information.
+
+**Big-M Penalty for Unreachable Pairs.** When no viable path exists between an OD pair, the penalty $M = 10^5$ is applied. This is the standard Big-M method from mathematical programming, converting the hard connectivity constraint (a well-designed route system should connect all demand-weighted locations) into a penalty term. The value is set several orders of magnitude larger than the maximum feasible path cost, ensuring that any route system with unreachable OD pairs is dominated by all fully-connected systems.
+
+**Fixed OD Sample Set.** The surrogate samples $N_s$ OD pairs once at initialization and reuses them for every evaluation. Jin (2005)[^31] identifies that surrogate evaluators in evolutionary computation must provide consistent relative rankings across candidate solutions. If each evaluation used a different random OD sample, two evaluations of the same route system could produce different fitness scores, introducing noise that corrupts selection pressure. By fixing $\mathcal{S}$, the surrogate becomes a deterministic function of $\mathbf{R}$.
+
+| Symbol | Current Value | Role |
+|--------|---------------|------|
+| Transfer $\times 2.5$ | 2.5 | Surrogate transfer inflation (TODO: sensitivity analysis) |
+| $M$ | $10^5$ | Unreachable OD penalty (TODO: sensitivity analysis) |
+| $N_s$ | 100 | Fixed OD sample size (TODO: sensitivity analysis) |
 
 ___
 
@@ -980,6 +1043,163 @@ Governs the evolutionary search: population size, generation limit, stagnation t
 The optimization parameters (lines 63–87 of `iligan_configs.yaml`) carry an explicit `[TODO] RESEARCH AND JUSTIFY THESE VALUES` comment. The current values are engineering defaults selected for computational tractability. A formal hyperparameter sensitivity analysis is required to justify these choices for the thesis.
 
 ___
+# Post-Optimization Evaluation
+
+The optimization loop produces candidate route systems. But a candidate is not a result. Before a route system can be presented in a thesis defense, it must be rigorously evaluated: "How similar is this system to the previous generation's system?" "By how much did that mutation actually change the route?" "Does the surrogate evaluator actually rank solutions correctly?" "How diverse are the routing options available to passengers?"
+
+These questions cannot be answered by the fitness function alone. The fitness function compresses an entire route system into a single scalar cost. To actually understand what the optimizer produced, we need a vocabulary of comparison metrics — topological, geometric, distributional, and statistical.
+
+The framework addresses this with a two-layer architecture:
+
+1. **`evaluation_metrics.py`** — The mathematical toolkit. Pure, stateless functions that operate on primitive data types (sets, lists, vectors). No domain knowledge. This module knows nothing about routes or chromosomes — it knows about Jaccard similarity, Fréchet distance, and Wasserstein transport.
+
+2. **`post_evaluation.py`** — The domain-specific evaluation workflows. This module knows about routes, chromosomes, and simulation results. It extracts the right data from domain objects, calls the metrics, and returns meaningful evaluation reports.
+
+___
+## EvaluationMetrics
+
+### Logic
+
+Every evaluation question reduces to a mathematical operation on a specific data representation. "How topologically similar are two edge sets?" is a set overlap problem (Jaccard). "How geometrically similar are two ordered coordinate sequences?" is a trajectory comparison problem (Fréchet). "How much work to reshape one demand distribution into another?" is an optimal transport problem (Wasserstein).
+
+By isolating these operations as pure functions with no domain coupling, the toolkit becomes independently testable, reusable across modules (the optimizer already uses Jaccard internally for convergence detection), and transparent in its mathematical assumptions.
+
+### Implementation
+
+The metrics are organized into five categories:
+
+1. **Topological Similarity** — Metrics that operate on sets and graph structures.
+	- `jaccard_similarity(set_a, set_b)` — Proportion of shared elements between two sets.
+	- `cosine_similarity(vector_a, vector_b)` — Angular alignment of two sparse feature vectors.
+	- `graph_edit_distance(edges_a, edges_b)` — Minimum structural edit operations to transform one graph into another.
+
+2. **Geometric Similarity** — Metrics that operate on ordered coordinate sequences.
+	- `discrete_frechet_distance(P, Q)` — Minimum leash length for two traversals (order-preserving).
+
+3. **Distributional Distance** — Metrics that compare probability distributions.
+	- `wasserstein_1d(dist_a, dist_b)` — Earth Mover's Distance between two univariate samples.
+	- `wasserstein_2d(coords_a, weights_a, coords_b, weights_b)` — Optimal transport cost between two weighted spatial distributions.
+	- `ks_test(dist_a, dist_b)` — Kolmogorov-Smirnov two-sample test for distributional equivalence.
+
+4. **Diversity & Structure** — Metrics that characterize a single distribution.
+	- `shannon_entropy(frequencies)` — Information-theoretic diversity measure.
+	- `coefficient_of_variation(data)` — Relative dispersion (σ/μ).
+
+5. **Ranking Fidelity** — Metrics that compare two ranked orderings.
+	- `spearman_correlation(scores_a, scores_b)` — Rank correlation coefficient.
+	- `kendall_tau(scores_a, scores_b)` — Concordance of pairwise orderings.
+	- `pearson_correlation(vector_a, vector_b)` — Linear correlation.
+	- `top_k_overlap(ranking_a, ranking_b, k)` — Precision/recall of top-k sets.
+	- `normalized_rmse(predicted, actual)` — Scale-independent prediction error.
+	- `mape(baseline, test)` — Mean Absolute Percentage Error.
+
+### On-Jaccard-Similarity
+
+Jaccard similarity is the simplest topological comparison: it counts how many elements two sets share, normalized by the total number of distinct elements across both sets.
+
+$$J(A, B) = \frac{|A \cap B|}{|A \cup B|}$$
+
+For route systems, the "elements" are edge IDs. If System A uses 100 street segments and System B uses 100 street segments, and 80 of those segments are identical, then $J = 80 / 120 = 0.667$. The metric is symmetric, bounded $[0, 1]$, and requires no parameter tuning.
+
+The Jaccard index appears throughout the framework: inside the optimizer for convergence detection ([On-Multi-Dimensional-Convergence](#On-Multi-Dimensional-Convergence)), in the crossover operator for trunk identification ([Genetic](#Genetic)), and here in post-evaluation for system comparison. By centralizing it in `evaluation_metrics.py`, all three use cases call the same implementation.
+
+### On-Discrete-Fréchet-Distance
+
+The Fréchet distance is often explained as the "dog walker" metric: imagine a person walking along path $P$ and a dog walking along path $Q$, both connected by a leash. Neither can backtrack. The Fréchet distance is the minimum leash length required for both to complete their traversals.
+
+The discrete variant — introduced by Eiter and Mannila (1994)[^28] — restricts the comparison to the vertex sequences of each path and computes the result via a standard $O(n \times m)$ dynamic programming recurrence:
+
+$$ca(i, j) = \max\left(\min\left(ca(i-1, j),\ ca(i, j-1),\ ca(i-1, j-1)\right),\ d(P_i, Q_j)\right)$$
+
+where $d(P_i, Q_j)$ is the Euclidean distance between the $i$-th vertex of $P$ and the $j$-th vertex of $Q$.
+
+Critically, Fréchet respects traversal order. Two routes sharing identical streets but traveling in opposite directions correctly register as dissimilar. This makes it strictly more informative than Hausdorff distance (which is order-agnostic) for evaluating route mutations, where the question "did the mutation reverse a segment?" is diagnostically important.
+
+### On-Wasserstein-Distance
+
+The Wasserstein distance (Earth Mover's Distance) asks: "What is the minimum cost to reshape one pile of demand into the shape of another?" The "cost" is mass × distance moved.
+
+Formally, given two probability distributions $\mu$ and $\nu$ over a metric space, the 1-Wasserstein distance is:
+
+$$W_1(\mu, \nu) = \inf_{\gamma \in \Gamma(\mu, \nu)} \int_{X \times X} d(x, y) \, d\gamma(x, y)$$
+
+where $\Gamma(\mu, \nu)$ is the set of all joint distributions (transport plans) with marginals $\mu$ and $\nu$.
+
+The framework implements two variants:
+
+- **1D Wasserstein** (`scipy.stats.wasserstein_distance`): Compares univariate empirical distributions (e.g., travel time samples from two different runs). This has a closed-form solution via sorted quantile matching.
+
+- **2D Wasserstein** (linear programming formulation): Compares two weighted spatial point distributions. Given node coordinates and demand weights for two route systems, the LP solver finds the minimum-cost plan to redistribute demand mass from System A's configuration to System B's. This is computationally expensive ($O(n^3)$ for the simplex method) but exact.
+
+De Bacco et al. (2023)[^29] applied optimal transport theory to compare multi-layer urban network structures. Their formulation is directly analogous to comparing the demand coverage distributions of two candidate route systems — both involve weighted spatial graphs with multi-modal connectivity.
+
+Unlike Jaccard (which is purely topological) or Fréchet (which is purely geometric), Wasserstein is demand-aware. Two systems that cover different streets but serve the same demand surface will have a low Wasserstein distance. Two systems that cover the same streets but serve different demand distributions will have a high Wasserstein distance. This makes it the correct metric for the question "how differently do these systems serve the city?"
+
+### On-Shannon-Entropy-for-Path-Diversity
+
+Shannon entropy quantifies the diversity of a distribution:
+
+$$H = -\sum_{i} P(x_i) \log_2 P(x_i)$$
+
+Applied to the passenger path frequency distribution, entropy measures how many distinct routing options a transit system offers. A system where 90% of passengers take the same path has low entropy (bottleneck). A system where passengers are distributed across many distinct paths has high entropy (genuine multi-modal choice).
+
+Levinson (2012)[^30] applied entropy measures specifically to urban transportation networks, demonstrating that structural diversity correlates with network resilience — systems with higher routing entropy are more robust to link failures and demand perturbations.
+
+### On-Spearman-for-Surrogate-Validation
+
+The surrogate evaluator computes a fast proxy cost. The critical question is not "does the surrogate predict the exact cost?" but "does the surrogate correctly rank solutions?"
+
+Evolutionary selection is ranking-based: tournament selection picks the fittest of $k$ random chromosomes, elitism preserves the top $n$. These operations depend entirely on relative ordering, not absolute magnitude. If the surrogate says Chromosome A costs 500 and Chromosome B costs 600, and the true costs are 7000 and 8000, the surrogate is perfectly useful despite being wildly inaccurate — it correctly identified A as better than B.
+
+Jin (2005)[^31] explicitly establishes Spearman rank correlation as the primary validation metric for fitness approximation in evolutionary computation. A Spearman $\rho \geq 0.7$ indicates that the surrogate preserves enough ranking fidelity for reliable selection pressure. Below $0.5$, the surrogate is actively misleading the search.
+
+The framework additionally reports Kendall $\tau$ (more robust for small sample sizes), NRMSE (scale-independent magnitude error), and MAPE (percentage error) — but Spearman is the decision-making metric.
+
+### On-KS-Test-for-Stochastic-Consistency
+
+The Kolmogorov-Smirnov two-sample test determines whether two sets of observations are drawn from the same underlying probability distribution. It computes the maximum vertical distance between the two empirical cumulative distribution functions:
+
+$$D_{n,m} = \sup_x |F_n(x) - G_m(x)|$$
+
+For transit evaluation, this validates stochastic consistency: if the same route system is simulated twice with different random seeds, the resulting travel time distributions should be statistically identical ($p \geq 0.05$). If they are not, the simulation has insufficient sample size or a non-deterministic bug.
+
+___
+## PostEvaluation
+
+### Logic
+
+The mathematical metrics in `evaluation_metrics.py` operate on primitive types — sets, lists, tuples. But the questions we actually need to answer involve domain objects: "Compare these two Chromosomes." "Track how this route system evolved across 30 generations." "Validate whether our surrogate evaluator is trustworthy."
+
+The `post_evaluation.py` module bridges this gap. It extracts the right data from domain objects (`Route.path` → coordinate sequences, `Chromosome.routes` → aggregate edge sets, `SimulationResult.recorded_paths` → path frequency distributions), calls the appropriate metric, and returns a meaningful result.
+
+### Implementation
+
+1. **Route Similarity**
+	- `compare_routes_geometric(route_a, route_b)` — Extracts coordinate sequences from each route's edge path and computes the discrete Fréchet distance. This is the correct metric for quantifying how much a Lamarckian mutation physically displaced a route.
+	- `compare_routes_topological(route_a, route_b)` — Extracts edge ID sets and computes Jaccard similarity. This answers whether two routes share the same infrastructure, regardless of geometry.
+
+2. **System Similarity**
+	- `compare_systems_topological(chrom_a, chrom_b)` — Aggregates all edge IDs across all routes in each chromosome and computes Jaccard. This is the system-level version of "do these systems serve the same streets?"
+	- `compare_systems_structural(chrom_a, chrom_b)` — Computes Graph Edit Distance between the two network topologies. Unlike Jaccard (which measures overlap), GED quantifies the minimum number of structural modifications to transform one system into another.
+	- `compare_systems_degree_distribution(chrom_a, chrom_b)` — Extracts node degree distributions and computes cosine similarity. This captures whether the same nodes serve as hubs in both systems, even if the specific edges differ.
+	- `compare_systems_demand_coverage(chrom_a, chrom_b, sampler)` — Computes the 2D Wasserstein distance between the demand coverage distributions. This is the demand-aware comparison: "how differently do these systems serve the city's passengers?"
+
+3. **Generational Tracking**
+	- `track_topological_drift(gen_chromosomes)` — Given a sequence of best-chromosomes across generations, computes consecutive Jaccard similarities. A drift trace that stabilizes near 1.0 indicates convergence. A drift trace that oscillates indicates the optimizer is cycling.
+	- `track_fitness_correlation(gen_chromosomes)` — Correlates topological change ($1 - J$) with fitness improvement ($\Delta cost$). A strong negative Pearson $r$ means topology changes reliably improve fitness. A weak or positive $r$ means the optimizer is making structural changes that don't help.
+	- `compute_path_diversity(recorded_paths)` — Shannon entropy over the passenger path frequency distribution from a simulation result.
+
+4. **Surrogate Fidelity**
+	- `validate_surrogate_ranking(surrogate_scores, true_scores)` — Returns a report containing Spearman $\rho$, Kendall $\tau$, NRMSE, and MAPE. This is the comprehensive surrogate validation suite.
+	- `validate_surrogate_top_k(surrogate_ranking, true_ranking, k)` — Precision/recall of the surrogate's top-$k$ against the true evaluator's top-$k$.
+	- `validate_distribution_consistency(dist_a, dist_b)` — KS-test with a human-readable report.
+
+**TODO:** Run `validate_surrogate_ranking` on actual optimization telemetry data and report the Spearman $\rho$ in the results chapter. This directly addresses the existing TODO: "Prove the direct mathematical correlation between the static surrogate routing cost and the dynamic temporal cost of the full agent-based simulation."
+
+**TODO:** Integrate `track_topological_drift` into the `TelemetryEngine` to automatically log structural evolution alongside fitness convergence.
+
+**TODO:** Establish baseline path diversity (Shannon entropy) thresholds for the Iligan City network using historical jeepney route data.
+
 # References
 
 [^1]: Guillen, M. D., Ishida, H., & Okamoto, N. (2013). Is the use of informal public transport modes in developing countries habitual? An empirical study in Davao City, Philippines. _Transport Policy_, _26_, 31-42.
@@ -1009,3 +1229,12 @@ ___
 [^25]: Middendorf, M., Reischle, F., & Schmeck, H. (2002). Multi colony ant algorithms. _Journal of Heuristics_, _8_(3), 305-320.
 [^26]: Eiben, Á. E., Hinterding, R., & Michalewicz, Z. (1999). Parameter control in evolutionary algorithms. IEEE Transactions on evolutionary computation, 3(2), 124-141.
 [^27]: Sastry, K., Goldberg, D. E., & Kendall, G. (2013). Genetic algorithms. In Search methodologies: Introductory tutorials in optimization and decision support techniques (pp. 93-117). Boston, MA: Springer US.
+[^28]: Eiter, T., & Mannila, H. (1994). Computing discrete Fréchet distance. _Technical Report CD-TR 94/64_, Technische Universität Wien.
+[^29]: De Bacco, C., Baptista, D., Sarkar, S., & Kalantzis, V. (2023). Optimal transport in multilayer networks for traffic flow optimization. _Physical Review Research_, _5_(4), 043028.
+[^30]: Levinson, D. (2012). Network structure and city size. _PLoS ONE_, _7_(1), e29721.
+[^31]: Jin, Y. (2005). A comprehensive survey of fitness approximation in evolutionary computation. _Soft Computing_, _9_(1), 3-12.
+[^32]: Ortúzar, J. de D., & Willumsen, L. G. (2011). _Modelling Transport_ (4th ed.). Wiley.
+[^33]: Coello Coello, C. A. (2002). Theoretical and numerical constraint-handling techniques used with evolutionary algorithms: a survey of the state of the art. _Computer Methods in Applied Mechanics and Engineering_, _191_(11-12), 1245-1287.
+[^34]: Welch, T. F., & Mishra, S. (2013). A measure of equity for public transit connectivity. _Journal of Transport Geography_, _33_, 29-41.
+[^35]: Jara-Díaz, S., & Gschwender, A. (2003). Towards a general microeconomic model for the operation of public transport. _Transport Reviews_, _23_(4), 453-469.
+[^36]: Iseki, H., & Taylor, B. D. (2009). Not all transfers are created equal: Towards a framework relating transfer connectivity to travel behaviour. _Transport Reviews_, _29_(6), 777-800.

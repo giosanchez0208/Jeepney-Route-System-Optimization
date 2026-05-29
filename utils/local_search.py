@@ -4,6 +4,7 @@ from typing import Any, Optional
 from .route import Route
 from .pheromone import PheromoneMatrix
 from .directed_edge import DirEdge
+from .evaluation_metrics import discrete_frechet_distance
 
 
 class ACOLocalSearch:
@@ -18,16 +19,7 @@ class ACOLocalSearch:
         if not route_a.path or not route_b.path: return float('inf')
         P = [(e.start.lat, e.start.lon) for e in route_a.path]
         Q = [(e.start.lat, e.start.lon) for e in route_b.path]
-        n, m = len(P), len(Q)
-        ca = [[0.0 for _ in range(m)] for _ in range(n)]
-        for i in range(n):
-            for j in range(m):
-                dist = math.sqrt((P[i][0] - Q[j][0])**2 + (P[i][1] - Q[j][1])**2)
-                if i == 0 and j == 0: ca[i][j] = dist
-                elif i > 0 and j == 0: ca[i][j] = max(ca[i-1][0], dist)
-                elif i == 0 and j > 0: ca[i][j] = max(ca[0][j-1], dist)
-                else: ca[i][j] = max(min(ca[i-1][j], ca[i][j-1], ca[i-1][j-1]), dist)
-        return ca[n-1][m-1]
+        return discrete_frechet_distance(P, Q)
 
     def _get_shortest_path_edges(self, start_node: Any, end_node: Any) -> list[Any]:
         if start_node == end_node: return []
