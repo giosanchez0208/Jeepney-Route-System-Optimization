@@ -22,6 +22,17 @@
 - [LocalSearch](#LocalSearch)
 - [Genetic](#Genetic)
 
+**Optimizer Orchestration**
+- [ExperimentConfig](#ExperimentConfig)
+- [AdaptiveController](#AdaptiveController)
+- [MemeticEngine](#MemeticEngine)
+- [StatePreservationEngine](#StatePreservationEngine)
+- [TelemetryEngine](#TelemetryEngine)
+- [Optimizer](#Optimizer)
+
+**Configuration**
+- [YAML-Configs](#YAML-Configs)
+
 ___
 # Core Modules
 ___
@@ -674,7 +685,299 @@ Furthermore, the algorithm actively applies Lamarckian mutation by running the `
 
 **TODO:** Validate the correlation between the $O(1)$ surrogate cost estimate and the final agent-based simulation cost to prove the surrogate's accuracy.
 ___
+# Optimizer Orchestration
+
+The modules documented under [Optimization Modules](#Optimization-Modules) define the algorithmic primitives: the pheromone memory, the local search mutations, and the genetic crossover/inheritance operators. However, algorithms do not run themselves. The Optimizer Orchestration layer is responsible for coordinating these primitives into a reproducible, interruptible, and auditable evolutionary search loop.
+
+This section documents, in dependency order, the six modules that bridge the gap between "we have a Memetic Algorithm" and "we can run, pause, resume, and analyze a multi-generational optimization experiment."
+___
+## ExperimentConfig
+
+### Logic
+
+Metaheuristic optimization involves dozens of interacting parameters: population sizes, mutation rates, pheromone decay constants, travel graph penalties, fleet allocations, simulation tick counts, and vehicle speeds. Hardcoding these values inside source code creates two critical failures:
+
+1. **Reproducibility Collapse:** If a parameter is changed inline, there is no auditable record of what configuration produced a specific result. For a thesis defense, every result must trace back to an exact, immutable parameter set.
+
+2. **Experiment Throughput:** Testing the sensitivity of the algorithm to different hyperparameter values requires modifying source code for every run. This is error-prone and structurally prevents queuing multiple experiments.
+
+### Implementation
+
+1. **YAML Ingestion**
+	The `ExperimentConfig` class method `from_yaml` parses a structured YAML file and maps every field to a typed Python attribute. The parser handles two distinct city topologies: real-world OSM bounding boxes (`city_graph.bbox`) and synthetic toy city grids (`toy_city` origin + step + grid size), computing a rough bounding box from the grid geometry when no explicit bbox is provided.
+
+2. **Immutable Frozen Dataclass**
+	The configuration is implemented as a `@dataclass(frozen=True)`. Once instantiated, no attribute can be mutated. This guarantees that the parameter set governing a run cannot be accidentally altered by any downstream module during execution.
+
+3. **Parameter Grouping**
+	The YAML structure mirrors the architectural layers of the framework:
+	- **Orchestrator IO:** Output paths, telemetry intervals, checkpoint frequencies.
+	- **Genetic Algorithm:** Population size, max generations, stagnation limit, elitism count, tournament size, mutation rate, crossover coefficient, Jaccard patience.
+	- **Local Search & Pheromone:** Initial pheromone concentration, evaporation rate, deposition constant, operator probabilities, default jeep weight.
+	- **System Cost:** Headway variance penalty ($\alpha$), underservice penalty ($\beta$).
+	- **System Definition:** Number of routes, total fleet, city bounds.
+	- **Travel Graph:** Walk, ride, wait, and transfer weight penalties.
+	- **Simulation:** Tick count, speeds, capacity, spawn rates, boarding tolerance, dispatch spacing.
+
+### OptimizationState
+
+The `OptimizationState` is the mutable counterpart to the immutable `ExperimentConfig`. It is implemented as a standard (non-frozen) dataclass that tracks the live evolutionary state:
+
+- `generation`: The current generation index.
+- `stagnation_counter`: The number of consecutive generations without fitness improvement.
+- `best_fitness`: The lowest system cost observed across all generations.
+- `population`: The active list of `Chromosome` objects.
+- `pheromones`: The master `PheromoneMatrix` (typically mirrored from the fittest chromosome).
+- `random_state`: The captured pseudorandom number generator state via `random.getstate()`. This is critical for [deterministic replay](#On-Deterministic-Replay).
+
+The separation between immutable configuration and mutable state is not accidental. The `ExperimentConfig` defines _what_ the experiment is. The `OptimizationState` tracks _where_ the experiment currently is. By keeping them structurally isolated, the framework guarantees that serialization, checkpointing, and resumption operate on the state without risk of parameter contamination.
+
+___
+## AdaptiveController
+
+### Logic
+
+A static mutation rate creates a fundamental trade-off that cannot be resolved at compile time. If the rate is set high, the algorithm explores aggressively but wastes computational cycles on random perturbations even after it has already located a promising region. If the rate is set low, the algorithm exploits efficiently but gets permanently trapped the moment it reaches a local optimum.
+
+The `AdaptiveController` solves this by dynamically adjusting the mutation intensity based on real-time population feedback. When the algorithm stagnates, the controller escalates mutation to force exploration. The moment progress resumes, the controller snaps back to the baseline to resume fine-grained exploitation.
+
+### Implementation
+
+1. **Quadratic Stagnation Scaling**
+	The controller monitors the `stagnation_counter` (generations without improvement). As stagnation increases, the mutation probability scales quadratically toward a hard cap of 0.8:
+
+	$$P_{mut} = P_{base} + (P_{max} - P_{base}) \times \left(\frac{s}{S_{limit}}\right)^2$$
+
+	where $s$ is the current stagnation count and $S_{limit}$ is the configured stagnation threshold. The quadratic curve is deliberate: it provides a gentle initial increase (giving the algorithm time to naturally escape), but accelerates sharply as stagnation persists. A linear scaling would either react too aggressively too early or too slowly near the limit.
+
+2. **Exploitation Reset**
+	The instant the population registers a new best fitness, the stagnation counter resets to zero, and the controller immediately reverts the mutation rate to the baseline. This prevents the controller from continuing to force exploration after the algorithm has already broken free.
+
+3. **Linear Decay of Local Search Probability**
+	The probability of triggering a local search mutation decays linearly across generations:
+
+	$$P_{local}(g) = P_{min} + (P_{max} - P_{min}) \times \left(1 - \frac{g}{G_{max}}\right)$$
+
+	Early generations apply heavy local search to rapidly improve raw candidate routes. Later generations reduce this to prevent the local search operators from destroying topologies that the algorithm has already refined.
+
+4. **Dynamic Radius Tightening**
+	The `intensity` parameter, which controls the spatial aggressiveness of the local search operators (window sizes, detour lengths), follows the same linear decay formula. Early generations cast a wide net. Late generations make small, surgical adjustments.
+
+### On-Adaptive-Parameter-Control
+
+The theoretical foundation for dynamic mutation scaling is established by Eiben, Hinterding, and Michalewicz (1999)[^26]. Their seminal survey on parameter control in evolutionary algorithms formally categorizes three control strategies: deterministic (fixed schedule), adaptive (feedback-driven), and self-adaptive (encoded in the chromosome). Our controller implements the _adaptive_ strategy, using population stagnation as the feedback signal. Eiben et al. explicitly identify stagnation-driven mutation scaling as one of the most effective adaptive mechanisms for escaping local optima in combinatorial optimization.
+
+The decision to use quadratic rather than linear scaling is a refinement on the standard approach. Linear scaling applies uniform pressure across the entire stagnation window, which means the algorithm pays the same exploration cost at stagnation count 1 (where natural escape is still likely) as at stagnation count $S_{limit} - 1$ (where aggressive intervention is required). Quadratic scaling front-loads patience and back-loads force, which better matches the empirical observation that most local optima traps resolve naturally within the first few stagnant generations.
+
+___
+## MemeticEngine
+
+### Logic
+
+The `MemeticEngine` is the computational core that connects the algorithmic primitives ([Pheromone](#Pheromone), [LocalSearch](#LocalSearch), [Genetic](#Genetic)) into a single executable generational pipeline. Without this module, the `MemeticAlgorithm` class knows _how_ to cross over and mutate, but has no concept of populations, generations, elitism, or tournament selection. The engine provides the structural loop that turns individual genetic operations into an evolutionary search.
+
+### Implementation
+
+1. **Engine Initialization**
+	The engine is constructed with the immutable `ExperimentConfig`, the active `CityGraph`, and an optional `DirectDemandSampler`. It internally instantiates the `ACOLocalSearch` operator suite (with probabilities loaded from the config) and the `MemeticAlgorithm` coordinator.
+
+2. **Population Initialization (`initialize_state`)**
+	The engine generates the initial population of `Chromosome` objects. For each chromosome in `n_population`:
+	- A `RouteGenerator` synthesizes `num_routes` candidate transit loops from the demand distribution.
+	- A **fresh, decoupled** `PheromoneMatrix` is instantiated exclusively for that chromosome. This is a critical design decision explained under [On-Decoupled-Pheromone-Initialization](#On-Decoupled-Pheromone-Initialization).
+	- The chromosome is immediately evaluated via `evaluate_chromosome` to compute its initial surrogate cost.
+	The population is sorted by cost, and the fittest chromosome's pheromone matrix is promoted to the master state.
+
+3. **Generational Step (`step_generation`)**
+	Each call to `step_generation` advances the population by one evolutionary cycle. The pipeline executes in strict sequential order:
+
+	- **Elitism:** The top $n_{elite}$ chromosomes are copied directly into the next generation without modification.
+	- **Tournament Selection:** For each remaining slot, $k$ chromosomes are sampled uniformly from the current population. The two fittest become Parent A and Parent B.
+	- **Topological Hub Crossover:** The engine calls `crossover_topological_hub(parent_a, parent_b)` to generate the offspring's route set.
+	- **Epigenetic Pheromone Inheritance:** The engine calls `inherit_pheromones(parent_a, parent_b)` to blend the parents' demand memory.
+	- **Surrogate Evaluation:** The offspring is immediately evaluated to compute its baseline cost.
+	- **Lamarckian Mutation Gate:** If a random draw falls below the current mutation rate, the engine triggers `apply_lamarckian_mutation`. The local search operators physically modify the offspring's routes. If the resulting cost is lower than the parent's cost, the mutation is accepted. Otherwise, the original routes are restored.
+	- **State Update:** The new population is sorted. If the best cost improved, the stagnation counter resets. Otherwise, it increments.
+
+### On-Decoupled-Pheromone-Initialization
+
+Each chromosome in the initial population receives its own independent `PheromoneMatrix` rather than sharing a single global matrix. This is not a memory optimization — it is an architectural requirement.
+
+If all chromosomes shared one pheromone matrix, the evaporation and deposition operations performed during the evaluation of one chromosome would contaminate the demand signal used to evaluate the next. Because the `evaluate_chromosome` override (see [Optimizer](#Optimizer)) performs pheromone updates as part of evaluation, sharing a matrix would create an order-dependent bias: chromosomes evaluated later would inherit the accumulated demand artifacts of chromosomes evaluated earlier.
+
+By decoupling the matrices, each chromosome maintains a private demand map that reflects exclusively its own route topology and evaluated passenger journeys. When two chromosomes are selected for crossover, their private matrices are blended via `inherit_pheromones`, creating a child matrix that is a mathematically weighted fusion of two independently evolved demand surfaces. This preserves the integrity of the epigenetic inheritance mechanism described under [Genetic](#Genetic).
+
+### On-Generational-Pipeline-Order
+
+The strict ordering of operations within `step_generation` is not arbitrary:
+
+1. **Elitism first** guarantees that the best-known solution is never lost, even if every crossover and mutation in that generation produces worse offspring. This monotonic guarantee is a foundational requirement of elitist genetic algorithms [^27].
+
+2. **Evaluation before mutation** establishes the offspring's baseline cost. This baseline becomes the Lamarckian acceptance threshold. Without it, there is no reference point to determine whether a mutation improved or degraded the offspring.
+
+3. **Mutation last** ensures that the local search operators act on a fully formed, evaluated chromosome with a populated pheromone matrix. The operators depend on demand-service gaps, which require an evaluated pheromone state to compute.
+
+___
+## StatePreservationEngine
+
+### Logic
+
+Evolutionary optimization runs are computationally expensive. A single Iligan City optimization at 30 generations with 10 chromosomes per population requires building and evaluating hundreds of candidate transit networks. If the process is interrupted — whether by a power failure, a manual stop, or a system crash — all generational progress is lost unless the state has been serialized to disk.
+
+The `StatePreservationEngine` handles this serialization with two guarantees: **atomicity** (a checkpoint file is never left in a partially written, corrupted state) and **deterministic replay** (a resumed run produces the exact same results as if it had never been interrupted).
+
+### Implementation
+
+1. **Checkpoint Serialization**
+	The `save_state` method serializes the entire `OptimizationState` (population, pheromone matrices, generation counter, stagnation counter, best fitness, and random state) into a Python pickle file indexed by generation number (`state_gen_{G}.pkl`).
+
+2. **Atomic Write Pattern**
+	The serialization writes to a temporary `.tmp` file first and only renames it to the final `.pkl` extension after the write completes successfully. If the process crashes mid-write, the `.tmp` file is discarded on the next run, and the previous valid checkpoint remains intact. This prevents the framework from ever loading a partially written, corrupted state file.
+
+3. **Deterministic State Capture**
+	Before serialization, the engine captures the Python pseudorandom number generator state via `random.getstate()` and stores it inside the `OptimizationState`. On resume, the `Optimizer` restores this exact state via `random.setstate()` _after_ all deterministic infrastructure (the `CityGraph`, `DirectDemandSampler`, and `MemeticEngine`) has been initialized. This ordering is critical: if `setstate()` were called before infrastructure initialization, any random calls during setup would consume random numbers that were intended for the evolutionary search.
+
+### OptimizerBuilder
+
+The `OptimizerBuilder` is a static factory class responsible for constructing isolated run environments:
+
+- **`build_new_run`** creates a timestamped output directory under the configured `output_root` and copies the source YAML configuration file into it. This copy serves as a permanent, immutable record of the exact parameter set used for that experiment.
+- **`resume_run`** locates the most recent valid checkpoint in an existing run directory, deserializes it, and reconstructs the `ExperimentConfig` from the stored YAML copy.
+
+### On-Deterministic-Replay
+
+Reproducibility in stochastic optimization is not optional — it is a scientific requirement. Two researchers running the same configuration on the same machine must produce identical results. The framework achieves this by capturing and restoring the pseudorandom state at every checkpoint boundary.
+
+However, deterministic replay is fragile. It requires that the sequence of random number calls between the checkpoint and the next evolutionary step is identical on resume. If any module consumes random numbers during initialization (e.g., building a KDTree with random sampling), those calls must occur _before_ the captured state is restored. The `Optimizer` enforces this by calling `random.setstate()` strictly after `_init_engines()` completes, ensuring the random sequence for the evolutionary search is mathematically identical to the sequence that would have occurred without interruption.
+
+___
+## TelemetryEngine
+
+### Logic
+
+Evolutionary algorithms are opaque by default. A standard GA reports only the final best solution. But in a thesis defense, you must explain _how_ the algorithm arrived at that solution: which generations showed improvement, when stagnation occurred, which parent chromosomes produced the best offspring, and how the demand surface evolved across the search.
+
+The `TelemetryEngine` makes the search transparent by logging three parallel data streams at configurable intervals throughout the optimization.
+
+### Implementation
+
+1. **Generational Metrics (`history.csv`)**
+	Each logged generation appends a row containing: generation index, global best cost, population mean cost, active mutation rate, and stagnation counter. This provides the raw data for convergence plots in the results chapter.
+
+2. **Lineage Tracking (`lineage.csv`)**
+	Every chromosome in every generation is logged with: its unique ID, birth generation, fitness cost, and the UIDs of both parents. This creates a complete genealogical record. You can trace any chromosome in the final population back through its entire ancestral chain to the initial random population.
+
+3. **JSON Network Snapshots**
+	At each telemetry interval, the engine exports a high-fidelity JSON payload containing:
+	- The best chromosome's route geometries (lat/lon coordinate sequences).
+	- The pheromone intensity values for all edges above a configurable threshold.
+	- The demand-service gap chokepoints (nodes with high positive gap values).
+	- The topological hub coordinates (the node with the highest accumulated pheromone demand).
+	- Population-level fitness distributions and unserved demand proxy values.
+
+	These snapshots are designed for external GIS visualization clients. A downstream dashboard can consume the JSON sequence to render an animated visualization of the optimization's spatial evolution.
+
+### On-Lineage-Tracking
+
+Standard fitness convergence curves show _what_ happened. Lineage tracking shows _why_. If Generation 15 shows a sudden fitness improvement, the lineage CSV identifies exactly which two parents crossed over to produce that breakthrough chromosome. If the best solution at Generation 30 shares 80% of its edges with the best solution at Generation 5, the lineage trace proves that the algorithm preserved a high-quality trunk structure across 25 generations of crossover and mutation.
+
+This data is also critical for validating the [Topological Hub Crossover](#Genetic). If the crossover operator is working correctly, the lineage should show that fitter parents disproportionately contribute trunk routes to their offspring. If fitter and weaker parents contribute equally, the hub extraction is failing to identify the correct high-demand corridors.
+
+___
+## Optimizer
+
+### Logic
+
+The `Optimizer` is the user-facing master orchestrator. Every module documented in this guide — the `CityGraph`, the `DirectDemandSampler`, the `TravelGraph`, the `MemeticEngine`, the `StatePreservationEngine`, the `TelemetryEngine`, and the `AdaptiveController` — is instantiated, wired, and executed by this single class. It is the entry point for running the optimization and the exit point for extracting results.
+
+### Implementation
+
+1. **Unified Infrastructure Initialization (`_init_engines`)**
+	The optimizer loads the stored YAML configuration, detects the city topology (OSM real-city vs. synthetic toy grid), and constructs the complete spatial stack: `CityGraph`, `DirectDemandSampler`, `MemeticEngine`, `StaticSurrogateEvaluator`, `StatePreservationEngine`, `TelemetryEngine`, and `AdaptiveController`.
+
+2. **Custom Evaluate Override**
+	After initialization, the optimizer replaces the `MemeticAlgorithm`'s default `evaluate_chromosome` method with a custom function that fuses three operations into a single evaluation pass:
+
+	- **Surrogate Cost Computation:** The `StaticSurrogateEvaluator` computes the multi-modal A* routing cost for a fixed set of pre-sampled Origin-Destination pairs against the candidate's route topology.
+	- **Pheromone Lifecycle:** The evaluated passenger paths are used to perform a full evaporation-deposition cycle on the chromosome's private `PheromoneMatrix`.
+	- **Gap Recalculation:** The chromosome's demand-service gaps are recomputed against its updated route system, preparing the spatial intelligence required by the next generation's local search operators.
+
+	This fusion is a critical optimization. Without it, these three operations would require separate passes over the route topology, tripling the computational overhead per evaluation.
+
+3. **The Main Search Loop (`start`)**
+	The `start` method executes the evolutionary search. On each generation, it:
+	- Queries the `AdaptiveController` for the current local search probability and intensity.
+	- Boosts the mutation rate if stagnation is active.
+	- Advances the population via `engine.step_generation`.
+	- Logs lineage data via the `TelemetryEngine`.
+	- Evaluates multi-dimensional convergence criteria (see [On-Multi-Dimensional-Convergence](#On-Multi-Dimensional-Convergence)).
+	- Periodically exports telemetry snapshots and serializes checkpoints.
+
+4. **State Reconstruction on Resume**
+	When an `Optimizer` is instantiated from an existing run directory, the `_reconstruct_state_references` method rebuilds the object references that were lost during pickle serialization. Route paths are re-linked to the live `CityGraph` edge objects. Pheromone matrices are re-wired to their representative edge objects. This reconstruction is necessary because Python's `pickle` serializes object state but cannot preserve cross-module object identity.
+
+### On-Unified-Evaluate-Gate
+
+The decision to override `evaluate_chromosome` with a unified custom function is an architectural choice motivated by the interaction between the surrogate evaluator and the pheromone system.
+
+In a naive implementation, evaluation and pheromone updates would be separate operations. The engine would evaluate a chromosome, then separately trigger pheromone evaporation and deposition. This separation creates a timing hazard: between evaluation and pheromone update, the chromosome's demand-service gaps are stale. If the Lamarckian mutation gate triggers in this window, the local search operators would read outdated gap data, potentially directing route mutations toward corridors that are no longer underserved.
+
+By fusing evaluation, pheromone lifecycle, and gap recalculation into a single atomic operation, the framework guarantees that every chromosome's spatial intelligence is temporally consistent at the exact moment mutation decisions are made.
+
+### On-Multi-Dimensional-Convergence
+
+The standard termination criterion for evolutionary algorithms is a stagnation limit: if the best fitness does not improve for $N$ consecutive generations, the search halts. This catches the case where the algorithm is stuck in a local optimum. However, it misses a subtler failure mode: _phenotypic convergence without fitness convergence_.
+
+Consider a population where all chromosomes have slightly different costs but their route topologies are structurally identical. The fitness variance is non-zero (the algorithm appears to still be searching), but the genotypic diversity has collapsed. Every crossover produces an offspring that looks like its parents because there is no structural variation left to recombine.
+
+To detect this, the optimizer computes two independent convergence metrics:
+
+1. **Elite Jaccard Similarity:** The top 10% of the population (ranked by cost) are selected. For every pair of elites, the Jaccard similarity of their route edge sets is calculated:
+
+	$$J(A, B) = \frac{|E_A \cap E_B|}{|E_A \cup E_B|}$$
+
+	If the average pairwise Jaccard remains $\geq 0.95$ for a configurable number of consecutive generations (`jaccard_patience`), the optimizer terminates due to phenotypic saturation. This threshold indicates that the elite chromosomes share 95% or more of their topological structure — further crossover cannot meaningfully recombine them [^27].
+
+2. **Fitness Variance:** If the population fitness variance falls below $10^{-6}$, the optimizer terminates due to genotypic convergence. At this point, the cost differences between chromosomes are negligible, and the algorithm has exhausted its ability to differentiate solutions.
+
+By monitoring both structural topology and fitness distribution, the optimizer terminates efficiently regardless of which convergence failure mode occurs first.
+
+### On-Fail-Safe-State-Preservation
+
+The search loop is wrapped in a `try/except KeyboardInterrupt/finally` block. If the user manually interrupts execution (Ctrl+C), the `finally` clause triggers an immediate state checkpoint via the `StatePreservationEngine`. This guarantees that no generational progress is lost, even on forced termination. The optimizer reports the save location and exits cleanly.
+
+**TODO:** The current stagnation limit and Jaccard patience values are configured but not empirically justified. We need to run ablation experiments to determine the optimal convergence thresholds for the Iligan City network topology.
+
+**TODO:** Profile the computational overhead of the unified evaluate gate versus a separated evaluation-then-pheromone pipeline to empirically confirm the performance benefit.
+___
 # YAML-Configs
+
+The optimization framework is configured exclusively through structured YAML files. No hyperparameter, penalty weight, or simulation constraint is hardcoded in the source. This section documents the configuration philosophy and the rationale behind the parameter groupings.
+
+### Configuration Philosophy
+
+Every optimization run copies its source YAML file into the run's output directory at initialization. This means every result in the `outputs/` folder carries a permanent, immutable record of the exact configuration that produced it. You can reproduce any experiment by pointing the `OptimizerBuilder` at the stored YAML copy.
+
+### Parameter Groups
+
+**City Graph**
+Defines the spatial domain: bounding box coordinates, PBF file path, cache prefix, and optional named landmarks. The bounding box `[8.1500, 8.3300, 124.1500, 124.4000]` was selected to enclose all currently active Iligan City jeepney routes and terminal nodes, ensuring geographic parity with the existing transit system.
+
+**Direct Demand Model**
+Controls the demand surface synthesis. The `alpha` and `beta` coefficients weight the fusion of live traffic data and structural centrality respectively. The current split ($\alpha = 0.6$, $\beta = 0.4$) is justified by Ramos-Santiago's finding that local activity indicators exert a statistically heavier pull on ridership generation than pure geometric network location.
+
+**Travel Graph Weights**
+Defines the generalized cost penalties for each transition type in the multi-modal A* pathfinding. `walk_wt` and `ride_wt` are per-meter distance costs. `wait_wt` and `transfer_wt` are fixed penalties applied once per boarding and once per vehicle transfer, respectively. These penalties encode the behavioral friction that forces the pathfinding algorithm to prefer direct routes over multi-transfer journeys.
+
+**Simulation Parameters**
+Configures the agent-based simulation: vehicle capacity, tick granularity, speeds, fleet size, and passenger spawn rates. All numerical values are annotated with their empirical sources directly in the YAML comments (JICA congestion studies for vehicle speed, UP Diliman NCTS benchmarks for pedestrian speed, Iligan population statistics for spawn rates).
+
+**Optimization Parameters**
+Governs the evolutionary search: population size, generation limit, stagnation threshold, elitism count, tournament size, mutation rate, crossover coefficient, Jaccard patience, pheromone initialization/evaporation/deposition constants, local search operator probabilities, and system cost penalty weights.
+
+### Current Limitation
+
+The optimization parameters (lines 63–87 of `iligan_configs.yaml`) carry an explicit `[TODO] RESEARCH AND JUSTIFY THESE VALUES` comment. The current values are engineering defaults selected for computational tractability. A formal hyperparameter sensitivity analysis is required to justify these choices for the thesis.
 
 ___
 # References
@@ -704,3 +1007,5 @@ ___
 [^23]: Gschwender, A., Jara-Díaz, S., & Bravo, C. (2016). Feeder-trunk or direct lines? Economies of density, transfer costs and transit structure in an urban context. _Transportation Research Part A: Policy and Practice_, _88_, 209-222.
 [^24]: Risso, C., Nesmachnow, S., & Faller, G. (2023). Optimized design of a backbone network for public transportation in Montevideo, Uruguay. _Sustainability_, _15_(23), 16402.
 [^25]: Middendorf, M., Reischle, F., & Schmeck, H. (2002). Multi colony ant algorithms. _Journal of Heuristics_, _8_(3), 305-320.
+[^26]: Eiben, Á. E., Hinterding, R., & Michalewicz, Z. (1999). Parameter control in evolutionary algorithms. IEEE Transactions on evolutionary computation, 3(2), 124-141.
+[^27]: Sastry, K., Goldberg, D. E., & Kendall, G. (2013). Genetic algorithms. In Search methodologies: Introductory tutorials in optimization and decision support techniques (pp. 93-117). Boston, MA: Springer US.
