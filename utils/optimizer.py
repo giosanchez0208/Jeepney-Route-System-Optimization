@@ -15,7 +15,7 @@ from .optimizer_orchestrator_io import OptimizerBuilder, StatePreservationEngine
 from .optimizer_telemetry import TelemetryEngine
 from .optimizer_adaptive import AdaptiveController
 from .optimizer_engine import MemeticEngine
-from .simulation import StaticSurrogateEvaluator
+from .simulation import SimulationEvaluator, StaticSurrogateEvaluator
 
 class Optimizer:
     def __init__(self, run_dir: Path):
@@ -109,24 +109,23 @@ class Optimizer:
 
         self.engine = MemeticEngine(self.config, self.cg, self.sampler)
         
-        # Instantiate high-fidelity StaticSurrogateEvaluator to compute real travel-time costs
+        # Instantiate the full fitness evaluator for GA scoring.
+        self.fitness = SimulationEvaluator(
+            config=self.raw_config,
+            city_graph=self.cg,
+            travel_graph=None,
+            demand_sampler=self.sampler
+        )
+
+        # Instantiate the static surrogate for local-search mutation checks only.
         self.surrogate = StaticSurrogateEvaluator(
             config=self.raw_config,
             city_graph=self.cg,
             demand_sampler=self.sampler,
             num_samples=100
         )
-        # Dynamic override to resolve evaluate_chromosome logic-only mismatch during metaheuristic search
-        def custom_evaluate(chrom, fleet):
-            sim_result = self.surrogate.evaluate(chrom.routes)
-            chrom.cost = sim_result.fitness_score
-            # Perform high-fidelity pheromone updates: evaporate and deposit along evaluated passenger paths
-            chrom.pheromones.update_pheromones(sim_result)
-            # Recalculate demand service gaps for the chromosome's routes to guide next generation's local search
-            chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
-            return chrom.cost
-
-        self.engine.algo.evaluate_chromosome = custom_evaluate
+        self.engine.algo.set_fitness_evaluator(self.fitness)
+        self.engine.algo.set_surrogate_evaluator(self.surrogate)
 
         self.preservation = StatePreservationEngine(self.run_dir)
         self.telemetry = TelemetryEngine(self.run_dir, self.config.city_bounds)

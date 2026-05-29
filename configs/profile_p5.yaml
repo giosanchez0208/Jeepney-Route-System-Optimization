@@ -61,3 +61,8 @@ optimization:
   default_jeep_weight: 1.0
   alpha_std_penalty: 0.5
   beta_penalty: 2.0
+
+surrogate:
+  transfer_multiplier: 2.5
+  unreachable_penalty: 100000.0
+  num_samples: 100

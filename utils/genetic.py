@@ -14,7 +14,6 @@ from typing import Any, Optional
 from .route import Route
 from .pheromone import PheromoneMatrix
 from .local_search import ACOLocalSearch
-from .jeep_system import FleetAllocator
 
 
 class Chromosome:
@@ -43,7 +42,7 @@ class Chromosome:
         self.cost: float = 0.0
 
     def __str__(self) -> str:
-        return f"Chromosome(uid={self.uid}, generation={self.generation}, cost={self.cost:.2f}, routes={len(self.routes)})"
+        return f"Chromosome(uid={self.uid}, generation={self.generation}, fitness={self.cost:.2f}, routes={len(self.routes)})"
 
 
 class MemeticAlgorithm:
@@ -61,6 +60,14 @@ class MemeticAlgorithm:
         self.local_search: ACOLocalSearch = local_search
         self.target_route_count: int = target_route_count
         self.verbose: bool = verbose
+        self.fitness_evaluator: Any = None
+        self.surrogate_evaluator: Any = None
+
+    def set_fitness_evaluator(self, evaluator: Any) -> None:
+        self.fitness_evaluator = evaluator
+
+    def set_surrogate_evaluator(self, evaluator: Any) -> None:
+        self.surrogate_evaluator = evaluator
 
     def __str__(self) -> str:
         return f"MemeticAlgorithm(target_route_count={self.target_route_count}, verbose={self.verbose})"
@@ -195,49 +202,54 @@ class MemeticAlgorithm:
 
     def evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float:
         """
-        Evaluates the chromosome's total system cost using a surrogate model.
+        Evaluates the chromosome with the microscopic fitness objective.
 
-        Academic Rationale (Surrogate Heuristic vs Full Simulation):
-        Evaluating every candidate solution by running a full agent-based simulation is computationally 
-        catastrophic (requiring O(N_pop * N_pass * |V| log |V|) complexity). 
-        To bypass this computational bottleneck, we implement a mathematical surrogate model 
-        using FleetAllocator and Mohring fractions to estimate system cost in O(1) heuristic time 
-        for the evolutionary loop, reserving the heavy agent-based simulation strictly for 
-        the final validation of the optimized routes. This is a standard and highly defensible 
-        practice in combinatorial optimization.
+        The GA path must use the full fitness score so selection, elitism, and
+        replacement all operate on the same objective. Surrogate scores are
+        reserved for local-search mutation checks only.
         """
         if chrom is None:
             raise ValueError("[MEMETIC ALGO] Chromosome cannot be None.")
         if total_fleet <= 0:
             raise ValueError(f"[MEMETIC ALGO] Total fleet must be positive, got {total_fleet}.")
 
-        allocation = FleetAllocator.allocate_by_mohring(total_fleet, chrom.routes, chrom.pheromones, self.cg)
-        report = FleetAllocator.evaluate_allocation(allocation, chrom.pheromones)
+        if self.fitness_evaluator is None:
+            raise RuntimeError("[MEMETIC ALGO] Fitness evaluator has not been configured.")
 
-        system_cost: float = 0.0
-        for r_data in report.values():
-            if r_data["jeeps"] > 0:
-                system_cost += (r_data["headway"] * 0.4) + (r_data["length"] * 0.6)
-            else:
-                system_cost += 10000.0
-        chrom.allocation = allocation
-        chrom.cost = system_cost
-        return system_cost
+        sim_result = self.fitness_evaluator.evaluate(chrom.routes)
+        if sim_result.fitness_score is None:
+            raise ValueError("[MEMETIC ALGO] Fitness evaluator did not return a fitness score.")
 
-    def apply_lamarckian_mutation(self, child: Chromosome, target_cost: float, total_fleet: int, intensity: float = 1.0) -> bool:
+        chrom.cost = sim_result.fitness_score
+        chrom.pheromones.update_pheromones(sim_result)
+        chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
+        return chrom.cost
+
+    def _evaluate_surrogate_cost(self, routes: list[Route]) -> float:
+        if self.surrogate_evaluator is None:
+            raise RuntimeError("[MEMETIC ALGO] Surrogate evaluator has not been configured.")
+
+        sim_result = self.surrogate_evaluator.evaluate(routes)
+        if sim_result.surrogate_cost is None:
+            raise ValueError("[MEMETIC ALGO] Surrogate evaluator did not return a surrogate cost.")
+        return sim_result.surrogate_cost
+
+    def apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool:
         if child is None:
             raise ValueError("[MEMETIC ALGO] Child chromosome cannot be None.")
 
         original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
-        
+
+        baseline_surrogate = self._evaluate_surrogate_cost(child.routes)
         child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
         self.local_search.optimize_system(child.routes, child.pheromones, intensity=intensity)
-        
-        hard_cost: float = self.evaluate_chromosome(child, total_fleet)
 
-        if hard_cost < target_cost:
+        mutated_surrogate = self._evaluate_surrogate_cost(child.routes)
+
+        if mutated_surrogate < baseline_surrogate:
+            self.evaluate_chromosome(child, total_fleet)
             return True
 
         child.routes = original_routes_backup
-        self.evaluate_chromosome(child, total_fleet)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
         return False

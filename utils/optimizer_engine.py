@@ -102,7 +102,7 @@ class MemeticEngine:
             self.algo.evaluate_chromosome(child, target_fleet)
             
             if random.random() < current_mutation_rate:
-                self.algo.apply_lamarckian_mutation(child, parent_a.cost, target_fleet, intensity=intensity)
+                self.algo.apply_lamarckian_mutation(child, target_fleet, intensity=intensity)
                 
             next_gen.append(child)
 
