@@ -497,9 +497,9 @@ Errors:
 `ACOLocalSearch` is the optimization engine that mutates routes to improve coverage, directness, and efficiency.
 
 - Coordinates spatial route mutation strategies to continuously optimize network performance.
-- Implements **Spatial Attraction** to splice detours toward underserved high-demand corridors.
-- Implements **Redundancy Repulsion** to excise overlapping pathways in overserved areas.
-- Implements **Tortuosity Pruning** to bypass geometric "wiggles" with straight-line shortest-path segments.
+- Implements **Demand-Driven Attraction (Or-opt Segment Transplant)** to splice detours toward underserved high-demand corridors without destroying topological validity.
+- Implements **Redundancy Repulsion (2-opt Segment Reversal)** to execute localized geometric detours that excise overlapping pathways in overserved areas without polluting global graph weights.
+- Implements **Demand-Aware Tortuosity Pruning (Node Deletion & Circuity Reduction)** using true $A^*$ geometric tortuosity ratios ($\kappa$) to bypass geometric "wiggles" with straight-line shortest-path segments.
 
 Why it matters:
 
@@ -690,7 +690,7 @@ This notebook extends the core workflow into the simulation stack.
 This notebook serves as the reasoning log, validation harness, and high-performance visual diagnostic for the genetic optimization's local search mutation operators (`ACOLocalSearch`).
 
 - Features an advanced, light-themed $3 \times 3$ operator showcase dashboard.
-- Validates the three primary mutation operators (Spatial Attraction, Redundancy Repulsion, and Tortuosity Pruning) using targeted candidate searches that guarantee organic triggers.
+- Validates the three primary mutation operators (Demand-Driven Attraction, Redundancy Repulsion, and Tortuosity Pruning) using targeted candidate searches that guarantee organic triggers.
 - Quantifies performance shifts across baseline and mutated systems using both the static surrogate evaluator and full transit simulation runs.
 - Implements prioritized drawing overlays where the mutated route is colored in bold red and drawn last on top of muted slate-gray unmutated background routes.
 

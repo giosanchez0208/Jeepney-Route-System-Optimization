@@ -1,0 +1,50 @@
+
+	    
+	- A **negative gap** indicates an over-served corridor.
+	    
+    This metric is cached and directly utilized by the GA operators to intelligently guide spatial mutation. By tracking both positive and negative values, the framework generates a comprehensive topological map of service disparities across the city. The GA uses this full spectrum to dynamically adjust mutation parameters (Eiben et al., 1999). It mathematically biases the algorithm to pull route topologies away from heavily negative, over-served regions and push them toward highly positive, underserved corridors. Once the physical routes are spatially balanced by this push and pull dynamic, the framework defers the actual vehicle volume distribution to the `FleetAllocator` utilizing the Mohring allocation.
+
+___
+## LocalSearch 
+(The Lamarckian Mutation Part)
+### Logic
+
+The `ACOLocalSearch` module functions as the active mutation engine of the framework. Rather than relying on stochastic Darwinian mutation, the framework deploys three targeted Lamarckian operators. These operators read the Demand-Service Gaps mapped by the `PheromoneMatrix` and actively modify the topological structure of the candidate routes before they are evaluated. By allowing candidate solutions to learn from environmental feedback and pass those improvements to the next generation, the algorithm operates as a highly efficient Memetic Algorithm.
+
+### 1. Demand-Driven Attraction (Or-opt Segment Transplant)
+
+**Academic Justification:** In TRNDP metaheuristics, transit networks must constantly adapt to capture unmet passenger demand. Much like Baaj and Mahmassani [^18]  did in their Route Generation Algorithm by employing specific "node selection and insertion strategies" to connect high-demand pairs, this framework utilizes a Demand-Driven Attraction mechanism. Kepaptsoglou and Karlaftis [^19] explicitly noted in their comprehensive review that demand-guided node addition is a primary heuristic for capturing unserved market share.
+
+**Implementation Strategy:**
+
+This operator identifies contiguous route segments operating on low-demand corridors and mathematically transplants them toward high Demand-Service Gap clusters. By utilizing a continuous Or-opt routing mechanic, the algorithm physically detaches a poorly performing sequence of edges and stitches it directly across underserved nodes. This cleanly pulls the route into high-demand areas, effectively capturing massive unmet transit demand while rigorously preserving the structural validity of the topological loop.
+
+### 2. Redundancy Repulsion (2-opt Segment Reversal)
+
+**Academic Justification:** Operator viability requires minimizing redundant vehicle kilometers. Fan and Machemehl [^21] explicitly modeled the Transit Route Network Design Problem to balance user costs against operator costs and the penalties. Kepaptsoglou and Karlaftis [^19] reviewed several models that deliberately constrained route overlap to maximize spatial coverage and disperse fleet resources efficiently. Moving a highly useful route segment away from a low-served area provides no mathematical benefit, but if multiple routes share the same highly served segment, they create fleet redundancy.
+
+**Implementation Strategy:**
+
+The repulsion operator identifies segments where multiple routes overlap redundantly across a negative-gap (overserved) corridor. Instead of globally penalizing the graph weights, it executes a localized 2-opt geometric reversal. 
+
+- **Constrained 2-opt Detour:** The algorithm geometrically slices the redundant sequence and actively reroutes the connection around the congested zone via a parallel detour. This organically disperses the overlapping routes, maximizing spatial coverage without polluting the globally shared `TravelGraph` with artificial edge weights.
+
+### 3. Demand-Aware Tortuosity Pruning (Node Deletion & Circuity Reduction)
+
+**Academic Justification:** A robust public transit network relies on directness of service. Ceder and Wilson [^20] established that minimizing the difference between indirect and direct passenger-hours (a concept known as circuity or tortuosity) is critical for effective bus network design. To combat tortuosity, Baaj and Mahmassani [^18] incorporated route improvement algorithms specifically designed to fix inefficiencies and ensure directness of service.
+
+**Implementation Strategy:**
+
+This operator identifies segments that meander inefficiently between high-demand hubs. It amputates the detour and bridges the gap using a strict A* shortest-path calculation on the base `CityGraph`.
+
+The mathematical robustness of this operator relies on two critical safeguards:
+
+- **True Geometric Tortuosity ($\kappa$):** The algorithm computes true geometric circuity by explicitly dividing the length of the traversed path by the theoretical shortest A* path between the segment endpoints ($\kappa = L_{path} / L_{direct}$). By separating this pure geometric ratio from the pheromone utility score (used only as a tiebreaker), the operator correctly targets genuinely meandering, tortuous loops rather than simply amputating straight, low-demand edges.
+    
+- **Gap Immunity:** Without intervention, a pruning function would naturally target the exact detours created by the Attraction operator. By granting algorithmic immunity to any segment containing a positive-gap (underserved) edge, the framework ensures the node insertion and node deletion operators remain mathematically orthogonal, working in tandem rather than in opposition.
+
+**TODO:** Generate a map visualization showing the step-by-step execution of the "cheapest-insertion cost scoring" to demonstrate exactly how the route bends toward a demand hotspot.
+    
+**TODO:** Provide a statistical breakdown of route lengths before and after the pruning operator is applied to empirically validate the reduction in tortuosity as defined by Ceder and Wilson.
+
+___

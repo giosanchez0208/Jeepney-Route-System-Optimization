@@ -417,7 +417,7 @@ from utils.local_search import ACOLocalSearch
 
 # pwede rani kwaon
 try:
-    engine = ACOLocalSearch(cg=city, p_local=1.0, base_window_size=15)
+    engine = ACOLocalSearch(cg=city, p_attraction=1.0, p_repulsion=1.0, p_pruning=1.0, base_window_size=15)
     print("Success:", engine)
 except Exception as e:
     print(f"{type(e).__name__}: {e}")
@@ -434,7 +434,7 @@ generator = RouteGenerator(city_graph=city, sampler=sampler, verbose=False)
     True,
     ACOLocalSearch,
     cg=city,
-    p_local=1.0,
+    p_attraction=1.0, p_repulsion=1.0, p_pruning=1.0,
     base_window_size=15
 ) """
 
@@ -591,7 +591,7 @@ for op_info in operators:
     found = False
     attempt = 0
     # Seed dynamically to maintain high diversity across operators
-    random.seed(300 + len(showcase_panels) * 100)
+    # random.seed(300 + len(showcase_panels) * 100) # Removed to allow dynamic runs
     
     while not found and attempt < 150:
         # Generate 4 initial routes
@@ -710,7 +710,7 @@ for op_info in operators:
                     font_body
                 )
                 
-                # Panel 3: Mutated Route System (Highlight mutated in RED drawn LAST)
+                # Panel 3: Mutated Route System (Highlight mutation diff)
                 panel3_img = base_map.copy()
                 
                 # Step 1: Draw unmutated gray routes first
@@ -722,12 +722,27 @@ for op_info in operators:
                 if rs_unmutated.routes:
                     panel3_img = rs_unmutated.draw(context, panel3_img, line_width=4, dash_length=0)
                     
-                # Step 2: Draw red mutated route last so it overlays perfectly on top!
-                rs_mutated = RouteSystem()
+                # Step 2: Draw the mutated route with diff colors
                 mutated_route = routes_mut[mutated_idx]
-                mutated_route.designated_color = "#ef4444"
-                rs_mutated.add_route(mutated_route)
-                panel3_img = rs_mutated.draw(context, panel3_img, line_width=4, dash_length=0)
+                orig_route = routes_init[mutated_idx]
+                
+                orig_edge_ids = {engine._edge_id(e) for e in orig_route.path}
+                mut_edge_ids = {engine._edge_id(e) for e in mutated_route.path}
+                
+                # Draw deleted edges (faint red)
+                for e in orig_route.path:
+                    if engine._edge_id(e) not in mut_edge_ids:
+                        e.draw(context, panel3_img, color="#fca5a5", width=2)
+                
+                # Draw common edges (standard blue)
+                for e in mutated_route.path:
+                    if engine._edge_id(e) in orig_edge_ids:
+                        e.draw(context, panel3_img, color="#3b82f6", width=4)
+                        
+                # Draw newly added edges (thick solid red)
+                for e in mutated_route.path:
+                    if engine._edge_id(e) not in orig_edge_ids:
+                        e.draw(context, panel3_img, color="#ef4444", width=6)
                 
                 col3_labeled = draw_panel_with_labels(
                     panel3_img,
@@ -923,7 +938,7 @@ results = {op: {n: [] for n in N_ROUTES} for op in OPERATORS}
 doc_captured = {op: False for op in OPERATORS}
 
 generator = RouteGenerator(city_graph=city, sampler=sampler, verbose=False)
-engine    = ACOLocalSearch(cg=city, p_local=1.0, base_window_size=15)
+engine    = ACOLocalSearch(cg=city, p_attraction=1.0, p_repulsion=1.0, p_pruning=1.0, base_window_size=15)
 surrogate = StaticSurrogateEvaluator(config=cfg, city_graph=city, demand_sampler=sampler, num_samples=NUM_SURROGATE_SAMPLES)
 
 for n_routes in N_ROUTES:
