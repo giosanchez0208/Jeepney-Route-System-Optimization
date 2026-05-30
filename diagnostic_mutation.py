@@ -729,20 +729,19 @@ for op_info in operators:
                 orig_edge_ids = {engine._edge_id(e) for e in orig_route.path}
                 mut_edge_ids = {engine._edge_id(e) for e in mutated_route.path}
                 
-                # Draw deleted edges (faint red)
+                # Draw the entire original route (faint red) to show where it used to be
                 for e in orig_route.path:
-                    if engine._edge_id(e) not in mut_edge_ids:
-                        e.draw(context, panel3_img, color="#fca5a5", width=2)
+                    e.draw(context, panel3_img, color="#fca5a5", width=3)
                 
-                # Draw common edges (standard blue)
+                # Draw common edges (standard blue) - slightly offset so it doesn't eclipse the original route
                 for e in mutated_route.path:
                     if engine._edge_id(e) in orig_edge_ids:
-                        e.draw(context, panel3_img, color="#3b82f6", width=4)
+                        e.draw(context, panel3_img, color="#3b82f6", width=4, offset=(3, 3))
                         
-                # Draw newly added edges (thick solid red)
+                # Draw newly added edges (thick solid red) - slightly offset
                 for e in mutated_route.path:
                     if engine._edge_id(e) not in orig_edge_ids:
-                        e.draw(context, panel3_img, color="#ef4444", width=6)
+                        e.draw(context, panel3_img, color="#ef4444", width=5, offset=(3, 3))
                 
                 col3_labeled = draw_panel_with_labels(
                     panel3_img,
