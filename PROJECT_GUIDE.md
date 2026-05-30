@@ -1,4 +1,4 @@
-﻿# Index
+# Index
 
 **Core Modules**
 - [Node](#Node)
@@ -666,25 +666,23 @@ ___
 
 The `ACOLocalSearch` module functions as the active mutation engine of the framework. Rather than relying on stochastic Darwinian mutation, the framework deploys three targeted Lamarckian operators. These operators read the Demand-Service Gaps mapped by the `PheromoneMatrix` and actively modify the topological structure of the candidate routes before they are evaluated. By allowing candidate solutions to learn from environmental feedback and pass those improvements to the next generation, the algorithm operates as a highly efficient Memetic Algorithm.
 
-### 1. Demand-Driven Attraction (Node Insertion)
+### 1. Demand-Driven Attraction (Or-opt Segment Transplant)
 
 **Academic Justification:** In TRNDP metaheuristics, transit networks must constantly adapt to capture unmet passenger demand. Much like Baaj and Mahmassani [^18]  did in their Route Generation Algorithm by employing specific "node selection and insertion strategies" to connect high-demand pairs, this framework utilizes a Demand-Driven Attraction mechanism. Kepaptsoglou and Karlaftis [^19] explicitly noted in their comprehensive review that demand-guided node addition is a primary heuristic for capturing unserved market share.
 
 **Implementation Strategy:**
 
-This operator identifies contiguous sequences of underutilized edges and computes their proximity to high Demand-Service Gap clusters. To execute this, the algorithm employs a cheapest-insertion cost scoring mechanism rather than a naive closest-edge approach. It calculates the optimal entry and exit nodes along the existing route and executes a true zero-width insertion. This mathematically bends the route toward the hotspot without destroying existing structural connectivity, completely eliminating the risk of generating inefficient hairpin detours.
+This operator identifies contiguous route segments operating on low-demand corridors and mathematically transplants them toward high Demand-Service Gap clusters. By utilizing a continuous Or-opt routing mechanic [^37], the algorithm physically detaches a poorly performing sequence of edges and stitches it directly across underserved nodes. This cleanly pulls the route into high-demand areas, effectively capturing massive unmet transit demand while rigorously preserving the structural validity of the topological loop.
 
-### 2. Oversupply Repulsion (Route Overlap Minimization)
+### 2. Redundancy Repulsion (2-opt Segment Reversal)
 
 **Academic Justification:** Operator viability requires minimizing redundant vehicle kilometers. Fan and Machemehl [^21] explicitly modeled the Transit Route Network Design Problem to balance user costs against operator costs and the penalties. Kepaptsoglou and Karlaftis [^19] reviewed several models that deliberately constrained route overlap to maximize spatial coverage and disperse fleet resources efficiently. Moving a highly useful route segment away from a low-served area provides no mathematical benefit, but if multiple routes share the same highly served segment, they create fleet redundancy.
 
 **Implementation Strategy:**
 
-The repulsion operator isolates one of the overlapping routes on a negative-gap corridor and mathematically repels it to a parallel street.
+The repulsion operator identifies segments where multiple routes overlap redundantly across a negative-gap (overserved) corridor. Instead of globally penalizing the graph weights, it executes a localized 2-opt geometric reversal [^38].
 
-- **Haversine Similarity:** To accurately identify overlapping routes on a global scale, the algorithm replaces flat Euclidean distance with the Haversine formula. This computes the true great-circle distance between route nodes, guaranteeing spatial accuracy for the similarity matrix.
-    
-- **Constrained Detour Routing:** By applying a spatial exclusion window, the algorithm forces a detour. It temporarily penalizes the overserved edges, forcing the A* search to bridge the gap via adjacent, underserved blocks, thereby maintaining general directional utility while explicitly expanding spatial coverage.
+- **Constrained 2-opt Detour:** The algorithm geometrically slices the redundant sequence and actively reroutes the connection around the congested zone via a parallel detour. This organically disperses the overlapping routes, maximizing spatial coverage without polluting the globally shared `TravelGraph` with artificial edge weights.
     
 
 ### 3. Demand-Aware Tortuosity Pruning (Node Deletion & Circuity Reduction)
@@ -697,7 +695,7 @@ This operator identifies segments that meander inefficiently between high-demand
 
 The mathematical robustness of this operator relies on two critical safeguards:
 
-- **Zero-Utility Correction:** When evaluating the passenger utility of a route segment, edges that have no recorded passenger traffic must strictly evaluate to a pheromone value of 0.0 rather than a baseline default. This ensures that unused, dead-end detours receive an infinite cost penalty, immediately flagging them as targets for algorithmic node deletion.
+- **True Geometric Tortuosity ($\kappa$):** The algorithm computes true geometric circuity by explicitly dividing the length of the traversed path by the theoretical shortest A* path between the segment endpoints ($\kappa = L_{path} / L_{direct}$). By separating this pure geometric ratio from the pheromone utility score (used only as a tiebreaker), the operator correctly targets genuinely meandering, tortuous loops rather than simply amputating straight, low-demand edges.
     
 - **Gap Immunity:** Without intervention, a pruning function would naturally target the exact detours created by the Attraction operator. By granting algorithmic immunity to any segment containing a positive-gap (underserved) edge, the framework ensures the node insertion and node deletion operators remain mathematically orthogonal, working in tandem rather than in opposition.
 
@@ -1258,3 +1256,5 @@ It is the post-run analysis layer for answering questions about the final score 
 [^34]: Welch, T. F., & Mishra, S. (2013). A measure of equity for public transit connectivity. _Journal of Transport Geography_, _33_, 29-41.
 [^35]: Jara-Díaz, S., & Gschwender, A. (2003). Towards a general microeconomic model for the operation of public transport. _Transport Reviews_, _23_(4), 453-469.
 [^36]: Iseki, H., & Taylor, B. D. (2009). Not all transfers are created equal: Towards a framework relating transfer connectivity to travel behaviour. _Transport Reviews_, _29_(6), 777-800.
+[^37]: Laporte, G., & Semet, F. (2002). Classical heuristics for the capacitated VRP. In _The vehicle routing problem_ (pp. 109-128). Society for Industrial and Applied Mathematics.
+[^38]: Ciaffi, F., Cipriani, E., & Petrelli, M. (2012). Feeder bus network design problem: A new metaheuristic procedure and real size applications. _Procedia-Social and Behavioral Sciences_, _54_, 798-807.

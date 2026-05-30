@@ -1046,9 +1046,9 @@ Applies demand-driven mutations and spatial heuristics to optimize route systems
 
 - **Attributes**
   - `cg` (CityGraph): City road network.
-  - `p_attraction` (float): Spatial attraction mutation probability.
+  - `p_attraction` (float): Demand-driven attraction mutation probability.
   - `p_repulsion` (float): Redundancy repulsion mutation probability.
-  - `p_pruning` (float): Tortuosity pruning mutation probability.
+  - `p_pruning` (float): Demand-aware tortuosity pruning mutation probability.
   - `base_window_size` (int): Window size for segment manipulation.
 
 - **Methods**
@@ -1083,15 +1083,15 @@ Applies demand-driven mutations and spatial heuristics to optimize route systems
   - `strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`
     - Parameters: Routes list, pheromones, and intensity scalar.
     - Outputs: Optional[Route].
-    - Primary Purpose: Detours routes toward underserved demand corridors (positive gap scores) using cheapest-insertion heuristics.
+    - Primary Purpose: Detours routes toward underserved demand corridors (positive gap scores) using continuous Or-opt segment transplants.
   - `strategy_redundancy_repulsion(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`
     - Parameters: Routes list, pheromones, and intensity scalar.
     - Outputs: Optional[Route].
-    - Primary Purpose: Detours routes away from overserved corridors (negative gap scores) by detouring around overserved segments.
+    - Primary Purpose: Detours routes away from overserved corridors (negative gap scores) by executing localized 2-opt geometric reversals.
   - `strategy_tortuosity_pruning(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> tuple[int, Optional[Route]]`
     - Parameters: Routes list, pheromones, and intensity.
     - Outputs: tuple of prunes count and the modified Route.
-    - Primary Purpose: Smooths out geometrically inefficient wiggles in routes, utilizing gap immunity to skip underserved segments.
+    - Primary Purpose: Smooths out geometrically inefficient wiggles in routes utilizing true $A^*$ geometric tortuosity ratios ($\kappa$) and gap immunity.
   - `optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> dict`
     - Parameters: Routes list, pheromones, and intensity.
     - Outputs: dict of actions taken.
