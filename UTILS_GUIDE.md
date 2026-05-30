@@ -777,7 +777,7 @@ Demand Sampler configuration container.
     - Primary Purpose: Instantiates the DDMConfig data container.
 
 #### DirectDemandSampler
-Models passenger demand by blending TomTom traffic flow with structural centrality.
+Models passenger demand by employing centrality-weighted spatial sampling to direct limited TomTom API queries toward the network's arterial backbone, then blending empirical and imputed traffic flows with structural centrality.
 
 - **Attributes**
   - `city` (CityGraph): City road network.
@@ -792,12 +792,12 @@ Models passenger demand by blending TomTom traffic flow with structural centrali
   - `__init__(self, city: CityGraph, config: DDMConfig, verbose: bool = False) -> None`
     - Parameters: CityGraph, configurations, and verbose mode.
     - Outputs: None.
-    - Primary Purpose: Instantiates the sampler, imputing traffic data, calculating centrality, blending weights, and building O(1) Walker's Alias tables.
+    - Primary Purpose: Instantiates the sampler using Efraimidis & Spirakis weighted sampling to select high-centrality nodes, queries TomTom API for those nodes, imputes remaining traffic via IDW anchored to arterials, calculates centrality, blends weights, and builds O(1) Walker's Alias tables.
   - `_impute_missing_traffic(self, traffic_data: dict) -> dict[Node, float]`
     - Parameters:
-      - `traffic_data` (dict): Raw traffic flow data.
-    - Outputs: dict mapping Node to flow value.
-    - Primary Purpose: Internal helper using Inverse Distance Weighting (IDW) to impute missing TomTom traffic flows.
+      - `traffic_data` (dict): Raw traffic flow data from sampled nodes.
+    - Outputs: dict mapping Node to imputed traffic weight.
+    - Primary Purpose: Internal helper using Inverse Distance Weighting (IDW) with Haversine distance to impute missing TomTom traffic flows. Because known data points are concentrated on arterials (due to centrality-weighted sampling), the interpolation naturally mirrors real-world traffic diffusion from major corridors to local streets.
   - `_build_alias_tables(self, raw_probs: list[float]) -> None`
     - Parameters:
       - `raw_probs` (list[float]): Raw demand scores.

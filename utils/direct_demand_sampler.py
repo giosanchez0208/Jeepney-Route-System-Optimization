@@ -326,9 +326,20 @@ class DirectDemandSampler:
             return self.node_list
             
         if self.verbose:
-            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} random target nodes for API queries.")
+            print(f"[DIRECT DEMAND] Selecting {self.api_sample_limit} target nodes using centrality-weighted sampling.")
             
-        return random.sample(self.node_list, self.api_sample_limit)
+        # Xie & Levinson (2007) Alignment: 
+        # Shift from uniform random sampling to Centrality-Weighted Sampling.
+        # This uses the Efraimidis and Spirakis (2006) method for weighted 
+        # random sampling without replacement.
+        
+        weighted_nodes = sorted(
+            self.centrality_scores.keys(),
+            key=lambda node: math.log(random.random()) / self.centrality_scores[node],
+            reverse=True
+        )
+        
+        return weighted_nodes[:self.api_sample_limit]
 
     def _impute_traffic(self, empirical: dict[Node, float]) -> dict[Node, float]:
         if self.verbose:

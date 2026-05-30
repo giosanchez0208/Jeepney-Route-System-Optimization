@@ -239,16 +239,17 @@ flowchart TD
 
 ### `direct_demand_sampler.py`
 
-`DirectDemandSampler` turns sparse traffic observations into node sampling.
+`DirectDemandSampler` employs centrality-weighted spatial sampling to create realistic demand distributions.
 
-- Blends TomTom flow data with structural centrality.
-- Uses IDW to fill gaps where traffic data is missing.
+- Uses Efraimidis & Spirakis weighted sampling to direct limited TomTom API queries toward high-centrality arterial nodes.
+- Imputes traffic at unqueried nodes using IDW anchored to arterials for realistic traffic diffusion.
+- Blends empirical/imputed traffic flows with betweenness centrality to create demand probabilities.
 - Builds alias tables for constant-time sampling.
 
 Why it matters:
 
-- It feeds route generation and passenger spawning with realistic origins and destinations.
-- It avoids pretending the network has complete demand coverage.
+- It feeds route generation and passenger spawning with realistic origins and destinations grounded in both traffic and network structure.
+- It avoids wasting API budget on low-traffic residential streets and preserves the network's arterial backbone as the sampling anchor.
 
 Errors:
 
