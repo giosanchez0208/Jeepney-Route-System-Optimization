@@ -1,0 +1,157 @@
+\section{The Hybrid GA-ACO Memetic Algorithm}
+\noindent
+The optimization layer combines a Genetic Algorithm (GA) with an Ant Colony Optimization (ACO)-style memory structure to produce a memetic search procedure. In this framework, a chromosome represents an entire jeepney route system, while a gene represents one jeepney route inside that system. This distinction is important because the optimizer must preserve the integrity of closed transit loops, not merely rearrange isolated road segments. The GA supplies global exploration through recombination and selection, while the ACO component supplies stigmergic memory through pheromone trails that record where passenger demand and route utility are strongest. The resulting procedure is memetic because candidate solutions are not only inherited, but also locally improved before they are passed to the next generation.
+
+\subsection{Stigmergic Pheromone Matrix and the Demand-Service Gap}
+\noindent
+The pheromone matrix functions as the algorithm's environmental memory. Each traversed road segment is mapped to a spatial key, so route segments that occupy the same physical corridor contribute to the same pheromone cell even if they belong to different candidate chromosomes. After evaluation, pheromones are reinforced along edges that supported efficient passenger journeys and evaporated on edges whose demand is no longer current. This follows the standard ACO principle that useful paths should remain visible to later search steps, while stale paths should gradually disappear \citep{Dorigo1996}.
+
+Let $\tau_{ij}$ denote the pheromone intensity on edge $ij$, and let $s_{ij}$ denote the current service supply on that same corridor, measured as the number of active jeepneys scaled by the configured jeep weight. The framework defines the Demand-Service Gap as
+
+\[
+\Delta_{ij} = \tau_{ij} - s_{ij}
+\]
+
+where a positive value indicates an underserved corridor and a negative value indicates oversupply. This gap is not treated as a direct passenger count. It is a spatial signal that compares demand memory against present service capacity. Because the gap is cached after each evaluation cycle, the local search operators can query it without recomputing the full passenger simulation. This makes the pheromone matrix both descriptive, because it stores learned service patterns, and prescriptive, because it guides where route edits should occur next.
+
+\subsection{Lamarckian Local Search Operators}
+\noindent
+The local search phase is Lamarckian because improvements acquired during mutation are written back into the chromosome before the next generation begins. In other words, the route system learns from the environment, and that learned improvement is inherited. This is different from a purely Darwinian mutation, where random perturbations are accepted or rejected without preserving the reasoning behind them. Here, each operator is tied to a specific spatial condition in the Demand-Service Gap map, so the edits are targeted rather than blind.
+
+\subsubsection{Demand-Driven Attraction (Node Insertion)}
+\noindent
+Demand-Driven Attraction inserts intermediate nodes into a route when the gap map shows that a nearby corridor is underserved. The operator first identifies contiguous edges with strongly positive gap values, then measures candidate insertion points around that hotspot. The chosen insertion is the one that minimizes the added path cost while preserving route continuity. A simple way to express this is
+
+\[
+\Delta C_{\text{ins}}(u,v,x) = C(u,x) + C(x,v) - C(u,v)
+\]
+
+where $u$ and $v$ are consecutive nodes on the current route, $x$ is a feasible insertion node, and $C(\cdot)$ is the shortest-path cost over the drivable graph. The operator selects the node, or node sequence, that yields the smallest valid increase in cost while moving the route closer to the demand hotspot. This is why the insertion is best understood as a cheapest-insertion refinement rather than a naive route extension. It increases coverage without destroying the closed-loop structure of the jeepney route.
+
+\subsubsection{Oversupply Repulsion (Route Overlap Minimization)}
+\noindent
+Oversupply Repulsion acts on corridors where the pheromone signal is strongly negative, which means the system is allocating too much service to the same physical street segment. The operator identifies overlapping route fragments, then shifts one of the competing fragments toward a nearby parallel street that still preserves the route's reach into the same general area. The purpose is not to weaken useful routes, but to reduce redundant vehicle kilometers and to spread service toward under-covered space.
+
+To compare route fragments reliably, the framework uses true geographic distance rather than planar approximations. This matters because the same node sequence may be interpreted differently depending on map scale and coordinate distortion. By using a spatial exclusion window, the operator prevents the modified route from collapsing back into the overserved corridor during repair. The resulting child route remains topologically connected, but it occupies a less redundant corridor in the network.
+
+\subsubsection{Demand-Aware Tortuosity Pruning (Node Deletion)}
+\noindent
+Demand-Aware Tortuosity Pruning removes nodes that create unnecessary detours and circuity. Tortuosity here refers to how much longer a route is than the direct path between the same functional endpoints. If a segment is both geometrically inefficient and weakly supported by demand, the operator deletes the redundant node and reconnects the remaining endpoints through the shortest feasible path on the base city graph.
+
+Let $L_{\text{path}}$ be the length of the current route segment and let $L_{\text{direct}}$ be the length of its direct replacement path. A simple tortuosity ratio is
+
+\[
+\kappa = \frac{L_{\text{path}}}{L_{\text{direct}}}
+\]
+
+Higher values of $\kappa$ indicate a more circuitous route. Segments with low pheromone intensity and high $\kappa$ are the strongest pruning candidates. The operator also applies a zero-utility correction, meaning that unused edges are treated as having zero supporting demand rather than a neutral default value. This prevents dead-end detours from being preserved merely because they were never assigned a meaningful penalty. To protect service equity, segments that belong to a positive-gap corridor are exempt from deletion even if they appear geometrically irregular.
+
+\subsection{Memetic Genetic Operators}
+\noindent
+The genetic operators work at the chromosome level, so they modify whole jeepney route systems rather than isolated edges. This is essential because the objective is not to improve a single route in isolation, but to improve the entire network of routes as a coordinated service system. The crossover and inheritance steps therefore preserve the best structural features of the parent networks while still allowing the child to explore new route combinations.
+
+\subsubsection{Topological Hub Crossover (Trunk and Feeder Preservation)}
+\noindent
+Topological Hub Crossover is designed to preserve the strongest corridors of both parents while still allowing the child to inherit spatial coverage from each. The algorithm first identifies the topological hub, which is the set of road segments with the strongest combined pheromone support and structural importance. These segments form the trunk of the route system because they represent the most active and transit-relevant corridors in the network.
+
+The fitter parent contributes the trunk routes, while the other parent contributes feeder routes that do not geometrically conflict with the preserved backbone. This is not a blind splice of route arrays. It is a constrained recombination that respects closed-loop validity, route isolation, and corridor utility. In practical terms, the operator tries to keep the high-capacity core of the first parent and merge it with complementary access coverage from the second parent. The child therefore inherits a coherent trunk-and-feeder structure rather than a fragmented set of edges.
+
+\subsubsection{Epigenetic Inheritance (Fitness-Weighted Pheromones)}
+\noindent
+Epigenetic Inheritance transfers learned demand information from the parents to the child. The child does not merely inherit route geometry. It also inherits the pheromone surface that helped shape the parents' search history. This is epigenetic because the inherited memory is environmental and learned, not hard-coded in the chromosome structure itself.
+
+If $C_A$ and $C_B$ are the parent costs, the child receives a weighted pheromone blend of the form
+
+\[
+\tau^{\text{child}}_{ij} = w_A \tau^A_{ij} + w_B \tau^B_{ij}
+\]
+
+with weights defined by
+
+\[
+w_A = \frac{C_B}{C_A + C_B}, \qquad w_B = \frac{C_A}{C_A + C_B}
+\]
+
+This means that the lower-cost parent contributes more strongly to the child's initial memory. The effect is to give the offspring a useful prior over which corridors are likely to support efficient service, so the next local search step starts from informed demand memory rather than from a blank map.
+
+\section{Optimizer Orchestration and Adaptive Control}
+\noindent
+The optimizer orchestration layer turns the memetic operators into a reproducible search process. It controls when populations are created, when they are evaluated, when local search is allowed to intervene, and when the search should stop. This layer is necessary because the memetic algorithm is not a single operator, but a coordinated sequence of evaluation, selection, mutation, logging, and preservation steps.
+
+\subsection{The Generational Memetic Pipeline}
+\noindent
+Each generation follows a strict ordering so that the optimizer remains deterministic and behaviorally interpretable. The pipeline begins by evaluating the current population and updating the pheromone matrices attached to each chromosome. It then applies elitism, which copies the best chromosomes forward unchanged. Tournament selection is used to choose parent pairs for recombination, and the Topological Hub Crossover and Epigenetic Inheritance operators produce the child route system. After that, the Lamarckian mutation gate decides whether local search should be applied, using the current mutation rate and the surrogate evaluator as the acceptance context. Once mutation is complete, the child is re-evaluated, the stagnation counter is updated, and telemetry is recorded.
+
+This sequencing matters. If local search were applied before evaluation, there would be no meaningful baseline against which to judge improvement. If elitism were delayed, the optimizer could accidentally discard the best known network. If telemetry were delayed, the lineage of a successful chromosome would be harder to reconstruct. The pipeline therefore preserves both optimization correctness and scientific traceability.
+
+\subsection{Adaptive Mutation Scaling via Stagnation Feedback}
+\noindent
+The adaptive controller adjusts exploration pressure according to stagnation. Let $s$ be the number of consecutive generations without improvement, and let $S_{\text{limit}}$ be the configured stagnation threshold. The mutation rate is scaled quadratically as
+
+\[
+P_{\text{mut}} = P_{\text{base}} + (P_{\text{max}} - P_{\text{base}})\left(\frac{s}{S_{\text{limit}}}\right)^2
+\]
+
+This gives the optimizer patience early in stagnation, but forces stronger exploration as the plateau persists. When a new best solution is found, the stagnation counter resets to zero and the mutation rate returns to its baseline value. The same controller also schedules local search probability and intensity so that early generations apply broader route edits, while later generations perform more conservative refinements. This coupling prevents the search from becoming either too random at the start or too disruptive near convergence.
+
+\subsection{Multi-Dimensional Convergence Criteria (Jaccard and Variance)}
+\noindent
+The optimizer stops only when both structural and numerical evidence suggest that the search has exhausted useful diversity. The first criterion is elite Jaccard similarity. If $E_A$ and $E_B$ are the active edge sets of two elite chromosomes, their similarity is
+
+\[
+J(A,B) = \frac{|E_A \cap E_B|}{|E_A \cup E_B|}
+\]
+
+The optimizer computes the average pairwise Jaccard similarity among the top 10 percent of the population. If that value remains above the configured threshold for a sufficient number of generations, the population is considered phenotypically saturated, meaning the best route systems have become structurally too similar to recombine meaningfully.
+
+The second criterion is fitness variance. If the population costs collapse toward the same value, the search is also considered converged, even if the route structures are not perfectly identical. This handles the case where many chromosomes differ only in minor details that no longer change the objective in a meaningful way. By checking both topology and cost dispersion, the optimizer avoids false termination caused by using only one kind of convergence signal.
+
+\subsection{Telemetry, Deterministic Replay, and State Preservation}
+\noindent
+Telemetry records how the optimizer behaves over time, while state preservation ensures that the same behavior can be resumed exactly after an interruption. The telemetry engine writes three complementary outputs. The history log stores generational fitness statistics such as best cost, mean cost, mutation rate, and stagnation count. The lineage log records parent-child relationships so that a final chromosome can be traced back through its ancestry. The JSON snapshot stream exports route geometries, pheromone hotspots, and demand-choked corridors for later visualization.
+
+State preservation is implemented through atomic checkpointing. The live optimization state, including the population, pheromone matrices, generation counter, stagnation counter, best fitness, and pseudorandom state, is serialized to disk using a temporary file first and then promoted to a permanent checkpoint only after the write succeeds. This prevents corrupted partial saves. Deterministic replay is maintained by restoring the random state only after all deterministic infrastructure has been rebuilt, so the resumed run consumes the same sequence of random numbers that the uninterrupted run would have used.
+
+\section{Post-Optimization Evaluation Metrics}
+\noindent
+After optimization, the final route systems are evaluated using several complementary metrics. No single score is sufficient because a network can be similar in structure, similar in geometry, similar in coverage, or similar in ranking behavior without being identical in all four senses. These metrics therefore measure topology, geometry, distribution, and surrogate fidelity separately.
+
+\subsection{Topological and Geometric Similarity (Jaccard, Discrete Fréchet, GED)}
+\noindent
+Topological similarity is measured with the Jaccard index over active route edges. This metric answers a simple question: how much corridor overlap exists between two route systems? It is useful when the goal is to compare whether two candidate networks share the same trunks and feeder branches. However, Jaccard similarity does not capture the order of nodes along a route, so it is complemented by geometric distance measures.
+
+Discrete Fréchet distance compares the shape of two ordered route traces. Unlike set overlap, it respects path direction and the sequence in which nodes are visited. This makes it suitable for deciding whether two routes follow the same general corridor even if they are not edge-identical. Graph edit distance adds a third view by counting the structural changes needed to transform one network into another, such as node insertions, deletions, or edge substitutions. Taken together, these three measures separate shared corridor membership, route shape, and structural transformation cost.
+
+\subsection{Distributional Distance and Spatial Coverage (1D/2D Wasserstein)}
+\noindent
+Wasserstein distance measures how much mass must be moved to transform one distribution into another. In one dimension, it is useful for comparing distributions such as commute times, route lengths, or passenger waiting times. In two dimensions, it can be applied to spatial grids or coordinate clouds to compare where service is concentrated on the map. This is especially useful for transit design because a network may have the correct total amount of service but still place that service in the wrong neighborhood.
+
+The 1D form evaluates whether the final route system shifts the distribution of travel outcomes toward lower costs. The 2D form evaluates whether service coverage migrates toward underserved spatial regions. Because the metric is sensitive to both shape and displacement, it is more informative than simple differences in mean values.
+
+\subsection{Network Diversity (Shannon Entropy)}
+\noindent
+Shannon entropy measures how evenly route usage is distributed across the network. If $p_i$ is the normalized share of usage assigned to route $i$, then
+
+\[
+H = -\sum_i p_i \log p_i
+\]
+
+High entropy indicates that traffic and service are spread across many routes, which suggests diversity in the final solution. Low entropy indicates concentration on a small number of routes, which may be acceptable if the network is intentionally hierarchical, but may also reveal premature convergence or over-reliance on a few corridors. Entropy therefore complements the similarity metrics by describing network breadth rather than overlap.
+
+\subsection{Surrogate Fidelity Validation (Spearman and Kendall Rank Correlation)}
+\noindent
+The surrogate evaluator is only useful if it preserves the ordering of route systems produced by the full simulation. To test this, the framework compares surrogate scores and full simulation scores using rank-based correlation. Spearman correlation measures how closely the rank order of the two score lists agrees, while Kendall correlation measures how often the pairwise order of chromosomes is preserved.
+
+If $d_i$ is the rank difference for chromosome $i$, Spearman correlation can be written as
+
+\[
+\rho = 1 - \frac{6\sum d_i^2}{n(n^2-1)}
+\]
+
+where $n$ is the number of chromosomes in the validation set. Kendall correlation can be expressed as
+
+\[
+\tau = \frac{C - D}{\binom{n}{2}}
+\]
+
+where $C$ is the number of concordant pairs and $D$ is the number of discordant pairs. A strong positive value for both metrics indicates that the surrogate is faithful enough to guide local search, even if its absolute numeric scale differs from the full simulation fitness.

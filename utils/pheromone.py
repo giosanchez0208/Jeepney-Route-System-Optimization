@@ -118,14 +118,18 @@ class PheromoneMatrix:
     # ------------------------------------------------------------------
     def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route']) -> dict['DirEdge', float]:
         """
-        Computes the Demand-Service Gap for all tracked corridors.
+        Computes the Proportional Demand-Service Gap for all tracked corridors.
 
-        gap_e = tau_e - service_supply_e
+        Instead of a primitive linear subtraction (which suffers from dimensional 
+        mismatch between unbounded pheromones and discrete fleet counts), this 
+        calculates a normalized spatial disparity index:
+        
+            gap_e = (tau_e / total_tau) - (supply_e / total_supply)
 
-        service_supply_e = Σ_r  (jeeps_on_r * default_jeep_weight)  for routes covering edge e.
-
-        A positive gap means demand exceeds current supply → underserved corridor.
-        A negative gap means the corridor is over-served relative to pheromone demand.
+        A positive gap (>0) means the edge's share of network demand exceeds 
+        its share of the fleet supply (Underserved).
+        A negative gap (<0) means the edge receives a larger share of the 
+        fleet than its demand warrants (Oversupplied).
         """
         supply: dict[_CoordKey, float] = {k: 0.0 for k in self._tau}
 
@@ -139,11 +143,13 @@ class PheromoneMatrix:
             routes = []
             jeeps = []
 
+        # Count fleet allocation per route
         fleet_counts: dict = {r: 0 for r in routes}
         for j in jeeps:
             if j.route in fleet_counts:
                 fleet_counts[j.route] += 1
 
+        # Accumulate edge supply
         for route, fleet_size in fleet_counts.items():
             w_r = fleet_size * self.default_jeep_weight
             for edge in route.path:
@@ -151,9 +157,17 @@ class PheromoneMatrix:
                 if k in supply:
                     supply[k] += w_r
 
-        # Return gaps keyed by representative DirEdge (for draw() compatibility)
+        # Calculate network totals for normalization
+        total_tau = sum(self._tau.values())
+        total_supply = sum(supply.values())
+        
+        # Prevent division by zero if matrix or fleet is empty
+        safe_total_tau = total_tau if total_tau > 0 else 1.0
+        safe_total_supply = total_supply if total_supply > 0 else 1.0
+
+        # Return the normalized proportional disparity
         return {
-            self._edge_repr[k]: self._tau[k] - supply[k]
+            self._edge_repr[k]: (self._tau[k] / safe_total_tau) - (supply[k] / safe_total_supply)
             for k in self._tau
         }
 
