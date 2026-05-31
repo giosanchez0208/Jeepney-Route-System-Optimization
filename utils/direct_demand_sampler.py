@@ -35,7 +35,6 @@ class DDMConfig:
     """
     alpha: float = 0.6
     beta: float = 0.4
-    idw_power: float = 2.0
     cache_dir: str = "utils/.cache"
     
     # Cochran's Formula Parameters
@@ -65,7 +64,6 @@ def _config_signature(config: DDMConfig) -> str:
     payload = {
         "alpha": config.alpha,
         "beta": config.beta,
-        "idw_power": config.idw_power,
         "z_score": config.z_score,
         "proportion": config.proportion,
         "margin_error": config.margin_error,
@@ -376,7 +374,7 @@ class DirectDemandSampler:
                 if dist == 0:
                     dist = 0.0001
                 
-                weight = 1.0 / (dist ** self.config.idw_power)
+                weight = 1.0 / (dist ** 2.0)
                 numerator += empirical[k_node] * weight
                 denominator += weight
                 

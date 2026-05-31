@@ -13,7 +13,6 @@ city_graph:
 ddm:
   alpha: 0.6
   beta: 0.4
-  idw_power: 2.0
 
 travel_graph:
   walk_wt: 0.0142
