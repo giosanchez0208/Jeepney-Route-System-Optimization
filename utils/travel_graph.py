@@ -203,6 +203,12 @@ class TravelGraph:
             e.weight = saved_weights[e]
 
     def _snap_node(self, target: Node, layer: int) -> Node:
+        # --- O(1) Dictionary Lookup Bypass ---
+        coord = (target.lon, target.lat)
+        if layer == 1 and coord in self.l1_nodes: return self.l1_nodes[coord]
+        if layer == 3 and coord in self.l3_nodes: return self.l3_nodes[coord]
+        # ------------------------------------------
+        
         coords = np.array([[target.lon, target.lat]])
         if layer == 1:
             _, idx = self._l1_kdtree.query(coords)
