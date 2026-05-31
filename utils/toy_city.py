@@ -65,7 +65,6 @@ class ToyCityConfig:
 @dataclass
 class ToyDDMConfig:
     """Demand surface config: IDW power and hotspot list."""
-    idw_power: float = 2.0
     hotspots: list[ToyHotspot] = field(default_factory=lambda: [
         ToyHotspot("Market District",   124.202, 8.207, 12.0),
         ToyHotspot("Jeepney Terminal",  124.208, 8.201,  9.0),
@@ -153,7 +152,7 @@ class ToyDDM:
 
         raw_i = Σ_h  ( weight_h / dist(node_i, hotspot_h)^p )
 
-    where p = idw_power (default 2.0). This creates a smooth demand landscape
+    This creates a smooth demand landscape
     with high-demand zones near heavy hotspots and low-demand zones far from all
     hotspots, mimicking the real DDM's output without any API calls.
 
@@ -395,7 +394,6 @@ def toy_setup_from_yaml(
         hotspots = ToyDDMConfig().hotspots  # fall back to defaults
 
     ddm_config = ToyDDMConfig(
-        idw_power=float(td_raw.get("idw_power", 2.0)),
         hotspots=hotspots,
     )
 

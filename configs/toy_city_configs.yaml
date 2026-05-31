@@ -26,7 +26,6 @@ toy_city:
 #   - Suburbs: Low-density distributed residential generation.
 
 toy_ddm:
-  idw_power: 2.0
   hotspots:
     - name: "Downtown Public Market"
       lon: 124.220
