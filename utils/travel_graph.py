@@ -176,6 +176,7 @@ class TravelGraph:
         _stitch(al_edges, ew_edges)
         _stitch(al_edges, tr_edges)
         _stitch(ew_edges, ew_edges)
+        _stitch(ew_edges, tr_edges)
         
         # Route-specific layer 2 stitching
         # To avoid teleporting between routes, we must stitch L2 edges strictly per route.
