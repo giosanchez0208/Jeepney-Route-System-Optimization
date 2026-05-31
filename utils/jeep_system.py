@@ -79,14 +79,31 @@ class FleetAllocator:
         if total_sqrt_tau == 0: 
             total_sqrt_tau = 1.0
         
+        exact_shares = {r: total_fleet * (route_tau[r] / total_sqrt_tau) for r in routes}
+        
         allocation: dict[Route, int] = {}
-        remaining: int = total_fleet
-        for r in routes[:-1]:
-            count = max(1, int(round(total_fleet * (route_tau[r] / total_sqrt_tau))))
-            allocation[r] = count
-            remaining -= count
+        for r in routes:
+            allocation[r] = max(1, int(math.floor(exact_shares[r])))
             
-        allocation[routes[-1]] = max(1, remaining)
+        allocated = sum(allocation.values())
+        
+        while allocated > total_fleet:
+            over_served = [r for r in routes if allocation[r] > 1]
+            if not over_served:
+                break
+            r_dec = max(over_served, key=lambda r: allocation[r] - exact_shares[r])
+            allocation[r_dec] -= 1
+            allocated -= 1
+            
+        if allocated < total_fleet:
+            remainders = {r: exact_shares[r] - allocation[r] for r in routes}
+            sorted_routes = sorted(routes, key=lambda r: remainders[r], reverse=True)
+            for r in sorted_routes:
+                if allocated >= total_fleet:
+                    break
+                allocation[r] += 1
+                allocated += 1
+                
         return allocation
 
     @classmethod
