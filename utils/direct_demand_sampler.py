@@ -106,8 +106,24 @@ class TrafficClient:
             weight = self._query_api(node)
             if weight is not None:
                 empirical_data[node] = weight
+
+        # Always report success rate so silent mass-failures are immediately visible.
+        n_queried = len(target_nodes)
+        n_success = len(empirical_data)
+        n_failed = n_queried - n_success
+        if self.verbose or n_failed > 0:
+            print(
+                f"[TOMTOM SUMMARY] {n_success}/{n_queried} nodes returned valid weights "
+                f"({n_failed} failed/skipped). "
+                + ("High failure rate — check departAt validity and API key." if n_failed > n_queried * 0.1 else "")
+            )
                 
         return empirical_data
+
+    # Probe segment length in degrees latitude.
+    # 0.001° ≈ 111m is too short: integer-second rounding wipes out low/mid congestion signal.
+    # 0.01° ≈ 1.11km gives ~80s of free-flow travel time, making even 5% slowdowns distinguishable.
+    PROBE_OFFSET_DEG: float = 0.01
 
     def _query_api(self, node: Node) -> Optional[float]:
         time_str = self.target_time.isoformat() if self.target_time else "live"
@@ -121,35 +137,73 @@ class TrafficClient:
 
         # --- PREDICTIVE ROUTING MODE (Target time specified) ---
         if self.target_time:
-            # Shift slightly north to simulate a micro-segment route query starting at the node point
-            offset_lat = node.lat + 0.001
+            # FIX (Bug 3): Increased probe offset from 0.001° (~111m) to 0.01° (~1.11km).
+            # The original short segment caused integer-second travel times to round to the same
+            # value for both travelTimeInSeconds and noTrafficTravelTimeInSeconds, collapsing
+            # the congestion ratio to 1.0 across virtually all nodes.
+            offset_lat = node.lat + self.PROBE_OFFSET_DEG
             url = f"https://api.tomtom.com/routing/1/calculateRoute/{node.lat},{node.lon}:{offset_lat},{node.lon}/json"
             
+            # FIX (Bug 2): Added computeTravelTimeFor=all.
+            # Without this, noTrafficTravelTimeInSeconds is NOT returned by the TomTom API at all.
+            # The previous code fell back to the default of 1 second, making weight = travel_time / 1
+            # which is a meaningless ratio, not a congestion index.
             params = {
                 "key": self.api_key,
                 "departAt": self.target_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "traffic": "true"
+                "computeTravelTimeFor": "all",
+                "routeType": "fastest",
+                "travelMode": "car",
             }
             
             try:
-                response = requests.get(url, params=params, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    summary = data.get("routes", [{}])[0].get("summary", {})
-                    
-                    travel_time = summary.get("travelTimeInSeconds", 1)
-                    no_traffic_time = summary.get("noTrafficTravelTimeInSeconds", 1)
-                    
-                    # Weight represents penalty friction (Travel Time / Free Flow Travel Time)
-                    weight = travel_time / max(no_traffic_time, 1)
-                    
-                    with open(cache_path, "w") as f:
-                        json.dump({"weight": weight, "raw": summary}, f)
-                        
-                    return weight
-                else:
+                response = requests.get(url, params=params, timeout=10)
+
+                # FIX (Bug 1): Log non-200 responses instead of silently returning None.
+                # A mass-failure (e.g., invalid departAt date, expired API key, rate limit)
+                # was previously invisible: all nodes returned None, empirical_traffic ended up
+                # empty, and _impute_traffic defaulted every node to 1.0 — producing a perfectly
+                # flat traffic map with no diagnostic output whatsoever.
+                if response.status_code != 200:
+                    if self.verbose:
+                        print(
+                            f"[TOMTOM ERROR] HTTP {response.status_code} for node "
+                            f"({node.lat:.5f}, {node.lon:.5f}) | "
+                            f"departAt={params['departAt']} | "
+                            f"Body: {response.text[:200]}"
+                        )
                     return None
-            except requests.exceptions.RequestException:
+
+                data = response.json()
+                summary = data.get("routes", [{}])[0].get("summary", {})
+                
+                travel_time = summary.get("travelTimeInSeconds")
+                no_traffic_time = summary.get("noTrafficTravelTimeInSeconds")
+
+                # Guard: if either field is missing despite computeTravelTimeFor=all,
+                # log it and bail — do NOT silently produce a bogus 1.0 weight.
+                if travel_time is None or no_traffic_time is None or no_traffic_time == 0:
+                    if self.verbose:
+                        print(
+                            f"[TOMTOM WARNING] Missing time fields for node "
+                            f"({node.lat:.5f}, {node.lon:.5f}). "
+                            f"travelTime={travel_time}, noTrafficTime={no_traffic_time}. "
+                            f"Node will be excluded from empirical sample."
+                        )
+                    return None
+                
+                # Weight represents penalty friction (Travel Time / Free Flow Travel Time).
+                # Values above 1.0 indicate congestion; 1.0 = perfect free flow.
+                weight = travel_time / no_traffic_time
+                
+                with open(cache_path, "w") as f:
+                    json.dump({"weight": weight, "raw": summary}, f)
+                    
+                return weight
+
+            except requests.exceptions.RequestException as exc:
+                if self.verbose:
+                    print(f"[TOMTOM REQUEST ERROR] Node ({node.lat:.5f}, {node.lon:.5f}): {exc}")
                 return None
 
         # --- REAL-TIME LIVE FLOW MODE (Default Fallback) ---
@@ -157,22 +211,40 @@ class TrafficClient:
             url = f"https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point={node.lat},{node.lon}&key={self.api_key}"
             
             try:
-                response = requests.get(url, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    flow = data.get("flowSegmentData", {})
-                    current_speed = flow.get("currentSpeed", 1)
-                    free_flow = flow.get("freeFlowSpeed", 1)
-                    
-                    weight = free_flow / max(current_speed, 1)
-                    
-                    with open(cache_path, "w") as f:
-                        json.dump({"weight": weight, "raw": flow}, f)
-                        
-                    return weight
-                else:
+                response = requests.get(url, timeout=10)
+
+                if response.status_code != 200:
+                    if self.verbose:
+                        print(
+                            f"[TOMTOM FLOW ERROR] HTTP {response.status_code} for node "
+                            f"({node.lat:.5f}, {node.lon:.5f}) | Body: {response.text[:200]}"
+                        )
                     return None
-            except requests.exceptions.RequestException:
+
+                data = response.json()
+                flow = data.get("flowSegmentData", {})
+                current_speed = flow.get("currentSpeed")
+                free_flow = flow.get("freeFlowSpeed")
+
+                if not current_speed or not free_flow or current_speed == 0:
+                    if self.verbose:
+                        print(
+                            f"[TOMTOM FLOW WARNING] Missing speed fields for node "
+                            f"({node.lat:.5f}, {node.lon:.5f}). "
+                            f"currentSpeed={current_speed}, freeFlowSpeed={free_flow}."
+                        )
+                    return None
+
+                weight = free_flow / current_speed
+                
+                with open(cache_path, "w") as f:
+                    json.dump({"weight": weight, "raw": flow}, f)
+                    
+                return weight
+
+            except requests.exceptions.RequestException as exc:
+                if self.verbose:
+                    print(f"[TOMTOM FLOW REQUEST ERROR] Node ({node.lat:.5f}, {node.lon:.5f}): {exc}")
                 return None
 
 class DirectDemandSampler:
@@ -189,11 +261,13 @@ class DirectDemandSampler:
         self, 
         city: NetworkGraph, 
         config: DDMConfig = DDMConfig(),
-        verbose: bool = False
+        verbose: bool = False,
+        use_cache: bool = True
     ):
         self.city = city
         self.config = config
         self.verbose = verbose
+        self.use_cache = use_cache
         
         self.drivable_nodes = self._extract_drivable_nodes()
         self.target_nodes = self.city.nodes
@@ -220,7 +294,7 @@ class DirectDemandSampler:
         self.raw_probabilities: list[float] = []
         self.traffic_client: Optional[TrafficClient] = None
 
-        if self._load_cache():
+        if self.use_cache and self._load_cache():
             if self.verbose:
                 print(f"[DIRECT DEMAND] Loaded sampler cache from {self._cache_path}.")
             return
@@ -245,7 +319,8 @@ class DirectDemandSampler:
         
         self.raw_probabilities = self._apply_ddm(self.traffic_weights, self.centrality_scores)
         self._build_alias_tables(self.raw_probabilities)
-        self._save_cache()
+        if self.use_cache:
+            self._save_cache()
 
     def _calculate_optimal_sample_size(self) -> int:
         if self.config.api_limit_override is not None:
