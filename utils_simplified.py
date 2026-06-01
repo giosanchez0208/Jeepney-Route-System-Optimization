@@ -2,6 +2,8 @@ import yaml
 import pickle
 from typing import Optional
 from utils.city_graph import CityGraph
+from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
+from datetime import datetime
 
 # =========================================================
 # City Graph
@@ -33,4 +35,35 @@ def reuse_citygraph(pkl_file: str) -> CityGraph:
 # =========================================================
 # Direct Demand Model
 # =========================================================
+
+def build_ddm(yaml_file: str, cg: CityGraph, target_time: Optional[datetime], pkl_path: Optional[str] = None) -> DirectDemandSampler:
+    print(f"[INFO] Building DirectDemandSampler from YAML file: {yaml_file}")
+    with open(yaml_file, 'r', encoding='utf-8') as f:
+        config_data = yaml.safe_load(f)
+        
+    ddm_config_data = config_data.get('ddm', {})
+    
+    ddm_config = DDMConfig(
+        alpha=ddm_config_data.get('alpha', 0.6),
+        beta=ddm_config_data.get('beta', 0.4),
+        target_time=target_time
+    )
+    
+    # use_cache=False to avoid relying on pre-existing DDM internal cache
+    ddm = DirectDemandSampler(city=cg, config=ddm_config, verbose=True, use_cache=False)
+    
+    if pkl_path:
+        print(f"[INFO] Serializing DirectDemandSampler to pickle file: {pkl_path}")
+        with open(pkl_path, 'wb') as f:
+            pickle.dump(ddm, f)
+        print(f"[INFO] DirectDemandSampler successfully serialized to pickle file: {pkl_path}")
+            
+    return ddm
+
+def reuse_ddm(pkl_file: str) -> DirectDemandSampler:
+    print(f"[INFO] Reusing DirectDemandSampler from pickle file: {pkl_file}")
+    with open(pkl_file, 'rb') as f:
+        ddm = pickle.load(f)
+    return ddm
+
 
