@@ -3,8 +3,11 @@ import pickle
 from typing import Optional
 from utils.city_graph import CityGraph
 
-def build_citygraph(yaml_file: str, pkl_path: Optional[str] = None) -> CityGraph:
+# =========================================================
+# City Graph
+# =========================================================
 
+def build_citygraph(yaml_file: str, pkl_path: Optional[str] = None) -> CityGraph:
     print(f"[INFO] Building CityGraph from YAML file: {yaml_file}")
     with open(yaml_file, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f) 
@@ -27,15 +30,7 @@ def reuse_citygraph(pkl_file: str) -> CityGraph:
         cg = pickle.load(f)
     return cg
 
-if __name__ == "__main__":
-    import os
-    
-    yaml_file = "configs/profile_p1.yaml"
-    pkl_file = "test_citygraph.pkl"
+# =========================================================
+# Direct Demand Model
+# =========================================================
 
-    cg1 = build_citygraph(yaml_file, pkl_file)
-    cg2 = reuse_citygraph(pkl_file)
-    
-    # Clean up the test pickle file
-    if os.path.exists(pkl_file):
-        os.remove(pkl_file)
