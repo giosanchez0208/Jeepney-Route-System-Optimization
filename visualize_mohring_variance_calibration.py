@@ -1,231 +1,573 @@
+"""
+Mohring Allocation Sample-Size Calibration
+
+Purpose
+-------
+Runs repeated OD-sampling trials to estimate how OD sample size N affects:
+1. Stability of Mohring fleet allocation, measured by mean route-level standard deviation.
+2. Runtime cost, measured by mean computation time per trial.
+
+Important corrections from the earlier version
+----------------------------------------------
+1. Allocations are returned with route indices, not Route objects.
+   This avoids multiprocessing pickle/key-identity problems.
+2. The allocation always sums exactly to TOTAL_FLEET.
+3. Worker processes receive heavy graph objects once through an initializer,
+   rather than sending them again with every submitted task.
+4. Each trial receives a deterministic random seed for reproducibility.
+5. Broad bare except blocks are replaced with specific exception handling.
+"""
+
+from __future__ import annotations
+
+import math
 import os
+import random
+import re
 import sys
 import time
-import random
-import math
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+from typing import Optional
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# Ensure the project root is importable when this script is run directly.
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.city_graph import CityGraph
-from utils.travel_graph import TravelGraph
-from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
+from utils.direct_demand_sampler import DDMConfig, DirectDemandSampler
 from utils.route import RouteGenerator
+from utils.travel_graph import TravelGraph
 
-# ==============================================================================
-# TOP-LEVEL WORKER FUNCTION
-# Must be at the top level so Python can pickle it and send it to other CPU cores.
-# ==============================================================================
-def _run_mohring_trial(tg, sampler, routes, l1_keys, l3_keys, N, trial_idx):
-    """
-    Isolated worker task. Clears the local A* cache, runs the demand sampling, 
-    and returns the Mohring allocation back to the main process.
-    """
-    # CRITICAL: Clear cache so the runtime metric is accurate, not artificially fast
-    tg.findShortestJourney.cache_clear() 
-    
-    start_time = time.time()
-    route_demand = {r: 0.0 for r in routes}
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 
-    # Sample and Route N Passengers
+CITY_NAME = "Iligan City"
+BBOX = (8.1500, 8.3300, 124.1500, 124.4000)  # (min_lat, max_lat, min_lon, max_lon)
+PBF_PATH = "utils/data/iligan-city.pbf"
+CACHE_PREFIX = "iligan_arterial"
+
+N_ROUTES = 5
+ROUTE_N_POINTS = 5
+TOTAL_FLEET = 50
+
+SAMPLE_SIZES = list(range(50, 550, 50))
+NUM_TRIALS = 10
+BASE_SEED = 42
+STABILITY_THRESHOLD = 0.5
+
+UPDATED_WEIGHTS = {
+    "walk_wt": 0.5630,
+    "ride_wt": 0.00632,
+    "wait_wt": 14.44,
+    "transfer_wt": 15.78,
+    "direct_wt": 0.0,
+    "alight_wt": 0.0,
+}
+
+OUTPUT_DIR = Path("documentation/phase_3")
+OUTPUT_CSV = OUTPUT_DIR / "mohring_calibration_data.csv"
+OUTPUT_FIG = OUTPUT_DIR / "fig_6_mohring_variance_calibration.png"
+
+# =============================================================================
+# WORKER GLOBALS
+# =============================================================================
+
+_WORKER_TG: Optional[TravelGraph] = None
+_WORKER_SAMPLER: Optional[DirectDemandSampler] = None
+_WORKER_ROUTE_COUNT: int = 0
+_WORKER_L1_KEYS: list[tuple[float, float]] = []
+_WORKER_L3_KEYS: list[tuple[float, float]] = []
+
+_RIDE_ROUTE_PATTERN = re.compile(r"^RI_R(\d+)_")
+
+
+def _init_mohring_worker(
+    tg: TravelGraph,
+    sampler: DirectDemandSampler,
+    route_count: int,
+    l1_keys: list[tuple[float, float]],
+    l3_keys: list[tuple[float, float]],
+) -> None:
+    """
+    Initializes per-process global references.
+
+    This avoids repeatedly pickling and sending the heavy TravelGraph and sampler
+    objects for every single trial task.
+    """
+    global _WORKER_TG, _WORKER_SAMPLER, _WORKER_ROUTE_COUNT, _WORKER_L1_KEYS, _WORKER_L3_KEYS
+
+    _WORKER_TG = tg
+    _WORKER_SAMPLER = sampler
+    _WORKER_ROUTE_COUNT = int(route_count)
+    _WORKER_L1_KEYS = list(l1_keys)
+    _WORKER_L3_KEYS = list(l3_keys)
+
+
+def _extract_route_index(edge_id: str) -> Optional[int]:
+    """
+    Extracts the route index from a TravelGraph ride-edge ID.
+
+    Expected format from TravelGraph:
+        RI_R0_00001
+        RI_R1_00002
+        ...
+    """
+    match = _RIDE_ROUTE_PATTERN.match(edge_id)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _allocate_mohring_exact(route_demand: dict[int, float], total_fleet: int) -> dict[int, int]:
+    """
+    Applies Mohring square-root allocation and guarantees that the final integer
+    allocation sums exactly to total_fleet.
+
+    Formula:
+        F_i = F_total * sqrt(tau_i) / sum_j sqrt(tau_j)
+
+    The integer correction follows the same logic as the project's FleetAllocator:
+    floor exact shares, protect each route with at least one jeep, then distribute
+    remaining units by largest positive remainder.
+    """
+    if total_fleet <= 0:
+        raise ValueError("total_fleet must be positive.")
+    if not route_demand:
+        raise ValueError("route_demand cannot be empty.")
+    if total_fleet < len(route_demand):
+        raise ValueError("total_fleet must be at least the number of routes when min allocation is 1.")
+
+    route_tau = {route_idx: math.sqrt(max(1.0, demand)) for route_idx, demand in route_demand.items()}
+    total_tau = sum(route_tau.values()) or 1.0
+    exact_shares = {route_idx: total_fleet * (tau / total_tau) for route_idx, tau in route_tau.items()}
+
+    allocation = {
+        route_idx: max(1, int(math.floor(exact_share)))
+        for route_idx, exact_share in exact_shares.items()
+    }
+
+    allocated = sum(allocation.values())
+
+    while allocated > total_fleet:
+        reducible = [route_idx for route_idx, count in allocation.items() if count > 1]
+        if not reducible:
+            break
+        route_to_reduce = max(reducible, key=lambda route_idx: allocation[route_idx] - exact_shares[route_idx])
+        allocation[route_to_reduce] -= 1
+        allocated -= 1
+
+    while allocated < total_fleet:
+        route_to_increase = max(allocation, key=lambda route_idx: exact_shares[route_idx] - allocation[route_idx])
+        allocation[route_to_increase] += 1
+        allocated += 1
+
+    return allocation
+
+
+def _snap_to_layer_nodes(origin, destination):
+    """
+    Converts sampled CityGraph nodes into valid TravelGraph layer nodes.
+
+    TravelGraph.findShortestJourney can also snap internally, but doing exact
+    dictionary lookup first avoids unnecessary KDTree queries when the sampled
+    nodes already exist in the layer dictionaries.
+    """
+    if _WORKER_TG is None:
+        raise RuntimeError("Worker TravelGraph was not initialized.")
+
+    origin_coord = (origin.lon, origin.lat)
+    dest_coord = (destination.lon, destination.lat)
+
+    start = _WORKER_TG.l1_nodes.get(origin_coord)
+    end = _WORKER_TG.l3_nodes.get(dest_coord)
+
+    # Rare fallback for any sampled point that is not exactly in the layer maps.
+    if start is None:
+        start = _WORKER_TG.l1_nodes[random.choice(_WORKER_L1_KEYS)]
+    if end is None:
+        end = _WORKER_TG.l3_nodes[random.choice(_WORKER_L3_KEYS)]
+
+    return start, end
+
+
+def _run_mohring_trial(task: tuple[int, int, int, int]) -> tuple[int, int, dict[int, int], float]:
+    """
+    Runs one isolated Mohring calibration trial.
+
+    Returns:
+        (N, trial_idx, allocation_by_route_index, runtime_seconds)
+    """
+    N, trial_idx, total_fleet, seed = task
+
+    if _WORKER_TG is None or _WORKER_SAMPLER is None:
+        raise RuntimeError("Worker was not initialized. Check ProcessPoolExecutor initializer.")
+
+    random.seed(seed)
+    np.random.seed(seed % (2**32 - 1))
+
+    # Clear local A* cache so each trial measures cold-cache routing cost.
+    _WORKER_TG.findShortestJourney.cache_clear()
+
+    start_time = time.perf_counter()
+    route_demand = {route_idx: 0.0 for route_idx in range(_WORKER_ROUTE_COUNT)}
+
     for _ in range(N):
-        origin = sampler.get_point()
-        dest = sampler.get_point()
-        
-        start = tg.l1_nodes.get((origin.lon, origin.lat)) or tg.l1_nodes[random.choice(l1_keys)]
-        end = tg.l3_nodes.get((dest.lon, dest.lat)) or tg.l3_nodes[random.choice(l3_keys)]
+        origin = _WORKER_SAMPLER.get_point()
+        destination = _WORKER_SAMPLER.get_point()
+        start, end = _snap_to_layer_nodes(origin, destination)
 
-        journey = tg.findShortestJourney(start, end)
-        if journey:
-            for edge in journey:
-                if edge.id.startswith("RI"):
-                    try:
-                        r_idx = int(edge.id.split("_")[1][1:])
-                        route_demand[routes[r_idx]] += 1.0
-                    except:
-                        pass
-    
-    # Mohring Allocation (Supply = 50)
-    route_tau = {r: math.sqrt(max(1.0, demand)) for r, demand in route_demand.items()}
-    total_sqrt_tau = sum(route_tau.values()) or 1.0
-    allocation = {r: max(1, int(50 * (route_tau[r] / total_sqrt_tau))) for r in routes}
-    
-    runtime = time.time() - start_time
+        journey = _WORKER_TG.findShortestJourney(start, end)
+        if not journey:
+            continue
+
+        # Demand is counted per traversed ride edge, matching the original logic
+        # and the current FleetAllocator convention.
+        for edge in journey:
+            route_idx = _extract_route_index(edge.id)
+            if route_idx is None:
+                continue
+            if 0 <= route_idx < _WORKER_ROUTE_COUNT:
+                route_demand[route_idx] += 1.0
+
+    allocation = _allocate_mohring_exact(route_demand, total_fleet=total_fleet)
+    runtime = time.perf_counter() - start_time
+
     return N, trial_idx, allocation, runtime
 
-# ==============================================================================
-# DATA GENERATOR & ORCHESTRATOR
-# ==============================================================================
-def get_real_calibration_data() -> pd.DataFrame:
-    print("Instantiating Infrastructure for Calibration...")
-    bbox = (8.1500, 8.3300, 124.1500, 124.4000)
-    city = CityGraph(name="Iligan City", bbox=bbox, pbf_path="utils/data/iligan-city.pbf", cache_prefix="iligan_arterial")
-    
-    config = DDMConfig()
-    sampler = DirectDemandSampler(city, config=config)
-    rg = RouteGenerator(city, sampler)
 
-    print("Generating 5 transit loops...")
-    routes = [rg.generate(n_points=5) for _ in range(5)]
+# =============================================================================
+# DATA GENERATION
+# =============================================================================
 
-    updated_weights = {'walk_wt': 0.5630, 'ride_wt': 0.00632, 'wait_wt': 14.44, 'transfer_wt': 15.78, 'direct_wt': 0.0, 'alight_wt': 0.0}
-    tg = TravelGraph(cg=city, config=updated_weights, routes=routes)
+def build_calibration_infrastructure(seed: int = BASE_SEED) -> tuple[TravelGraph, DirectDemandSampler, int]:
+    """
+    Builds the CityGraph, DirectDemandSampler, generated routes, and TravelGraph
+    used by all Mohring calibration trials.
+    """
+    random.seed(seed)
+    np.random.seed(seed % (2**32 - 1))
+
+    print("Instantiating infrastructure for Mohring calibration...")
+    city = CityGraph(
+        name=CITY_NAME,
+        bbox=BBOX,
+        pbf_path=PBF_PATH,
+        cache_prefix=CACHE_PREFIX,
+    )
+
+    sampler = DirectDemandSampler(city, config=DDMConfig())
+    route_generator = RouteGenerator(city, sampler)
+
+    print(f"Generating {N_ROUTES} transit loops...")
+    routes = [route_generator.generate(n_points=ROUTE_N_POINTS) for _ in range(N_ROUTES)]
+
+    print("Constructing TravelGraph with calibrated generalized-cost weights...")
+    travel_graph = TravelGraph(cg=city, config=UPDATED_WEIGHTS, routes=routes)
+
+    return travel_graph, sampler, len(routes)
+
+
+def get_real_calibration_data(
+    sample_sizes: list[int] = SAMPLE_SIZES,
+    num_trials: int = NUM_TRIALS,
+    total_fleet: int = TOTAL_FLEET,
+    base_seed: int = BASE_SEED,
+    use_parallel: bool = True,
+) -> pd.DataFrame:
+    """
+    Executes repeated OD-sampling trials and returns a calibration DataFrame.
+    """
+    tg, sampler, route_count = build_calibration_infrastructure(seed=base_seed)
+
+    if total_fleet < route_count:
+        raise ValueError("TOTAL_FLEET must be at least the number of routes.")
 
     l1_keys = list(tg.l1_nodes.keys())
     l3_keys = list(tg.l3_nodes.keys())
 
-    sample_sizes = list(range(50, 550, 50))
-    
-    # INCREASED TRIALS: 10 trials per N mathematically guarantees a smooth variance curve
-    NUM_TRIALS = 10 
-    
-    cpu_cores = os.cpu_count() or 4
-    print(f"\nExecuting Variance vs. Runtime Trials concurrently across {cpu_cores} CPU cores...")
-    
-    results_map = {N: {'allocations': [], 'runtimes': []} for N in sample_sizes}
+    if not l1_keys or not l3_keys:
+        raise ValueError("TravelGraph layer nodes were not constructed correctly.")
 
-    # Parallel Execution Block
-    with ProcessPoolExecutor(max_workers=cpu_cores) as executor:
-        futures = []
-        
-        # Submit all tasks (100 total tasks = 10 sample sizes * 10 trials)
-        for N in sample_sizes:
-            for k in range(NUM_TRIALS):
-                futures.append(executor.submit(_run_mohring_trial, tg, sampler, routes, l1_keys, l3_keys, N, k))
-        
-        # Gather results as they finish
-        for future in as_completed(futures):
-            try:
-                N, trial_idx, allocation, runtime = future.result()
-                results_map[N]['allocations'].append(allocation)
-                results_map[N]['runtimes'].append(runtime)
-                print(f"  -> [N={N:3d}] Trial {trial_idx+1}/{NUM_TRIALS} Completed in {runtime:.2f}s")
-            except Exception as e:
-                print(f"  -> [!] A worker process failed: {e}")
+    results_map: dict[int, dict[str, list]] = {
+        N: {"allocations": [], "runtimes": []}
+        for N in sample_sizes
+    }
 
-    # Aggregate Stats
-    mean_std_devs = []
-    mean_runtimes = []
-    
+    tasks: list[tuple[int, int, int, int]] = []
     for N in sample_sizes:
-        trial_allocs = results_map[N]['allocations']
-        trial_runtimes = results_map[N]['runtimes']
-        
-        if trial_allocs:
-            # Map back to routes to calculate standard deviation per route
-            route_allocs = {r: [] for r in routes}
-            for alloc in trial_allocs:
-                for r, count in alloc.items():
-                    route_allocs[r].append(count)
-            
-            route_stdevs = [np.std(counts) for counts in route_allocs.values()]
-            mean_std_devs.append(np.mean(route_stdevs))
-        else:
-            mean_std_devs.append(0.0)
-            
-        mean_runtimes.append(np.mean(trial_runtimes) if trial_runtimes else 0.0)
+        for trial_idx in range(num_trials):
+            seed = base_seed + (N * 10_000) + trial_idx
+            tasks.append((N, trial_idx, total_fleet, seed))
 
-    return pd.DataFrame({
-        'N': sample_sizes,
-        'mean_std_dev': mean_std_devs,
-        'mean_runtime': mean_runtimes
-    })
+    if use_parallel:
+        cpu_count = os.cpu_count() or 1
+        max_workers = max(1, min(cpu_count - 1 if cpu_count > 1 else 1, len(tasks)))
+        print(f"\nExecuting {len(tasks)} trials across {max_workers} worker process(es)...")
+
+        with ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_mohring_worker,
+            initargs=(tg, sampler, route_count, l1_keys, l3_keys),
+        ) as executor:
+            futures = [executor.submit(_run_mohring_trial, task) for task in tasks]
+
+            for future in as_completed(futures):
+                N, trial_idx, allocation, runtime = future.result()
+                results_map[N]["allocations"].append(allocation)
+                results_map[N]["runtimes"].append(runtime)
+                print(f"  -> [N={N:3d}] Trial {trial_idx + 1:02d}/{num_trials} completed in {runtime:.2f}s")
+    else:
+        print(f"\nExecuting {len(tasks)} trials sequentially...")
+        _init_mohring_worker(tg, sampler, route_count, l1_keys, l3_keys)
+        for task in tasks:
+            N, trial_idx, allocation, runtime = _run_mohring_trial(task)
+            results_map[N]["allocations"].append(allocation)
+            results_map[N]["runtimes"].append(runtime)
+            print(f"  -> [N={N:3d}] Trial {trial_idx + 1:02d}/{num_trials} completed in {runtime:.2f}s")
+
+    rows = []
+    for N in sample_sizes:
+        trial_allocations: list[dict[int, int]] = results_map[N]["allocations"]
+        trial_runtimes: list[float] = results_map[N]["runtimes"]
+
+        if not trial_allocations:
+            rows.append({
+                "N": N,
+                "completed_trials": 0,
+                "mean_std_dev": 0.0,
+                "mean_runtime": 0.0,
+                "min_runtime": 0.0,
+                "max_runtime": 0.0,
+            })
+            continue
+
+        route_allocations = {route_idx: [] for route_idx in range(route_count)}
+        for allocation in trial_allocations:
+            if sum(allocation.values()) != total_fleet:
+                raise RuntimeError(f"Allocation does not sum to {total_fleet}: {allocation}")
+            for route_idx in range(route_count):
+                route_allocations[route_idx].append(allocation.get(route_idx, 0))
+
+        route_std_devs = [float(np.std(counts, ddof=0)) for counts in route_allocations.values()]
+
+        rows.append({
+            "N": N,
+            "completed_trials": len(trial_allocations),
+            "mean_std_dev": float(np.mean(route_std_devs)),
+            "mean_runtime": float(np.mean(trial_runtimes)),
+            "min_runtime": float(np.min(trial_runtimes)),
+            "max_runtime": float(np.max(trial_runtimes)),
+        })
+
+    df = pd.DataFrame(rows)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(OUTPUT_CSV, index=False)
+    print(f"\nCalibration data saved to: {OUTPUT_CSV.resolve()}")
+
+    return df
 
 
-def plot_mohring_calibration(df: pd.DataFrame):
+# =============================================================================
+# PLOTTING
+# =============================================================================
+
+def select_stable_sample_size(
+    df: pd.DataFrame,
+    threshold: float = STABILITY_THRESHOLD,
+) -> tuple[Optional[int], Optional[float]]:
     """
-    Generates a high-resolution, dual-axis elbow plot for variance vs runtime.
+    Selects the first sample size where stability is sustained for two adjacent
+    sample sizes. If sustained stability is not reached, selects the first point
+    below the threshold.
     """
-    sns.set_theme(style="white", rc={
-        "font.family": "serif", 
-        "font.serif": ["Times New Roman", "DejaVu Serif"],
-        "axes.edgecolor": "#333333",
-        "axes.labelcolor": "#333333",
-        "text.color": "#333333"
-    })
-    
+    if df.empty:
+        return None, None
+
+    ordered = df.sort_values("N").reset_index(drop=True)
+
+    for i in range(len(ordered) - 1):
+        current_sigma = float(ordered.loc[i, "mean_std_dev"])
+        next_sigma = float(ordered.loc[i + 1, "mean_std_dev"])
+        if current_sigma <= threshold and next_sigma <= threshold:
+            return int(ordered.loc[i, "N"]), current_sigma
+
+    below_threshold = ordered[ordered["mean_std_dev"] <= threshold]
+    if not below_threshold.empty:
+        row = below_threshold.iloc[0]
+        return int(row["N"]), float(row["mean_std_dev"])
+
+    return None, None
+
+
+def plot_mohring_calibration(
+    df: pd.DataFrame,
+    output_path: Path = OUTPUT_FIG,
+    stability_threshold: float = STABILITY_THRESHOLD,
+) -> None:
+    """
+    Generates a high-resolution dual-axis plot for allocation stability and
+    computation time.
+    """
+    if df.empty:
+        raise ValueError("Cannot plot an empty calibration DataFrame.")
+
+    sns.set_theme(
+        style="white",
+        rc={
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "DejaVu Serif"],
+            "axes.edgecolor": "#333333",
+            "axes.labelcolor": "#333333",
+            "text.color": "#333333",
+        },
+    )
+
     fig, ax1 = plt.subplots(figsize=(12, 8), dpi=300)
-    fig.patch.set_facecolor('white')
-    ax1.set_facecolor('white')
-    
-    # LEFT Y-AXIS (Variance)
-    color_var = '#1E88E5' 
-    ax1.set_xlabel('OD Sample Size ($N$)', fontsize=14, fontweight='bold', labelpad=12)
-    ax1.set_ylabel(r'Mean Standard Deviation of Fleet Allocation ($\sigma$)', color=color_var, fontsize=14, fontweight='bold', labelpad=12)
-    
-    line_var, = ax1.plot(df['N'], df['mean_std_dev'], color=color_var, linewidth=3, 
-                         marker='o', markersize=8, markeredgecolor='white', markeredgewidth=1.5,
-                         label=r'Mean Std. Deviation ($\sigma$)')
-    ax1.tick_params(axis='y', labelcolor=color_var, labelsize=12)
-    ax1.tick_params(axis='x', labelsize=12)
-    
-    ax1.axhline(y=0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.8)
-    ax1.text(df['N'].max(), 0.52, r'Stability Threshold ($\sigma = 0.5$)', color='gray', 
-             fontsize=11, ha='right', va='bottom', style='italic')
+    fig.patch.set_facecolor("white")
+    ax1.set_facecolor("white")
 
-    # RIGHT Y-AXIS (Runtime)
+    color_variance = "#1E88E5"
+    color_runtime = "#D90429"
+
+    line_variance, = ax1.plot(
+        df["N"],
+        df["mean_std_dev"],
+        color=color_variance,
+        linewidth=3,
+        marker="o",
+        markersize=8,
+        markeredgecolor="white",
+        markeredgewidth=1.5,
+        label=r"Mean Std. Deviation ($\sigma$)",
+    )
+
+    ax1.set_xlabel("OD Sample Size ($N$)", fontsize=14, fontweight="bold", labelpad=12)
+    ax1.set_ylabel(
+        r"Mean Standard Deviation of Fleet Allocation ($\sigma$)",
+        color=color_variance,
+        fontsize=14,
+        fontweight="bold",
+        labelpad=12,
+    )
+    ax1.tick_params(axis="y", labelcolor=color_variance, labelsize=12)
+    ax1.tick_params(axis="x", labelsize=12)
+
+    ax1.axhline(y=stability_threshold, color="gray", linestyle="--", linewidth=1.5, alpha=0.8)
+    ax1.text(
+        df["N"].max(),
+        stability_threshold + 0.02,
+        rf"Stability Threshold ($\sigma = {stability_threshold}$)",
+        color="gray",
+        fontsize=11,
+        ha="right",
+        va="bottom",
+        style="italic",
+    )
+
     ax2 = ax1.twinx()
-    color_time = '#D90429' 
-    ax2.set_ylabel('Mean Computation Time (Seconds)', color=color_time, fontsize=14, fontweight='bold', labelpad=12)
-    
-    line_time, = ax2.plot(df['N'], df['mean_runtime'], color=color_time, linewidth=3, 
-                          marker='s', markersize=7, markeredgecolor='white', markeredgewidth=1.5,
-                          label='Mean Runtime (s)')
-    ax2.tick_params(axis='y', labelcolor=color_time, labelsize=12)
-    
-    # ALGORITHMIC SELECTION: Look for SUSTAINED stability (current and next point are below 0.5)
-    optimal_n = None
-    optimal_sigma = None
-    
-    for i in range(len(df) - 1):
-        if df['mean_std_dev'].iloc[i] <= 0.5 and df['mean_std_dev'].iloc[i+1] <= 0.5:
-            optimal_n = df['N'].iloc[i]
-            optimal_sigma = df['mean_std_dev'].iloc[i]
-            break
-            
-    # Fallback if sustained stability isn't reached, just pick the first point < 0.5
-    if optimal_n is None:
-        sweet_spot_df = df[df['mean_std_dev'] <= 0.5]
-        if not sweet_spot_df.empty:
-            optimal_n = sweet_spot_df.iloc[0]['N']
-            optimal_sigma = sweet_spot_df.iloc[0]['mean_std_dev']
+    line_runtime, = ax2.plot(
+        df["N"],
+        df["mean_runtime"],
+        color=color_runtime,
+        linewidth=3,
+        marker="s",
+        markersize=7,
+        markeredgecolor="white",
+        markeredgewidth=1.5,
+        label="Mean Runtime (s)",
+    )
+    ax2.set_ylabel(
+        "Mean Computation Time (Seconds)",
+        color=color_runtime,
+        fontsize=14,
+        fontweight="bold",
+        labelpad=12,
+    )
+    ax2.tick_params(axis="y", labelcolor=color_runtime, labelsize=12)
 
-    if optimal_n is not None:
-        ax1.axvline(x=optimal_n, color='black', linestyle='--', linewidth=2, alpha=0.85)
-        ax1.annotate(f'Optimal Sample Size ($N={optimal_n}$)\n| Pareto Frontier',
-                     xy=(optimal_n, optimal_sigma),
-                     xytext=(optimal_n + 50, optimal_sigma + 0.3),
-                     arrowprops=dict(facecolor='black', shrink=0.05, width=2, headwidth=8),
-                     fontsize=12, fontweight='bold',
-                     bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="black", lw=1.2, alpha=0.9))
+    selected_n, selected_sigma = select_stable_sample_size(df, threshold=stability_threshold)
+    if selected_n is not None and selected_sigma is not None:
+        ax1.axvline(x=selected_n, color="black", linestyle="--", linewidth=2, alpha=0.85)
+        ax1.annotate(
+            f"Selected Sample Size ($N={selected_n}$)\nSustained stability criterion",
+            xy=(selected_n, selected_sigma),
+            xytext=(selected_n + 50, selected_sigma + 0.3),
+            arrowprops={"facecolor": "black", "shrink": 0.05, "width": 2, "headwidth": 8},
+            fontsize=12,
+            fontweight="bold",
+            bbox={"boxstyle": "round,pad=0.5", "fc": "white", "ec": "black", "lw": 1.2, "alpha": 0.9},
+        )
 
-    # Grid, Legend & Title
-    ax1.grid(True, which='both', axis='x', linestyle=':', linewidth=1, alpha=0.6)
-    ax1.grid(True, which='both', axis='y', linestyle=':', linewidth=1, alpha=0.6)
-    
-    lines = [line_var, line_time]
-    labels = [l.get_label() for l in lines]
-    ax1.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, 0.95), 
-               fontsize=12, frameon=True, shadow=True, borderpad=1, edgecolor='#333333')
-    
-    plt.title('Mohring Allocation Stability vs. Computational Runtime', fontsize=18, fontweight='bold', pad=25)
-    
-    output_dir = Path('documentation/phase_3')
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / 'fig_6_mohring_variance_calibration.png'
-    
+    ax1.grid(True, which="both", axis="x", linestyle=":", linewidth=1, alpha=0.6)
+    ax1.grid(True, which="both", axis="y", linestyle=":", linewidth=1, alpha=0.6)
+
+    lines = [line_variance, line_runtime]
+    labels = [line.get_label() for line in lines]
+    ax1.legend(
+        lines,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.95),
+        fontsize=12,
+        frameon=True,
+        shadow=True,
+        borderpad=1,
+        edgecolor="#333333",
+    )
+
+    plt.title(
+        "Mohring Allocation Stability vs. Computational Runtime",
+        fontsize=18,
+        fontweight="bold",
+        pad=25,
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor())
-    print(f"\nVisualization successfully generated and saved to: {output_path.absolute()}")
-    plt.close()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
 
-if __name__ == "__main__":
-    print("Executing empirical A* trials for Mohring sample size calibration (Multiprocessing Enabled)...")
-    calibration_data = get_real_calibration_data() 
-    
-    print("Engineering dual-axis visualization...")
+    print(f"Visualization saved to: {output_path.resolve()}")
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+def main() -> None:
+    print("Executing empirical A* trials for Mohring sample-size calibration...")
+    calibration_data = get_real_calibration_data(
+        sample_sizes=SAMPLE_SIZES,
+        num_trials=NUM_TRIALS,
+        total_fleet=TOTAL_FLEET,
+        base_seed=BASE_SEED,
+        use_parallel=True,
+    )
+
+    print("\nCalibration summary:")
+    print(calibration_data.to_string(index=False))
+
+    selected_n, selected_sigma = select_stable_sample_size(calibration_data)
+    if selected_n is not None:
+        print(f"\nSelected sample size: N={selected_n} with mean_std_dev={selected_sigma:.4f}")
+    else:
+        print("\nNo sample size reached the configured stability threshold.")
+
+    print("\nGenerating dual-axis visualization...")
     plot_mohring_calibration(calibration_data)
     print("Process complete.")
+
+
+if __name__ == "__main__":
+    main()
