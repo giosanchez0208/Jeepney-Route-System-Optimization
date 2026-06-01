@@ -15,15 +15,15 @@ ddm:
   beta: 0.4
 
 travel_graph:
-  walk_wt: 0.0142
-  ride_wt: 0.0071
-  wait_wt: 8.5
-  transfer_wt: 14.2
+  walk_wt: 0.5630
+  ride_wt: 0.00632
+  wait_wt: 14.44
+  transfer_wt: 15.78
   direct_wt: 0.0
   alight_wt: 0.0
 
 simulation:
-  mohring_sample_size: 200     # Uniform High-Fi Sampling
+  mohring_sample_size: 450 # Updated based on variance collapse empirical test
   jeep_capacity: 16
   num_ticks: 540               # Uniform High-Fi ticks (540 @ 10s = 90 min)
   jeep_speed_kmh: 20.0
@@ -64,4 +64,4 @@ optimization:
 surrogate:
   transfer_multiplier: 2.5
   unreachable_penalty: 100000.0
-  num_samples: 100
+  num_samples: 450            
