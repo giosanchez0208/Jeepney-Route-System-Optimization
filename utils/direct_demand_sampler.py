@@ -8,6 +8,7 @@ import requests
 import networkx as nx
 from typing import Optional, Protocol, Any
 from dataclasses import dataclass
+from datetime import datetime  # <-- Added for date and time handling
 from tqdm import tqdm
 from dotenv import load_dotenv
 from rich import print
@@ -32,10 +33,14 @@ class NetworkGraph(Protocol):
 class DDMConfig:
     """
     Standardized configuration for the Direct Demand Model equations.
+    Extended to support a target evaluation time.
     """
     alpha: float = 0.6
     beta: float = 0.4
     cache_dir: str = "utils/.cache"
+    
+    # Target date and time for the simulation. If None, default to live traffic.
+    target_time: Optional[datetime] = None  
     
     # Cochran's Formula Parameters
     z_score: float = 1.96        # 95% Confidence Level
@@ -43,7 +48,7 @@ class DDMConfig:
     margin_error: float = 0.05   # 5% Margin of Error
     api_limit_override: Optional[int] = None
 
-DDM_MODEL_CACHE_VERSION = 2
+DDM_MODEL_CACHE_VERSION = 3  # Incremented due to signature structural changes
 
 def _node_cache_key(node: Node) -> tuple[float, float, Optional[int]]:
     return (round(node.lon, 10), round(node.lat, 10), getattr(node, "layer", None))
@@ -69,6 +74,8 @@ def _config_signature(config: DDMConfig) -> str:
         "margin_error": config.margin_error,
         "api_limit_override": config.api_limit_override,
         "cache_dir": config.cache_dir,
+        # Unique string token representation changes the signature per time variation
+        "target_time": config.target_time.isoformat() if config.target_time else "LIVE"
     }
     return hashlib.md5(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -77,11 +84,12 @@ class TrafficClient:
     Standalone client for network requests and caching.
     Decouples TomTom API logic from the mathematical sampling engine.
     """
-    def __init__(self, api_key: Optional[str], cache_dir: str, verbose: bool = False):
+    def __init__(self, api_key: Optional[str], cache_dir: str, target_time: Optional[datetime] = None, verbose: bool = False):
         if not api_key:
             raise ValueError("[ENVIRONMENT] TOMTOM_API_KEY is missing from the .env file.")
         self.api_key = api_key
         self.verbose = verbose
+        self.target_time = target_time
         
         # Isolate TomTom API payloads
         self.cache_dir = os.path.join(cache_dir, "tomtom_api")
@@ -91,7 +99,8 @@ class TrafficClient:
         empirical_data = {}
         iterable = target_nodes
         if self.verbose:
-            iterable = tqdm(iterable, desc="Querying TomTom Flow API")
+            desc = f"Querying TomTom (Target Time: {self.target_time.isoformat()})" if self.target_time else "Querying TomTom Flow API"
+            iterable = tqdm(iterable, desc=desc)
             
         for node in iterable:
             weight = self._query_api(node)
@@ -101,7 +110,8 @@ class TrafficClient:
         return empirical_data
 
     def _query_api(self, node: Node) -> Optional[float]:
-        cache_key = hashlib.md5(f"{node.lat}_{node.lon}".encode()).hexdigest()
+        time_str = self.target_time.isoformat() if self.target_time else "live"
+        cache_key = hashlib.md5(f"{node.lat}_{node.lon}_{time_str}".encode()).hexdigest()
         cache_path = os.path.join(self.cache_dir, f"tomtom_{cache_key}.json")
         
         if os.path.exists(cache_path):
@@ -109,26 +119,61 @@ class TrafficClient:
                 data = json.load(f)
                 return data.get("weight")
 
-        url = f"https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point={node.lat},{node.lon}&key={self.api_key}"
-        
-        try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                flow = data.get("flowSegmentData", {})
-                current_speed = flow.get("currentSpeed", 1)
-                free_flow = flow.get("freeFlowSpeed", 1)
-                
-                weight = free_flow / max(current_speed, 1)
-                
-                with open(cache_path, "w") as f:
-                    json.dump({"weight": weight, "raw": flow}, f)
+        # --- PREDICTIVE ROUTING MODE (Target time specified) ---
+        if self.target_time:
+            # Shift slightly north to simulate a micro-segment route query starting at the node point
+            offset_lat = node.lat + 0.001
+            url = f"https://api.tomtom.com/routing/1/calculateRoute/{node.lat},{node.lon}:{offset_lat},{node.lon}/json"
+            
+            params = {
+                "key": self.api_key,
+                "departAt": self.target_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "traffic": "true"
+            }
+            
+            try:
+                response = requests.get(url, params=params, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    summary = data.get("routes", [{}])[0].get("summary", {})
                     
-                return weight
-            else:
+                    travel_time = summary.get("travelTimeInSeconds", 1)
+                    no_traffic_time = summary.get("noTrafficTravelTimeInSeconds", 1)
+                    
+                    # Weight represents penalty friction (Travel Time / Free Flow Travel Time)
+                    weight = travel_time / max(no_traffic_time, 1)
+                    
+                    with open(cache_path, "w") as f:
+                        json.dump({"weight": weight, "raw": summary}, f)
+                        
+                    return weight
+                else:
+                    return None
+            except requests.exceptions.RequestException:
                 return None
-        except requests.exceptions.RequestException:
-            return None
+
+        # --- REAL-TIME LIVE FLOW MODE (Default Fallback) ---
+        else:
+            url = f"https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point={node.lat},{node.lon}&key={self.api_key}"
+            
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    flow = data.get("flowSegmentData", {})
+                    current_speed = flow.get("currentSpeed", 1)
+                    free_flow = flow.get("freeFlowSpeed", 1)
+                    
+                    weight = free_flow / max(current_speed, 1)
+                    
+                    with open(cache_path, "w") as f:
+                        json.dump({"weight": weight, "raw": flow}, f)
+                        
+                    return weight
+                else:
+                    return None
+            except requests.exceptions.RequestException:
+                return None
 
 class DirectDemandSampler:
     """
@@ -186,7 +231,12 @@ class DirectDemandSampler:
             print(f"[STATISTICS] Population Size (N): {self.n}")
             print(f"[STATISTICS] Computed Sample Size (n): {self.api_sample_limit}")
 
-        self.traffic_client = TrafficClient(TOMTOM_API_KEY, self.config.cache_dir, self.verbose)
+        self.traffic_client = TrafficClient(
+            api_key=TOMTOM_API_KEY, 
+            cache_dir=self.config.cache_dir, 
+            target_time=self.config.target_time, 
+            verbose=self.verbose
+        )
         
         self.centrality_scores = self._compute_centrality()
         self.target_centroids = self._select_query_centroids()
@@ -197,7 +247,6 @@ class DirectDemandSampler:
         self._build_alias_tables(self.raw_probabilities)
         self._save_cache()
 
-    
     def _calculate_optimal_sample_size(self) -> int:
         if self.config.api_limit_override is not None:
             return self.config.api_limit_override
@@ -227,6 +276,7 @@ class DirectDemandSampler:
             "nodes": self.n,
         }
         return hashlib.md5(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
     def _resolve_node(self, key: tuple[float, float, Optional[int]]) -> Node:
         node = self._node_lookup.get(key)
         if node is None:
@@ -330,7 +380,6 @@ class DirectDemandSampler:
         # Shift from uniform random sampling to Centrality-Weighted Sampling.
         # This uses the Efraimidis and Spirakis (2006) method for weighted 
         # random sampling without replacement.
-        
         weighted_nodes = sorted(
             self.centrality_scores.keys(),
             key=lambda node: math.log(random.random()) / self.centrality_scores[node],
