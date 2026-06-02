@@ -1,0 +1,104 @@
+% Chapter 4: Results & Discussion
+
+\chapter{Results \& Discussion}
+\noindent
+This chapter evaluates the performance of the proposed memetic framework, transitioning from environmental validation and algorithmic calibration on synthetic topologies to the final network optimization of the empirical Iligan City \texttt{TravelGraph}.
+
+% ────────────────────────────────────────────────────────────
+\section{Environment and Demand Generation}
+\noindent
+To ensure the optimization relies on valid spatial and demographic data, the digital twin of Iligan City and the simulated passenger demand must first be verified.
+
+\subsection{\texttt{CityGraph} Arterial Network Pruning}
+\textbf{Visual 1:} Full Iligan City OpenStreetMap graph (all \texttt{DirEdge} connections). \\
+\textbf{Visual 2:} The filtered Arterial \texttt{CityGraph}. \\
+\textit{Discussion:} Proves the successful removal of residential dead-ends and non-traversable nodes, restricting \texttt{Jeep} agent movement to valid, navigable transit corridors.
+
+\subsection{\texttt{DirectDemandModel} (DDM) Topography}
+\textbf{Visual 1:} \texttt{PassengerGenerator} initialization using Efraimidis \& Spirakis weighted reservoir sampling of OpenStreetMap POIs. \\
+\textbf{Visual 2:} The Inverse Distance Weighting (IDW) Heatmap showing spatial demand diffusion. \\
+\textbf{Visual 3:} Betweenness Centrality Graph vs. OD Centrality Graph (Side-by-side). \\
+\textit{Discussion:} Demonstrates mathematically that OD Centrality, derived directly from the DDM, is a superior proxy for true passenger flow compared to raw topological street betweenness.
+
+% ────────────────────────────────────────────────────────────
+\section{Architectural Validation}
+\noindent
+Prior to evolutionary optimization, the foundational mechanics of the multi-layer graph and the temporal physics engine are validated.
+
+\subsection{The Three-Layer \texttt{TravelGraph} Connectivity}
+\textbf{Visual 1:} A matrix of 6 isolated illustrations detailing the explicit layer transitions: Start Walk (SW), Wait (WA), Ride (RI), Alight (AL), End Walk (EW), and Transfer (TR). \\
+\textbf{Visual 2:} A Sample Journey tracing a single \texttt{Passenger} agent navigating physical distance and transfer penalties, converted into Equivalent In-Vehicle Minutes (EIVM).
+
+\subsection{Agent-Based Temporal Simulation}
+\textbf{Visual 1:} Tick-by-tick temporal validation tracing a \texttt{Passenger} and a \texttt{Jeep} agent, proving the temporal physics engine accurately handles boarding, alighting, and bus bunching. \\
+\textbf{Visual 2 (Mohring Allocation):} Side-by-side comparison. Left: Edge Utility (Gray to Red heat spectrum). Right: Route Concentration (Solid route colors, Gray to Red). \\
+\textit{Discussion:} Validates the fleet allocation mathematics by proving jeeps are densely assigned to corridors where passenger utility and demand-service gaps are highest.
+
+% ────────────────────────────────────────────────────────────
+\section{Component Calibration and Verification}
+\noindent
+Prior to executing the framework on the full empirical data, hyperparameter calibration was conducted on a synthetic Manhattan grid topology to isolate algorithmic behavior from geographic anomalies \citep{kepaptsoglou2009transit}. 
+
+
+\subsection{Simulation Fidelity and OD Demand Variance Calibration}
+\textbf{Visual:} A line chart with shaded error bands (representing $\pm 1$ standard deviation) plotting Passenger Generation Volume ($N$) on the x-axis against the Mean Simulation Fitness Score ($F_{\text{sim}}$) and Fitness Variance ($\sigma^2$) across multiple runs of a static topology. \\
+\textit{Discussion:} Because the \texttt{PassengerGenerator} stochastically spawns Origin-Destination (OD) pairs based on the \texttt{DirectDemandModel}, simulating an insufficient number of agents (e.g., $N < 50$) introduces severe sampling bias. Under low passenger volumes, the fitness evaluation is dominated by stochastic noise, resulting in extreme variance between identical runs. Conversely, while massive passenger volumes (e.g., $N > 1000$) eliminate variance and perfectly approximate the IDW demand landscape, they induce $\mathcal{O}(N)$ computational bottlenecks. This calibration experiment identifies the "sweet spot"—the critical volume threshold where fitness variance collapses and the score stabilizes, guaranteeing that the \texttt{MemeticEngine} selects parents based on true structural fitness rather than stochastic OD sampling luck, while minimizing simulation runtime.
+
+\subsection{Sensitivity Analysis of the Underservice Penalty ($\beta$)}
+
+\textbf{Visual:} A line chart plotting $\beta$ values against Total System Cost and \% of Completed Trips on the grid topology. \\
+\textit{Discussion:} Identifies the mathematical "sweet spot" where the algorithm completes the vast majority of trips without causing the $F_{\text{sim}}$ fitness score to artificially explode due to extreme routing detours.
+
+\subsection{Surrogate Ranking Fidelity (Spearman $\rho$)}
+\textbf{Visual:} Scatter Plot mapping the $\mathcal{O}(1)$ static A* Surrogate Cost ($C_{\text{sur}}$) against the full temporal Simulation Fitness ($F_{\text{sim}}$). \\
+\textit{Discussion:} Calculating the Spearman rank correlation ($\rho$) proves that the surrogate preserves the relative fitness ordering of candidate solutions, validating its use as a lightweight acceptance gate during Lamarckian mutation.
+
+\subsection{Lamarckian Operator Mechanics}
+\textbf{Visual 1:} Scatter plot proving networks with lower Demand-Service Gaps natively produce better $F_{\text{sim}}$ scores. \\
+\textbf{Visual 2:} Pre-mutation vs. Post-mutation map snapshots demonstrating the explicit structural effects of Attraction, Repulsion, and Tortuosity reduction executed by the \texttt{LocalSearch} mutator.
+
+% ────────────────────────────────────────────────────────────
+\section{Evolutionary Dynamics}
+\noindent
+This section evaluates the behavioral dynamics of the \texttt{MemeticEngine} over time.
+
+\subsection{Convergence and \texttt{AdaptiveController} Orchestration}
+\textbf{Visual:} The convergence curve tracking Best, Average, and Worst fitness scores, overlaid with the dynamically scaling mutation rate triggered by the stagnation counter ($s$).
+
+\subsection{Trunk Preservation and Lineage Tracking}
+\textbf{Visual:} A generational tree utilizing data from the \texttt{TelemetryEngine}, showing the preservation of specific route segments across parent-child lineages. \\
+\textit{Discussion:} Validates the Topological Hub Crossover by proving that fitter parents disproportionately pass down their core, high-efficiency "trunk" routes.
+
+\subsection{Heuristic Efficacy: Epigenetic Transfer vs. Native Pre-Simulation}
+\textbf{Visual:} A dual-axis scatter plot and bar chart comparing two metrics—Post-Mutation $F_{\text{sim}}$ Improvement (left y-axis) and Computational Runtime (right y-axis)—across two identical sets of offspring geometries. \\
+\textit{Discussion:} To rigorously evaluate the value of Epigenetic Inheritance, an A/B cloning experiment was conducted to compare inherited advice against native ground-truth advice. Following crossover, offspring topologies were duplicated. The experimental group (Twin A) was mutated using the $\mathcal{O}(1)$ fitness-weighted inherited matrix ($w_A \tau^A + w_B \tau^B$). The control group (Twin B) was forced to run a full, computationally expensive pre-simulation to generate its own native pheromone matrix prior to mutation. 
+
+While the native matrix of Twin B theoretically provides a perfectly accurate demand gradient for its specific topology, the results demonstrate the Pareto efficiency of the memetic approach. Epigenetic Inheritance captures the vast majority of the fitness improvement achieved by the native pre-simulation, but executes in a fraction of the computational time. This statistically proves that transferring the cultural demand memory is a highly accurate and computationally mandatory heuristic bypass, preventing the evolutionary algorithm from bottlenecking on redundant physics simulations during the local search phase.
+
+\subsection{Multi-Dimensional Phenotypic Convergence}
+\textbf{Visual:} A multi-line plot tracking the population's Jaccard Similarity, Graph Edit Distance (GED), and 2D Wasserstein Distance, overlaid with fitness variance ($\sigma^2(F)$) collapsing. \\
+\textit{Discussion:} Proves the algorithm avoids flat fitness landscapes by demonstrating simultaneous convergence across three orthogonal dimensions: shared streets (Jaccard), topological connectivity (GED), and spatial demand coverage (Wasserstein).
+
+% ────────────────────────────────────────────────────────────
+\section{Optimized Network for Iligan City}
+\noindent
+With the framework validated, the \texttt{Optimizer} is applied to the empirical Iligan City data. Due to the absence of explicit, digitized routing data for the current jeepney system, a stochastic baseline is established to measure algorithmic improvement.
+
+\subsection{Stochastic Baseline Generation}
+\textit{Discussion:} Evaluating the average performance of generation-zero networks (randomly initialized via \texttt{Routes} module) to establish a statistical baseline for arbitrary network performance.
+
+\subsection{Topological Robustness and the Optimized Network}
+\textbf{Visual 1:} A map of the final optimized route system extracted from the \texttt{StatePreservationEngine} JSON snapshots. \\
+\textbf{Visual 2:} A correlation matrix comparing the final optimized networks from 7 independent runs using Jaccard, GED, and Wasserstein metrics. \\
+\textit{Discussion:} High structural similarity across independent runs proves the algorithm converges deterministically on a robust global optimum region.
+
+\subsection{Operational Sensitivity Analysis}
+\textit{Discussion:} Observing structural changes in the optimized topologies when varying operational constraints: Allocatable \texttt{Jeep} fleet size and passenger spawning frequency.
+
+\subsection{Equity and Distribution Analysis}
+\textbf{Visual:} Histogram comparing the distribution of passenger travel times ($T_i$) between the Stochastic Baseline and the final Optimized Network. \\
+\textit{Discussion:} Proves the efficacy of the Equity Regularizer ($\alpha \sigma$) by showing a reduction in the "long tail" of extreme commute times for peripheral communities.
+
+\subsection{Network Resilience and Path Diversity}
+\textbf{Visual:} A heatmap of edge traversals accompanied by a Shannon Entropy calculation of the passenger path distribution. \\
+\textit{Discussion:} Demonstrates that the optimized network avoids forcing all traffic through a single catastrophic bottleneck. A higher Shannon entropy score indicates distinct routing options and a resilient transit architecture.
