@@ -14,6 +14,10 @@ from utils.passenger_generator import PassengerGenerator
 from utils.travel_graph import TravelGraph
 
 from datetime import datetime
+from dataclasses import dataclass
+import concurrent.futures
+import gc
+from utils.simulation_parallel import ParallelSimulationRunner
 
 # =========================================================
 # City Graph
@@ -139,6 +143,17 @@ def reuse_travelgraph(pkl_file: str) -> TravelGraph:
 # Simulation
 # =========================================================
 
+@dataclass
+class SimEnvironment:
+    """
+    Lightweight container for a simulation setup.
+    """
+    tg: TravelGraph
+    yaml_file: str
+    jeep_system: JeepSystem
+    sampler: DirectDemandSampler
+    delete_yaml_when_done: bool = False
+
 def generate_dummy_yaml(export_loc: str, **kwargs) -> str:
     print(f"[INFO] Generating dummy YAML at {export_loc} with overrides: {kwargs}")
     with open('configs/profile_p1.yaml', 'r', encoding='utf-8') as f:
@@ -204,3 +219,41 @@ def collect_metrics(sim: Simulation, export_loc: str) -> SimulationResult:
     result.export_report(export_loc)
     
     return result
+
+def run_simulation_env(env: SimEnvironment) -> Simulation:
+    """
+    Wrapper to run a simulation using a SimEnvironment object.
+    """
+    return run_simulation(
+        tg=env.tg,
+        yaml_file=env.yaml_file,
+        jeep_system=env.jeep_system,
+        sampler=env.sampler,
+        delete_yaml_when_done=env.delete_yaml_when_done
+    )
+
+def run_simulations_parallel(envs: list[SimEnvironment], max_workers: Optional[int] = None) -> list[SimulationResult]:
+    """
+    Runs an array of SimEnvironment setups in parallel using the ParallelSimulationRunner.
+    Requires that all environments share the same base configuration parameters (from the first yaml_file).
+    """
+    if not envs:
+        return []
+        
+    base_yaml = envs[0].yaml_file
+    with open(base_yaml, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+        
+    runner = ParallelSimulationRunner(config=config, max_workers=max_workers)
+    routes_list = [env.jeep_system.routes for env in envs]
+    
+    results = runner.run_parallel(routes_list)
+    
+    for env in envs:
+        if env.delete_yaml_when_done:
+            try:
+                os.remove(env.yaml_file)
+            except OSError:
+                pass
+                
+    return results
