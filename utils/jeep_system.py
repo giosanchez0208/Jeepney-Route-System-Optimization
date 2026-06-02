@@ -522,7 +522,7 @@ class JeepSystem:
                 # Alighting phase
                 for p in tuple(jeep.onboard_passengers):
                     target_node = p.get_target_alight_node()
-                    if target_node is not None and target_node is node:
+                    if target_node is not None and (target_node is node or (target_node.lon == node.lon and target_node.lat == node.lat)):
                         p.state = Passenger.WALKING
                         p.current_jeep = None
                         p.curr_lat = node.lat

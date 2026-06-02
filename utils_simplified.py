@@ -2,21 +2,22 @@ import os
 import yaml
 import pickle
 from typing import Optional
+
+from datetime import datetime
+from dataclasses import dataclass
+import concurrent.futures
+import gc
+
 from utils.city_graph import CityGraph
 from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
-
 from utils.route import Route, RouteGenerator
 from utils.jeep_system import JeepSystem, FleetAllocator
 from utils.travel_graph import TravelGraph
 from utils.jeep import Jeep
 from utils.simulation import Simulation, SimulationResult
 from utils.passenger_generator import PassengerGenerator
-from utils.travel_graph import TravelGraph
-
-from datetime import datetime
-from dataclasses import dataclass
-import concurrent.futures
-import gc
+from utils.pheromone import PheromoneMatrix
+from utils.local_search import ACOLocalSearch
 from utils.simulation_parallel import ParallelSimulationRunner
 
 # =========================================================
@@ -257,3 +258,199 @@ def run_simulations_parallel(envs: list[SimEnvironment], max_workers: Optional[i
                 pass
                 
     return results
+
+# =========================================================
+# Pheromones and Mutators
+# =========================================================
+
+def build_pheromone_matrix(cg: CityGraph, sim_result: SimulationResult) -> PheromoneMatrix:
+    """
+    Initializes a fresh PheromoneMatrix from the CityGraph and immediately
+    stamps the passenger flows from the SimulationResult onto it.
+    """
+    config = sim_result.metrics.get("config", {}) if hasattr(sim_result, "metrics") else {}
+    phero = PheromoneMatrix(all_edges=cg.graph, config=config, sim_result=sim_result)
+    
+    # Pre-compute gaps if jeep_system is available (if not stripped by IPC)
+    if hasattr(sim_result, "jeep_system") and sim_result.jeep_system is not None:
+        phero.gaps = phero.calculate_demand_service_gaps(sim_result.jeep_system)
+    else:
+        phero.gaps = {}
+        
+    return phero
+
+def blend_pheromone_matrix(parentA, parentB, cg: CityGraph) -> PheromoneMatrix:
+    """
+    Blends two parent Chromosomes (or objects with .pheromones and .cost) 
+    using a fitness-weighted arithmetic crossover.
+    """
+    if not hasattr(parentA, 'cost') or not hasattr(parentA, 'pheromones'):
+        raise ValueError("[UTILS] parentA must have 'cost' and 'pheromones' attributes.")
+        
+    total_cost = parentA.cost + parentB.cost
+    if total_cost == 0.0:
+        total_cost = 1.0
+
+    weight_a = parentB.cost / total_cost
+    weight_b = parentA.cost / total_cost
+
+    parent_cfg = {
+        "optimization": {
+            "initial_tau": parentA.pheromones.initial_tau,
+            "rho": parentA.pheromones.rho,
+            "q": parentA.pheromones.q,
+            "default_jeep_weight": parentA.pheromones.default_jeep_weight,
+        }
+    }
+    
+    child_phero = PheromoneMatrix(all_edges=cg.graph, config=parent_cfg)
+    
+    all_edges = set(parentA.pheromones.tau.keys()).union(parentB.pheromones.tau.keys())
+    for e in all_edges:
+        tau_a = parentA.pheromones.tau.get(e, 0.0)
+        tau_b = parentB.pheromones.tau.get(e, 0.0)
+        blended = (weight_a * tau_a) + (weight_b * tau_b)
+        if blended > 0.0:
+            child_phero.tau[e] = blended
+
+    return child_phero
+
+def mutate_attraction(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]:
+    """
+    Applies the Spatial Attraction (Or-Opt Transplant) operator to the route system.
+    """
+    import copy
+    routes_copy = [Route(path=r.path[:], city_graph=cg) for r in route_system]
+    
+    ls = ACOLocalSearch(cg)
+    # Ensure gaps are populated
+    if not matrix.gaps:
+        matrix.gaps = matrix.calculate_demand_service_gaps(routes_copy)
+        
+    result = ls.strategy_spatial_attraction(routes_copy, matrix, intensity)
+    return routes_copy if result else route_system
+
+def mutate_repulsion(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]:
+    """
+    Applies the Redundancy Repulsion (2-Opt Exchange) operator to the route system.
+    """
+    import copy
+    routes_copy = [Route(path=r.path[:], city_graph=cg) for r in route_system]
+    
+    ls = ACOLocalSearch(cg)
+    if not matrix.gaps:
+        matrix.gaps = matrix.calculate_demand_service_gaps(routes_copy)
+        
+    result = ls.strategy_redundancy_repulsion(routes_copy, matrix, intensity)
+    return routes_copy if result else route_system
+
+def mutate_pruning(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]:
+    """
+    Applies the Tortuosity Pruning operator to the route system.
+    """
+    import copy
+    routes_copy = [Route(path=r.path[:], city_graph=cg) for r in route_system]
+    
+    ls = ACOLocalSearch(cg)
+    if not matrix.gaps:
+        matrix.gaps = matrix.calculate_demand_service_gaps(routes_copy)
+        
+    n_prunes, _ = ls.strategy_tortuosity_pruning(routes_copy, matrix, intensity)
+    return routes_copy if n_prunes > 0 else route_system
+
+def crossover_routes(routesA: list[Route], matrixA: PheromoneMatrix, routesB: list[Route], cg: CityGraph, target_route_count: int = 4) -> list[Route]:
+    """
+    Executes a topological crossover utilizing a high-demand sub-graph cluster,
+    blending the structural properties of two parent route systems.
+    """
+    from utils.genetic import MemeticAlgorithm
+    from utils.local_search import ACOLocalSearch
+    
+    ls = ACOLocalSearch(cg)
+    ma = MemeticAlgorithm(cg, ls, target_route_count)
+    
+    class DummyChrom:
+        def __init__(self, r, p):
+            self.routes = r
+            self.pheromones = p
+            
+    pA = DummyChrom(routesA, matrixA)
+    pB = DummyChrom(routesB, None)
+    
+    return ma.crossover_topological_hub(pA, pB)
+
+
+# =========================================================
+# Evolutionary Optimizer & Telemetry Facade
+# =========================================================
+
+def build_optimizer(yaml_file: str, resume_dir: Optional[str] = None):
+    """
+    Constructs a genetic algorithm Optimizer instance from a YAML config file.
+    If resume_dir is provided, it attempts to load from the latest state checkpoint.
+    """
+    from utils.optimizer import Optimizer
+    from pathlib import Path
+    
+    if resume_dir:
+        print(f"[INFO] Resuming Optimizer from run directory: {resume_dir}")
+        return Optimizer(Path(resume_dir))
+    else:
+        print(f"[INFO] Building fresh Optimizer using config: {yaml_file}")
+        return Optimizer.create(Path(yaml_file))
+
+def process_telemetry(run_dir: str) -> dict:
+    """
+    Parses telemetry files (history.csv and lineage.csv) from an optimizer run directory.
+    Returns a dictionary containing pandas DataFrames for easy plotting and analysis.
+    """
+    import pandas as pd
+    from pathlib import Path
+    
+    run_path = Path(run_dir)
+    history_file = run_path / "history.csv"
+    lineage_file = run_path / "lineage.csv"
+    
+    result = {}
+    
+    if history_file.exists():
+        print(f"[INFO] Parsing history file: {history_file}")
+        try:
+            df_history = pd.read_csv(history_file)
+            result["history"] = df_history
+        except Exception as e:
+            print(f"[WARNING] Failed to parse history.csv: {e}")
+            result["history"] = pd.DataFrame()
+    else:
+        print(f"[WARNING] history.csv not found in {run_dir}")
+        result["history"] = pd.DataFrame()
+        
+    if lineage_file.exists():
+        print(f"[INFO] Parsing lineage file: {lineage_file}")
+        try:
+            df_lineage = pd.read_csv(lineage_file)
+            result["lineage"] = df_lineage
+        except Exception as e:
+            print(f"[WARNING] Failed to parse lineage.csv: {e}")
+            result["lineage"] = pd.DataFrame()
+    else:
+        print(f"[WARNING] lineage.csv not found in {run_dir}")
+        result["lineage"] = pd.DataFrame()
+        
+    return result
+
+def load_generation_snapshot(run_dir: str, generation: int) -> dict:
+    """
+    Loads a specific generation JSON snapshot from the run directory snapshots.
+    """
+    import json
+    from pathlib import Path
+    
+    snapshot_path = Path(run_dir) / "snapshots" / f"network_state_gen_{generation}.json"
+    if not snapshot_path.exists():
+        raise FileNotFoundError(f"Snapshot for generation {generation} not found at {snapshot_path}")
+        
+    with open(snapshot_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+    
