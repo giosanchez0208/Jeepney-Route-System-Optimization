@@ -28,6 +28,14 @@ class Node:
 		self.layer = layer
 		self.id: str = f"N{uuid4().hex}"
 
+	def __eq__(self, other: object) -> bool:
+		if not isinstance(other, Node):
+			return NotImplemented
+		return self.id == other.id
+
+	def __hash__(self) -> int:
+		return hash(self.id)
+
 	def __setattr__(self, name: str, value) -> None:
 		if "_lon" in self.__dict__ and "_lat" in self.__dict__ and name in {"lon", "lat", "_lon", "_lat"}:
 			raise AttributeError("[NODE] lon and lat are immutable after initialization.")

@@ -1,3 +1,4 @@
+import os
 import yaml
 import pickle
 from typing import Optional
@@ -87,14 +88,14 @@ def generate_route_system(num_routes: int, cg: CityGraph, sampler: DirectDemandS
     generator = RouteGenerator(city_graph=cg, sampler=sampler, verbose=True)
     return [generator.generate(n_points=4) for _ in range(num_routes)]
 
-def generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDemandSampler, tg: TravelGraph) -> JeepSystem:
+def generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDemandSampler, tg: TravelGraph, mohring_sample_size = 200) -> JeepSystem:
     print(f"[INFO] Allocating fleet of {num_jeeps} jeeps across {len(routes)} routes using Mohring Effect...")
     allocations = FleetAllocator.allocate_by_mohring(
         total_fleet=num_jeeps,
         routes=routes,
         sampler=sampler,
         tg=tg,
-        mohring_sample_size=2000
+        mohring_sample_size=mohring_sample_size
     )
     
     jeeps = []
@@ -174,7 +175,7 @@ def run_simulation(tg: TravelGraph, yaml_file: str, jeep_system: JeepSystem, sam
     
     sim = Simulation(
         city_query=config.get("city_graph", {}).get("name", "City"),
-        bounds=tg.city_graph.get_bounds(),
+        bounds=tg.cg.get_bounds(),
         jeep_system=jeep_system,
         passenger_generator=passenger_generator,
         max_ticks=sim_cfg.get("num_ticks", 3600),
