@@ -110,6 +110,30 @@ def generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDem
 # Travel Graph
 # =========================================================
 
+def build_travelgraph(cg: CityGraph, yaml_file: str, routes: list[Route], pkl_path: Optional[str] = None) -> TravelGraph:
+    print(f"[INFO] Building TravelGraph using config from: {yaml_file}")
+    with open(yaml_file, 'r', encoding='utf-8') as f:
+        config_data = yaml.safe_load(f)
+        
+    tg_config = config_data.get('travel_graph', {})
+    tg = TravelGraph(cg=cg, config=tg_config, routes=routes)
+    
+    if pkl_path:
+        import os
+        os.makedirs(os.path.dirname(pkl_path), exist_ok=True)
+        print(f"[INFO] Serializing TravelGraph to pickle file: {pkl_path}")
+        with open(pkl_path, 'wb') as f:
+            pickle.dump(tg, f)
+        print(f"[INFO] TravelGraph successfully serialized to pickle file: {pkl_path}")
+            
+    return tg
+
+def reuse_travelgraph(pkl_file: str) -> TravelGraph:
+    print(f"[INFO] Reusing TravelGraph from pickle file: {pkl_file}")
+    with open(pkl_file, 'rb') as f:
+        tg = pickle.load(f)
+    return tg
+
 # =========================================================
 # Simulation
 # =========================================================

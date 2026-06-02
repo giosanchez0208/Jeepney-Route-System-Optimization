@@ -43,8 +43,8 @@ _LAYER_BORDER_COLORS = {
 class TravelGraph3DVisualizer:
     def __init__(
         self,
-        travel_graph: "TravelGraph",
-        journey: Optional[list[DirEdge]] = None,
+        base_edges: list[DirEdge],
+        highlight_edges: Optional[list[DirEdge]] = None,
         *,
         mode: MapMode = "light_nolabels",
         edge_thickness: float = 2.6,
@@ -52,13 +52,16 @@ class TravelGraph3DVisualizer:
         node_radius: float = 42,
         layer_opacity: float = 0.56,
     ) -> None:
-        self.tg = travel_graph
-        self.journey = journey or []
+        self.base_edges = base_edges
+        self.highlight_edges = highlight_edges or []
         self.mode = mode
         self.edge_thickness = edge_thickness
         self.journey_thickness = journey_thickness
         self.node_radius = node_radius
         self.layer_opacity = layer_opacity
+        
+        # Extract unique nodes from base edges for bounding box calculations
+        self.nodes = list({e.start for e in self.base_edges} | {e.end for e in self.base_edges})
 
     def draw(
         self,
@@ -79,8 +82,8 @@ class TravelGraph3DVisualizer:
         node_radius: Optional[float] = None,
         layer_opacity: Optional[float] = None,
     ) -> Image.Image:
-        if not self.tg.cg.nodes:
-            raise ValueError("[TRAVEL GRAPH 3D] CityGraph nodes are required for visualization context.")
+        if not self.nodes:
+            raise ValueError("[TRAVEL GRAPH 3D] Base edges must contain nodes for visualization context.")
 
         mode = self.mode if mode is None else mode
         edge_thickness = self.edge_thickness if edge_thickness is None else edge_thickness
@@ -98,9 +101,9 @@ class TravelGraph3DVisualizer:
             "DI": display_direct,
         }
 
-        layer_gap = _layer_gap(self.tg.cg.nodes)
-        center_lon, center_lat = _projection_origin(self.tg.cg.nodes)
-        points = _collect_points(self.tg.cg.nodes, self.tg.cg.graph, self.journey, layer_gap, center_lon, center_lat)
+        layer_gap = _layer_gap(self.nodes)
+        center_lon, center_lat = _projection_origin(self.nodes)
+        points = _collect_points(self.nodes, self.base_edges, self.highlight_edges, layer_gap, center_lon, center_lat)
 
         fig, ax = _build_figure(points)
         face_color = _DARK_FACE_COLOR if mode.startswith("dark") else _LIGHT_FACE_COLOR
@@ -112,7 +115,7 @@ class TravelGraph3DVisualizer:
         for layer in _LAYERS:
             _draw_layer_plane(
                 ax,
-                self.tg.cg.nodes,
+                self.nodes,
                 layer,
                 layer_gap,
                 center_lon,
@@ -125,7 +128,7 @@ class TravelGraph3DVisualizer:
         for layer in _LAYERS:
             _draw_city_graph_edges(
                 ax,
-                self.tg.cg.graph,
+                self.base_edges,
                 layer,
                 layer_gap,
                 center_lon,
@@ -135,7 +138,7 @@ class TravelGraph3DVisualizer:
 
         _draw_journey(
             ax,
-            self.journey,
+            self.highlight_edges,
             flags,
             layer_gap,
             center_lon,
@@ -282,6 +285,10 @@ def _draw_city_graph_edges(
     segments = []
 
     for edge in edges:
+        # User snippet behavior: Layer 2 uses arterials only
+        if layer == 2 and getattr(edge, 'is_drivable', True) == False:
+            continue
+            
         start = _project_point(edge.start.lon, edge.start.lat, layer, layer_gap, center_lon, center_lat)
         end = _project_point(edge.end.lon, edge.end.lat, layer, layer_gap, center_lon, center_lat)
         segments.append((start, end))
@@ -291,9 +298,11 @@ def _draw_city_graph_edges(
             LineCollection(
                 segments,
                 colors=_CITY_EDGE_COLOR,
-                linewidths=max(edge_thickness * 0.55, 1.0),
+                linewidths=max(edge_thickness * 0.4, 0.5),
                 alpha=0.35,
-                zorder=layer * 3 + 0.5,
+                zorder=layer * 3 + 0.1,
+                capstyle='round',
+                joinstyle='round'
             )
         )
 
@@ -311,25 +320,76 @@ def _draw_journey(
     if not journey:
         return
 
-    segments = []
-    colors = []
-    labeled_segments: list[tuple[DirEdge, tuple[tuple[float, float], tuple[float, float]]]] = []
+    # Colored routes logic if prefix is "RI_R{idx}"
+    ROUTE_COLORS = ["#E63946", "#1D3557", "#2A9D8F", "#F4A261", "#9C27B0", "#E76F51", "#2A9D8F"]
+
+    grouped_paths = []
+    current_prefix = None
+    current_color = None
+    current_path = []
+    
+    labeled_segments = []
 
     for edge in journey:
         prefix = edge.id[:2]
-        if not flags.get(prefix, False):
+        
+        # Determine color
+        color = _TYPE_COLORS.get(prefix, "#FF1744")
+        if prefix == "RI" and "_" in edge.id:
+            try:
+                parts = edge.id.split("_")
+                r_idx = int(parts[1][1:])
+                color = ROUTE_COLORS[r_idx % len(ROUTE_COLORS)]
+                # Differentiate prefixes by route as well
+                prefix = f"RI_{r_idx}"
+            except ValueError:
+                pass
+                
+        if prefix[:2] not in flags or not flags.get(prefix[:2], False):
             continue
-        if edge.start.layer not in _LAYERS or edge.end.layer not in _LAYERS:
+            
+        if getattr(edge.start, 'layer', 1) not in _LAYERS or getattr(edge.end, 'layer', 1) not in _LAYERS:
             continue
 
-        start = _project_point(edge.start.lon, edge.start.lat, edge.start.layer, layer_gap, center_lon, center_lat)
-        end = _project_point(edge.end.lon, edge.end.lat, edge.end.layer, layer_gap, center_lon, center_lat)
-        segments.append((start, end))
-        colors.append(_TYPE_COLORS.get(prefix, "#FF1744"))
-        labeled_segments.append((edge, (start, end)))
+        start_pt = _project_point(edge.start.lon, edge.start.lat, edge.start.layer, layer_gap, center_lon, center_lat)
+        end_pt = _project_point(edge.end.lon, edge.end.lat, edge.end.layer, layer_gap, center_lon, center_lat)
+        
+        if labels_on:
+            labeled_segments.append((edge, (start_pt, end_pt)))
 
-    if segments:
-        ax.add_collection(LineCollection(segments, colors=colors, linewidths=journey_thickness, zorder=40))
+        if prefix == current_prefix:
+            current_path.append(end_pt)
+        else:
+            if current_path:
+                grouped_paths.append((current_color, current_path))
+            current_prefix = prefix
+            current_color = color
+            
+            if grouped_paths:
+                last_pt = grouped_paths[-1][1][-1]
+                if abs(start_pt[0] - last_pt[0]) < 1e-6 and abs(start_pt[1] - last_pt[1]) < 1e-6:
+                    current_path = [last_pt, end_pt]
+                else:
+                    current_path = [start_pt, end_pt]
+            else:
+                current_path = [start_pt, end_pt]
+
+    if current_path:
+        grouped_paths.append((current_color, current_path))
+
+    for color, path in grouped_paths:
+        xs = [pt[0] for pt in path]
+        ys = [pt[1] for pt in path]
+        
+        ax.plot(
+            xs, ys,
+            color=color,
+            linewidth=journey_thickness,
+            solid_capstyle='round',
+            solid_joinstyle='round',
+            alpha=0.9,
+            zorder=40
+        )
 
     if labels_on:
         for edge, ((x1, y1), (x2, y2)) in labeled_segments:
@@ -344,47 +404,27 @@ def _draw_journey(
 
 def _draw_legend(ax: plt.Axes, mode: MapMode) -> None:
     legend_items = [
-        (_TYPE_COLORS["SW"], "start_walk"),
-        (_TYPE_COLORS["WA"], "wait"),
-        (_TYPE_COLORS["RI"], "ride"),
-        (_TYPE_COLORS["AL"], "alight"),
-        (_TYPE_COLORS["TR"], "transfer"),
-        (_TYPE_COLORS["EW"], "end_walk"),
-        (_TYPE_COLORS["DI"], "direct"),
+        (_TYPE_COLORS["SW"], "Start Walk (SW)"),
+        (_TYPE_COLORS["WA"], "Wait (WA)"),
+        (_TYPE_COLORS["RI"], "Ride (RI)"),
+        (_TYPE_COLORS["AL"], "Alight (AL)"),
+        (_TYPE_COLORS["EW"], "End Walk (EW)"),
+        (_TYPE_COLORS["TR"], "Transfer (TR)"),
     ]
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            linestyle="None",
-            marker="s",
-            markersize=7,
-            markerfacecolor=color,
-            markeredgecolor=color,
-            label=label,
-        )
-        for color, label in legend_items
-    ]
+    handles = [Line2D([0], [0], color=color, linewidth=3.5, linestyle="solid", label=label) for color, label in legend_items]
+    
     text_color = "#ffffff" if mode.startswith("dark") else "#111111"
     legend = ax.legend(
-        handles=handles,
-        loc="upper left",
-        bbox_to_anchor=(0.012, 0.988),
-        bbox_transform=ax.transAxes,
-        frameon=True,
-        framealpha=0.9,
-        fancybox=True,
-        ncol=1,
-        handlelength=1.0,
-        handletextpad=0.6,
-        columnspacing=0.8,
-        labelspacing=0.4,
-        borderaxespad=0.0,
-        fontsize=8,
+        handles=handles, 
+        loc="upper left", 
+        bbox_to_anchor=(0.02, 0.98), 
+        frameon=True, 
+        framealpha=0.9, 
+        facecolor=_DARK_FACE_COLOR if mode.startswith("dark") else _LIGHT_FACE_COLOR, 
+        edgecolor="#CCCCCC", 
+        fontsize=10
     )
-    legend.get_frame().set_edgecolor("#777777")
-    legend.get_frame().set_facecolor(_DARK_FACE_COLOR if mode.startswith("dark") else _LIGHT_FACE_COLOR)
-    for text in legend.get_texts():
+    for text in legend.get_texts(): 
         text.set_color(text_color)
 
 
