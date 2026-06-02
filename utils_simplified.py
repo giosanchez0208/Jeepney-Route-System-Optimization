@@ -19,6 +19,8 @@ def build_citygraph(yaml_file: str, pkl_path: Optional[str] = None) -> CityGraph
     cg = CityGraph(**cg_config)
     
     if pkl_path:
+        import os
+        os.makedirs(os.path.dirname(pkl_path), exist_ok=True)
         print(f"[INFO] Serializing CityGraph to pickle file: {pkl_path}")
         with open(pkl_path, 'wb') as f:
             pickle.dump(cg, f)
@@ -51,8 +53,9 @@ def build_ddm(yaml_file: str, cg: CityGraph, target_time: Optional[datetime], pk
     
     # use_cache=False to avoid relying on pre-existing DDM internal cache
     ddm = DirectDemandSampler(city=cg, config=ddm_config, verbose=True, use_cache=False)
-    
     if pkl_path:
+        import os
+        os.makedirs(os.path.dirname(pkl_path), exist_ok=True)
         print(f"[INFO] Serializing DirectDemandSampler to pickle file: {pkl_path}")
         with open(pkl_path, 'wb') as f:
             pickle.dump(ddm, f)

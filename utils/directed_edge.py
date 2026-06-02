@@ -35,7 +35,8 @@ class DirEdge:
         weight: Optional[int] = None,
         id: Optional[str] = None,
         next_edges: Optional[list[str]] = None,
-        type: Optional[str] = None
+        type: Optional[str] = None,
+        osm_highway: Optional[str | list[str]] = None
     ) -> None:
         if start is None and end is None:
             raise ValueError("[DIR EDGE] No start and end node provided.")
@@ -61,6 +62,8 @@ class DirEdge:
         self.id = id if id is not None else f"{start.id}{end.id}"
         self.next_edges = next_edges if next_edges is not None else []
         self.type = type if type is not None else self.getType()
+        self.osm_highway = osm_highway
+
         # Cache haversine distance at construction time — getLength() is called
         # thousands of times per simulation tick across Jeep.update(),
         # Passenger._walk(), and spacing/allocation routines.
