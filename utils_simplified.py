@@ -3,6 +3,15 @@ import pickle
 from typing import Optional
 from utils.city_graph import CityGraph
 from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
+
+from utils.route import Route, RouteGenerator
+from utils.jeep_system import JeepSystem, FleetAllocator
+from utils.travel_graph import TravelGraph
+from utils.jeep import Jeep
+from utils.simulation import Simulation, SimulationResult
+from utils.passenger_generator import PassengerGenerator
+from utils.travel_graph import TravelGraph
+
 from datetime import datetime
 
 # =========================================================
@@ -69,14 +78,9 @@ def reuse_ddm(pkl_file: str) -> DirectDemandSampler:
         ddm = pickle.load(f)
     return ddm
 
-
-
-from utils.route import Route, RouteGenerator
-from utils.jeep_system import JeepSystem, FleetAllocator
-from utils.travel_graph import TravelGraph
-from utils.jeep import Jeep
-from utils.simulation import Simulation, SimulationResult
-from utils.passenger_generator import PassengerGenerator
+# =========================================================
+# Jeep and Route Systems
+# =========================================================
 
 def generate_route_system(num_routes: int, cg: CityGraph, sampler: DirectDemandSampler) -> list[Route]:
     print(f"[INFO] Generating {num_routes} routes...")
@@ -103,6 +107,10 @@ def generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDem
     return JeepSystem(jeeps=jeeps, routes=routes, weight_tolerance=50.0, equidistant_spawn=True)
 
 # =========================================================
+# Travel Graph
+# =========================================================
+
+# =========================================================
 # Simulation
 # =========================================================
 
@@ -126,8 +134,8 @@ def generate_dummy_yaml(export_loc: str, **kwargs) -> str:
     
     return export_loc
 
-def run_simulation(yaml_file: str, yaml_is_dummy: bool, tg: TravelGraph, jeep_system: JeepSystem, sampler: DirectDemandSampler) -> Simulation:
-    print(f"[INFO] Initializing simulation from {'dummy ' if yaml_is_dummy else ''}YAML: {yaml_file}")
+def run_simulation(tg: TravelGraph, yaml_file: str, jeep_system: JeepSystem, sampler: DirectDemandSampler, delete_yaml_when_done = False) -> Simulation:
+    print(f"[INFO] Initializing simulation from YAML: {yaml_file}")
     with open(yaml_file, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
         
@@ -154,6 +162,12 @@ def run_simulation(yaml_file: str, yaml_is_dummy: bool, tg: TravelGraph, jeep_sy
     print(f"[INFO] Running simulation for {sim.max_ticks} ticks...")
     # Just run it silently since it has its own tqdm
     sim.run() 
+
+    # Delete YAML if requested
+    if delete_yaml_when_done:
+        print(f"[INFO] Deleting YAML file: {yaml_file}")
+        os.remove(yaml_file)
+
     return sim
 
 def collect_metrics(sim: Simulation, export_loc: str) -> SimulationResult:
@@ -163,9 +177,5 @@ def collect_metrics(sim: Simulation, export_loc: str) -> SimulationResult:
     print(f"[INFO] Collecting metrics and exporting to {export_loc}...")
     result = sim.evaluate_fitness()
     result.export_report(export_loc)
-    
-    # Clean up heavy object
-    print("[INFO] Deleting heavy simulation object to free memory.")
-    del sim
     
     return result
