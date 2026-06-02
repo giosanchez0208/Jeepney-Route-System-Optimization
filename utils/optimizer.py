@@ -4,6 +4,7 @@ optimizer.py
 Main orchestrator. Controls execution flow, handles interrupts, and manages sub-engines.
 """
 
+import os
 from pathlib import Path
 import yaml
 import math
@@ -16,6 +17,7 @@ from .optimizer_telemetry import TelemetryEngine
 from .optimizer_adaptive import AdaptiveController
 from .optimizer_engine import MemeticEngine
 from .simulation import SimulationEvaluator, StaticSurrogateEvaluator
+from .simulation_parallel import ParallelSimulationRunner
 
 class Optimizer:
     def __init__(self, run_dir: Path):
@@ -90,24 +92,41 @@ class Optimizer:
             self.cg, self.sampler, self.raw_config = toy_setup_from_yaml(config_path, verbose=False)
         else:
             self.raw_config = yaml_data
-            cg_cfg = yaml_data.get("city_graph", {})
-            self.cg = CityGraph(
-                bbox=tuple(cg_cfg.get("bbox")) if "bbox" in cg_cfg else None,
-                name=cg_cfg.get("name", "UrbanNetwork"),
-                landmarks=cg_cfg.get("landmarks"),
-                pbf_path=cg_cfg.get("pbf_path", "utils/data/philippines-latest.osm.pbf"),
-                use_api=cg_cfg.get("use_api", False),
-                verbose=cg_cfg.get("verbose", False)
-            )
             
-            ddm_cfg = yaml_data.get("ddm", {})
-            self.sampler = DirectDemandSampler(
-                city=self.cg,
-                config=DDMConfig(**ddm_cfg),
-                verbose=False
-            )
+            cg_pkl = yaml_data.get("cg_pkl")
+            if cg_pkl and os.path.exists(cg_pkl):
+                import pickle
+                print(f"[OPTIMIZER] Loading CityGraph from {cg_pkl}")
+                with open(cg_pkl, 'rb') as f:
+                    self.cg = pickle.load(f)
+            else:
+                cg_cfg = yaml_data.get("city_graph", {})
+                self.cg = CityGraph(
+                    bbox=tuple(cg_cfg.get("bbox")) if "bbox" in cg_cfg else None,
+                    name=cg_cfg.get("name", "UrbanNetwork"),
+                    landmarks=cg_cfg.get("landmarks"),
+                    pbf_path=cg_cfg.get("pbf_path", "utils/data/philippines-latest.osm.pbf"),
+                    use_api=cg_cfg.get("use_api", False),
+                    verbose=cg_cfg.get("verbose", False)
+                )
+                
+            ddm_pkl = yaml_data.get("ddm_pkl")
+            if ddm_pkl and os.path.exists(ddm_pkl):
+                import pickle
+                print(f"[OPTIMIZER] Loading DirectDemandSampler from {ddm_pkl}")
+                with open(ddm_pkl, 'rb') as f:
+                    self.sampler = pickle.load(f)
+                self.sampler.city = self.cg
+            else:
+                ddm_cfg = yaml_data.get("ddm", {})
+                self.sampler = DirectDemandSampler(
+                    city=self.cg,
+                    config=DDMConfig(**ddm_cfg),
+                    verbose=False
+                )
 
-        self.engine = MemeticEngine(self.config, self.cg, self.sampler)
+        self.runner = ParallelSimulationRunner(config=self.raw_config)
+        self.engine = MemeticEngine(self.config, self.cg, self.sampler, runner=self.runner)
         
         # Instantiate the full fitness evaluator for GA scoring.
         self.fitness = SimulationEvaluator(

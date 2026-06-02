@@ -23,10 +23,11 @@ class MemeticEngine:
         crossover, local search, and generational replacement), and updates system states 
         by routing information directly between genetic and local search operators.
     """
-    def __init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None):
+    def __init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None, runner: Optional[Any] = None):
         self.config = config
         self.cg = cg
         self.sampler = sampler
+        self.runner = runner
         self.current_generation = 0
 
         self.local_search = ACOLocalSearch(
@@ -66,8 +67,13 @@ class MemeticEngine:
             # Instantiate a fresh, decoupled PheromoneMatrix for each chromosome
             chrom_phero = PheromoneMatrix(all_edges=self.cg.graph, config=phero_config)
             chrom = Chromosome(routes=routes, allocation={}, pheromones=chrom_phero, generation=0)
-            self.algo.evaluate_chromosome(chrom, self.config.total_allocatable_jeeps)
             population.append(chrom)
+
+        if self.runner:
+            self.algo.evaluate_population(population, self.runner)
+        else:
+            for chrom in population:
+                self.algo.evaluate_chromosome(chrom, self.config.total_allocatable_jeeps)
 
         population.sort(key=lambda c: c.cost)
         return OptimizationState(
@@ -82,8 +88,9 @@ class MemeticEngine:
         next_gen = population[:self.config.n_elite]
         
         target_fleet = getattr(self.config, 'total_allocatable_jeeps', 20)
+        children_to_evaluate = []
         
-        while len(next_gen) < self.config.n_population:
+        while len(next_gen) + len(children_to_evaluate) < self.config.n_population:
             tournament = random.sample(population, self.config.k_tournament)
             tournament.sort(key=lambda c: c.cost)
             parent_a, parent_b = tournament[0], tournament[1]
@@ -99,13 +106,18 @@ class MemeticEngine:
                 parents=[parent_a.uid, parent_b.uid]
             )
                 
-            self.algo.evaluate_chromosome(child, target_fleet)
-            
             if random.random() < current_mutation_rate:
-                self.algo.apply_lamarckian_mutation(child, target_fleet, intensity=intensity)
+                self.algo.apply_lamarckian_mutation(child, target_fleet, intensity=intensity, evaluate_inline=not bool(self.runner))
                 
-            next_gen.append(child)
+            children_to_evaluate.append(child)
 
+        if self.runner:
+            self.algo.evaluate_population(children_to_evaluate, self.runner)
+        else:
+            for child in children_to_evaluate:
+                self.algo.evaluate_chromosome(child, target_fleet)
+                
+        next_gen.extend(children_to_evaluate)
         next_gen.sort(key=lambda c: c.cost)
         
         current_best = next_gen[0].cost

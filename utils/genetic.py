@@ -225,6 +225,23 @@ class MemeticAlgorithm:
         chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
         return chrom.cost
 
+    def evaluate_population(self, population: list[Chromosome], runner: Any) -> None:
+        """
+        Evaluates a batch of chromosomes in parallel using the ParallelSimulationRunner.
+        """
+        if runner is None:
+            raise ValueError("[MEMETIC ALGO] Parallel runner cannot be None.")
+            
+        routes_list = [chrom.routes for chrom in population]
+        results = runner.run_parallel(routes_list)
+        
+        for chrom, sim_result in zip(population, results):
+            if sim_result.fitness_score is None:
+                raise ValueError(f"[MEMETIC ALGO] Parallel evaluator did not return a fitness score for sim_id {sim_result.sim_id}.")
+            chrom.cost = sim_result.fitness_score
+            chrom.pheromones.update_pheromones(sim_result)
+            chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
+
     def _evaluate_surrogate_cost(self, routes: list[Route]) -> float:
         if self.surrogate_evaluator is None:
             raise RuntimeError("[MEMETIC ALGO] Surrogate evaluator has not been configured.")
@@ -234,7 +251,7 @@ class MemeticAlgorithm:
             raise ValueError("[MEMETIC ALGO] Surrogate evaluator did not return a surrogate cost.")
         return sim_result.surrogate_cost
 
-    def apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool:
+    def apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0, evaluate_inline: bool = True) -> bool:
         if child is None:
             raise ValueError("[MEMETIC ALGO] Child chromosome cannot be None.")
 
@@ -247,7 +264,8 @@ class MemeticAlgorithm:
         mutated_surrogate = self._evaluate_surrogate_cost(child.routes)
 
         if mutated_surrogate < baseline_surrogate:
-            self.evaluate_chromosome(child, total_fleet)
+            if evaluate_inline:
+                self.evaluate_chromosome(child, total_fleet)
             return True
 
         child.routes = original_routes_backup
