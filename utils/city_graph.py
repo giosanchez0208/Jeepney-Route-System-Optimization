@@ -248,10 +248,11 @@ class CityGraph:
             start, end = self._node_lookup[start_id], self._node_lookup[end_id]
             if start.lon == end.lon and start.lat == end.lat:
                 continue
-            is_drivable = self._is_arterial(data.get("highway"))
+            highway_tag = data.get("highway")
+            is_drivable = self._is_arterial(highway_tag)
             
-            self.graph.append(DirEdge(start, end, is_drivable=is_drivable))
-            self.graph.append(DirEdge(end, start, is_drivable=is_drivable))
+            self.graph.append(DirEdge(start, end, is_drivable=is_drivable, osm_highway=highway_tag))
+            self.graph.append(DirEdge(end, start, is_drivable=is_drivable, osm_highway=highway_tag))
 
     def _build_outgoing_edges(self) -> None:
         self._outgoing_edges = defaultdict(list)
