@@ -73,6 +73,14 @@ class DirEdge:
     def __str__(self) -> str:
         return f"DirEdge({self.id}): {self.start.id} -> {self.end.id}, type={self.type}, weight={self.weight}, drivable={self.is_drivable}"
     
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DirEdge):
+            return NotImplemented
+        return self.id == other.id
+        
+    def __hash__(self) -> int:
+        return hash(self.id)
+    
     def getLength(self) -> float:
         return self._length
 

@@ -111,6 +111,25 @@ class RouteGenerator:
         self.cg: CityGraph = city_graph
         self.sampler: DirectDemandSampler = sampler
         self.verbose: bool = verbose
+        
+        # Build coordinate lookup to safely handle nodes sourced from different CityGraph instances
+        self._coord_lookup: dict[tuple[float, float], Node] = {
+            (n.lon, n.lat): n for n in self.cg.nodes
+        }
+        self._coords = np.array(list(self._coord_lookup.keys()))
+        self._kdtree = cKDTree(self._coords)
+
+    def _snap_node(self, target: Node) -> Node:
+        # --- O(1) Dictionary Lookup Bypass ---
+        coord = (target.lon, target.lat)
+        if coord in self._coord_lookup:
+            return self._coord_lookup[coord]
+        # ------------------------------------------
+        
+        coords = np.array([[target.lon, target.lat]])
+        _, idx = self._kdtree.query(coords)
+        matched_coord = tuple(self._coords[idx[0]])
+        return self._coord_lookup[matched_coord]
 
     def generate(self, n_points: int = 4, max_retries: int = 10) -> Route:
         if n_points < 2:
@@ -118,7 +137,11 @@ class RouteGenerator:
         
         for attempt in range(max_retries):
             # Enforce the drivable constraint during sampling
-            nodes = [self.sampler.get_point(only_drivable=True) for _ in range(n_points)]
+            raw_nodes = [self.sampler.get_point(only_drivable=True) for _ in range(n_points)]
+            
+            # Snap sampled nodes to the local CityGraph instance to prevent ValueError
+            nodes = [self._snap_node(n) for n in raw_nodes]
+            
             base_path: list[DirEdge] = []
             failed_segment = None
             

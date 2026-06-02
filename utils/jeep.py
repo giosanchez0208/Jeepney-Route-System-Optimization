@@ -41,36 +41,18 @@ class Jeep:
         self._edge_idx: int = 0
         self._edge_progress: float = 0.0
         
-        # Pre-compute cumulative weights for every (start_node, end_node) pair along
-        # the circular route so get_weight_if() is O(1) instead of O(|path|).
-        # Key is (id(start_node), id(end_node)) to avoid coordinate comparisons.
-        self._route_weight_cache: dict[tuple[int, int], float] = {}
-        path = route.path
-        n = len(path)
-        if n > 0:
-            # Build cumulative prefix sums of edge weights
-            cum = [0.0] * (n + 1)
+        # Shared route weight cache (saves massive memory and computation)
+        if not hasattr(route, '_node_indices'):
+            import collections
+            route._node_indices = collections.defaultdict(list)
+            path = route.path
+            n = len(path)
+            route._prefix_sums = [0.0] * (n + 1)
             for i, e in enumerate(path):
-                cum[i + 1] = cum[i] + e.weight
-            total = cum[n]
-            # For every start index s, for every end index e > s (forward only),
-            # store cumulative weight. Also handle wrap-around.
-            for s in range(n):
-                start_key = id(path[s].start)
-                running = 0.0
-                for k in range(1, n):  # at most n-1 edges forward
-                    idx = (s + k) % n
-                    running += path[(s + k - 1) % n].weight
-                    end_key = id(path[idx].start)
-                    cache_key = (start_key, end_key)
-                    if cache_key not in self._route_weight_cache:
-                        self._route_weight_cache[cache_key] = running
-                # Also register the final end node of the last edge from s
-                last_end_key = id(path[(s + n - 1) % n].end)
-                running_total = sum(path[(s + k) % n].weight for k in range(n))
-                cache_key = (start_key, last_end_key)
-                if cache_key not in self._route_weight_cache:
-                    self._route_weight_cache[cache_key] = running_total
+                route._prefix_sums[i + 1] = route._prefix_sums[i] + e.weight
+                route._node_indices[id(e.start)].append(i)
+            route._route_length = route._prefix_sums[-1] if n > 0 else 0.0
+            route._min_weight_cache = {}
         
         self._snap_to_route()
         self._update_heading()
@@ -184,8 +166,34 @@ class Jeep:
     def get_weight_if(self, start_node: Node, end_node: Node) -> Optional[float]:
         if not isinstance(start_node, Node) or not isinstance(end_node, Node):
             raise TypeError("[JEEP] Both start_node and end_node must be Node objects.")
-        # O(1) lookup using the pre-computed cache built at __init__ time.
-        return self._route_weight_cache.get((id(start_node), id(end_node)))
+            
+        cache_key = (id(start_node), id(end_node))
+        if cache_key in self.route._min_weight_cache:
+            return self.route._min_weight_cache[cache_key]
+            
+        start_indices = self.route._node_indices.get(id(start_node))
+        end_indices = self.route._node_indices.get(id(end_node))
+        
+        if not start_indices or not end_indices:
+            self.route._min_weight_cache[cache_key] = None
+            return None
+            
+        min_weight = float('inf')
+        for s in start_indices:
+            for e in end_indices:
+                if e > s:
+                    weight = self.route._prefix_sums[e] - self.route._prefix_sums[s]
+                elif e < s:
+                    weight = self.route._route_length - self.route._prefix_sums[s] + self.route._prefix_sums[e]
+                else:
+                    weight = self.route._route_length # full loop if same node
+                
+                if weight < min_weight:
+                    min_weight = weight
+                    
+        result = min_weight if min_weight != float('inf') else None
+        self.route._min_weight_cache[cache_key] = result
+        return result
 
     def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, radius: int = 12) -> Image.Image:
         if image.width != image.height:
