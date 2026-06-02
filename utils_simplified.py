@@ -70,3 +70,102 @@ def reuse_ddm(pkl_file: str) -> DirectDemandSampler:
     return ddm
 
 
+
+from utils.route import Route, RouteGenerator
+from utils.jeep_system import JeepSystem, FleetAllocator
+from utils.travel_graph import TravelGraph
+from utils.jeep import Jeep
+from utils.simulation import Simulation, SimulationResult
+from utils.passenger_generator import PassengerGenerator
+
+def generate_route_system(num_routes: int, cg: CityGraph, sampler: DirectDemandSampler) -> list[Route]:
+    print(f"[INFO] Generating {num_routes} routes...")
+    generator = RouteGenerator(city_graph=cg, sampler=sampler, verbose=True)
+    return [generator.generate(n_points=4) for _ in range(num_routes)]
+
+def generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDemandSampler, tg: TravelGraph) -> JeepSystem:
+    print(f"[INFO] Allocating fleet of {num_jeeps} jeeps across {len(routes)} routes using Mohring Effect...")
+    allocations = FleetAllocator.allocate_by_mohring(
+        total_fleet=num_jeeps,
+        routes=routes,
+        sampler=sampler,
+        tg=tg,
+        mohring_sample_size=2000
+    )
+    
+    jeeps = []
+    for route, count in allocations.items():
+        for _ in range(count):
+            start_coord = (route.path[0].start.lon, route.path[0].start.lat)
+            jeeps.append(Jeep(route, curr_pos=start_coord, speed=40.0, max_capacity=16))
+            
+    print(f"[INFO] JeepSystem created with {len(jeeps)} jeeps.")
+    return JeepSystem(jeeps=jeeps, routes=routes, weight_tolerance=50.0, equidistant_spawn=True)
+
+# =========================================================
+# Simulation
+# =========================================================
+
+def generate_dummy_yaml(export_loc: str, **kwargs) -> str:
+    print(f"[INFO] Generating dummy YAML at {export_loc} with overrides: {kwargs}")
+    with open('configs/profile_p1.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+        
+    for k, v in kwargs.items():
+        parts = k.split('.')
+        target = config
+        for part in parts[:-1]:
+            if part not in target:
+                target[part] = {}
+            target = target[part]
+        target[parts[-1]] = v
+        
+    os.makedirs(os.path.dirname(export_loc), exist_ok=True)
+    with open(export_loc, 'w', encoding='utf-8') as f:
+        yaml.dump(config, f)
+    
+    return export_loc
+
+def run_simulation(yaml_file: str, yaml_is_dummy: bool, tg: TravelGraph, jeep_system: JeepSystem, sampler: DirectDemandSampler) -> Simulation:
+    print(f"[INFO] Initializing simulation from {'dummy ' if yaml_is_dummy else ''}YAML: {yaml_file}")
+    with open(yaml_file, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+        
+    sim_cfg = config.get('simulation', {})
+    passenger_generator = PassengerGenerator(
+        tg=tg,
+        sampler=sampler,
+        rate_per_hour=sim_cfg.get("spawn_rate_per_hour", 40.0),
+        stdev=sim_cfg.get("spawn_stdev", 5.0),
+        speed=sim_cfg.get("passenger_speed_kmh", 5.0)
+    )
+    
+    sim = Simulation(
+        city_query=config.get("city_graph", {}).get("name", "City"),
+        bounds=tg.city_graph.get_bounds(),
+        jeep_system=jeep_system,
+        passenger_generator=passenger_generator,
+        max_ticks=sim_cfg.get("num_ticks", 3600),
+        beta_penalty=config.get("BETA_PENALTY", 2.0),
+        alpha_std_penalty=config.get("ALPHA_STD_PENALTY", 0.5),
+        config=config
+    )
+    
+    print(f"[INFO] Running simulation for {sim.max_ticks} ticks...")
+    # Just run it silently since it has its own tqdm
+    sim.run() 
+    return sim
+
+def collect_metrics(sim: Simulation, export_loc: str) -> SimulationResult:
+    if not export_loc:
+        raise ValueError("[INFO] collect_metrics requires a valid export_loc.")
+        
+    print(f"[INFO] Collecting metrics and exporting to {export_loc}...")
+    result = sim.evaluate_fitness()
+    result.export_report(export_loc)
+    
+    # Clean up heavy object
+    print("[INFO] Deleting heavy simulation object to free memory.")
+    del sim
+    
+    return result
