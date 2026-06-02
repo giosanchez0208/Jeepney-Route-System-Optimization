@@ -155,16 +155,16 @@ class ACOLocalSearch:
 
         The reinsertion cost follows the classical cheapest-insertion criterion
         (Rosenkrantz et al., 1977):
-            ΔC(u, v, x) = C(u, x) + C(x, v) − C(u, v)
+            ΔC(u, v, x) = C(u, x) + C(x, v) - C(u, v)
         where u and v are the predecessor and successor of the insertion gap,
         and x is the transplant segment. Because we lift a segment rather than
         inserting a foreign node, this is strictly a route-improvement move: the
         number of nodes served stays constant, but their arrangement changes to
         maximize coverage of the underserved corridor.
 
-        Complexity: O(n × K) pathfinder calls per invocation (K = window budget,
+        Complexity: O(n x K) pathfinder calls per invocation (K = window budget,
         default 3), which is a dramatic reduction from the previous
-        O(routes × n × window × 2) double-A* nested loop.
+        O(routes x n x window x 2) double-A* nested loop.
 
         Stigmergic link
         ---------------

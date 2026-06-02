@@ -136,6 +136,20 @@ class TravelGraph3DVisualizer:
                 edge_thickness,
             )
 
+        # Draw typed (coloured) edges only when there is no highlight journey.
+        # When highlight_edges is populated the caller wants a journey overlay,
+        # not the full-graph type illustration, so _draw_typed_edges is skipped.
+        if not self.highlight_edges:
+            _draw_typed_edges(
+                ax,
+                self.base_edges,
+                flags,
+                layer_gap,
+                center_lon,
+                center_lat,
+                edge_thickness,
+            )
+
         _draw_journey(
             ax,
             self.highlight_edges,
@@ -285,10 +299,15 @@ def _draw_city_graph_edges(
     segments = []
 
     for edge in edges:
-        # User snippet behavior: Layer 2 uses arterials only
-        if layer == 2 and getattr(edge, 'is_drivable', True) == False:
+        # Only use SW edges as the street-network template — they carry the city
+        # geometry for all three planes.  EW edges share the same coordinates as
+        # SW so we don't need them separately.  Cross-layer edges (WA, AL, TR,
+        # DI, RI) must never be projected here; they are drawn by _draw_typed_edges.
+        if edge.id[:2] != "SW":
             continue
-            
+
+        # Project SW street geometry onto whichever plane we are drawing,
+        # so all three layers show the same faint city-graph background.
         start = _project_point(edge.start.lon, edge.start.lat, layer, layer_gap, center_lon, center_lat)
         end = _project_point(edge.end.lon, edge.end.lat, layer, layer_gap, center_lon, center_lat)
         segments.append((start, end))
@@ -303,6 +322,61 @@ def _draw_city_graph_edges(
                 zorder=layer * 3 + 0.1,
                 capstyle='round',
                 joinstyle='round'
+            )
+        )
+
+
+def _draw_typed_edges(
+    ax: plt.Axes,
+    edges: list[DirEdge],
+    flags: dict[str, bool],
+    layer_gap: float,
+    center_lon: float,
+    center_lat: float,
+    edge_thickness: float,
+) -> None:
+    """
+    Draw every edge in `edges` in its typed colour, projected using each
+    edge's actual .start.layer / .end.layer.  Only edge types whose flag
+    is True are rendered.  This is the pass that produces the coloured
+    SW / EW / RI / WA / AL / TR overlays for the six-illustration view.
+    """
+    ROUTE_COLORS = ["#E63946", "#1D3557", "#2A9D8F", "#F4A261", "#9C27B0", "#E76F51", "#2A9D8F"]
+
+    # Bucket edges by colour so we can use LineCollection for speed.
+    by_color: dict[str, list] = {}
+
+    for edge in edges:
+        prefix = edge.id[:2]
+        if not flags.get(prefix, False):
+            continue
+        if getattr(edge.start, "layer", None) not in _LAYERS or getattr(edge.end, "layer", None) not in _LAYERS:
+            continue
+
+        if prefix == "RI" and "_" in edge.id:
+            try:
+                r_idx = int(edge.id.split("_")[1][1:])
+                color = ROUTE_COLORS[r_idx % len(ROUTE_COLORS)]
+            except (ValueError, IndexError):
+                color = _TYPE_COLORS.get("RI", "#FBBC05")
+        else:
+            color = _TYPE_COLORS.get(prefix, "#888888")
+
+        start_pt = _project_point(edge.start.lon, edge.start.lat, edge.start.layer, layer_gap, center_lon, center_lat)
+        end_pt = _project_point(edge.end.lon, edge.end.lat, edge.end.layer, layer_gap, center_lon, center_lat)
+
+        by_color.setdefault(color, []).append((start_pt, end_pt))
+
+    for color, segments in by_color.items():
+        ax.add_collection(
+            LineCollection(
+                segments,
+                colors=color,
+                linewidths=edge_thickness,
+                alpha=0.85,
+                zorder=20,
+                capstyle="round",
+                joinstyle="round",
             )
         )
 
@@ -411,20 +485,24 @@ def _draw_legend(ax: plt.Axes, mode: MapMode) -> None:
         (_TYPE_COLORS["EW"], "End Walk (EW)"),
         (_TYPE_COLORS["TR"], "Transfer (TR)"),
     ]
-    handles = [Line2D([0], [0], color=color, linewidth=3.5, linestyle="solid", label=label) for color, label in legend_items]
+    handles = [Line2D([0], [0], color=color, linewidth=2.0, linestyle="solid", label=label) for color, label in legend_items]
     
     text_color = "#ffffff" if mode.startswith("dark") else "#111111"
     legend = ax.legend(
-        handles=handles, 
-        loc="upper left", 
-        bbox_to_anchor=(0.02, 0.98), 
-        frameon=True, 
-        framealpha=0.9, 
-        facecolor=_DARK_FACE_COLOR if mode.startswith("dark") else _LIGHT_FACE_COLOR, 
-        edgecolor="#CCCCCC", 
-        fontsize=10
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(0.02, 0.98),
+        frameon=True,
+        framealpha=0.9,
+        facecolor=_DARK_FACE_COLOR if mode.startswith("dark") else _LIGHT_FACE_COLOR,
+        edgecolor="#CCCCCC",
+        fontsize=7,
+        handlelength=1.5,
+        handleheight=0.8,
+        borderpad=0.4,
+        labelspacing=0.3,
     )
-    for text in legend.get_texts(): 
+    for text in legend.get_texts():
         text.set_color(text_color)
 
 
