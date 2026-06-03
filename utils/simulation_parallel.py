@@ -21,6 +21,9 @@ from .directed_edge import DirEdge
 _WORKER_CONFIG = None
 _WORKER_CITY_GRAPH = None
 _WORKER_DEMAND_SAMPLER = None
+_WORKER_TG_CACHE = None          # Cached TravelGraph (reused if routes unchanged)
+_WORKER_ROUTES_CACHE = None      # Cached restored routes
+_WORKER_ROUTES_KEY = None        # Hash key to detect route changes
 
 
 def _worker_init(config: dict):
@@ -106,30 +109,41 @@ def _restore_route(route: Route, cg: CityGraph) -> Route:
 def _worker_run(routes: List[Route]) -> SimulationResult:
     """
     Executes a single simulation run within the worker process using the lightweight routes.
+    Caches the TravelGraph so it's only rebuilt when the route set changes.
     """
     global _WORKER_CONFIG, _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER
+    global _WORKER_TG_CACHE, _WORKER_ROUTES_CACHE, _WORKER_ROUTES_KEY
     
     if _WORKER_CITY_GRAPH is None or _WORKER_DEMAND_SAMPLER is None:
         raise RuntimeError(f"[Worker {os.getpid()}] process was not properly initialized with static objects.")
 
-    # 1. Restore Lightweight Routes to Heavy Routes
-    restored_routes = [_restore_route(r, _WORKER_CITY_GRAPH) for r in routes]
+    # 1. Check if we can reuse cached TravelGraph
+    route_key = tuple(getattr(r, 'id', i) for i, r in enumerate(routes))
+    
+    if _WORKER_TG_CACHE is not None and _WORKER_ROUTES_KEY == route_key:
+        restored_routes = _WORKER_ROUTES_CACHE
+        tg = _WORKER_TG_CACHE
+    else:
+        # Restore Lightweight Routes to Heavy Routes
+        restored_routes = [_restore_route(r, _WORKER_CITY_GRAPH) for r in routes]
+        tg = TravelGraph(
+            cg=_WORKER_CITY_GRAPH,
+            config=_WORKER_CONFIG.get("travel_graph", {}).copy(),
+            routes=restored_routes
+        )
+        _WORKER_TG_CACHE = tg
+        _WORKER_ROUTES_CACHE = restored_routes
+        _WORKER_ROUTES_KEY = route_key
+        print(f"[Worker {os.getpid()}] Built TravelGraph ({len(tg.travel_graph)} edges)")
 
     # 2. Build Local Heavy Objects
     sim_cfg = _WORKER_CONFIG.get("simulation", {})
     total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
-    jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0) 
+    jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0)
     jeep_capacity = sim_cfg.get("jeep_capacity", 16)
     weight_tol = sim_cfg.get("weight_tolerance", 50.0)
     seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
-    
     jeeps_per_route = max(1, total_jeeps // len(restored_routes)) if restored_routes else 0
-
-    tg = TravelGraph(
-        cg=_WORKER_CITY_GRAPH,
-        config=_WORKER_CONFIG.get("travel_graph", {}).copy(),
-        routes=restored_routes
-    )
     
     jeeps = []
     for route in restored_routes:
