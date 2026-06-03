@@ -81,16 +81,19 @@ class PheromoneMatrix:
         self._tau = state["_tau"]
         self.gaps = state["gaps"]
         self._edge_repr = {}
-        self.tau = None
+        self.tau = _TauView(self._tau, self._edge_repr)
 
     # ------------------------------------------------------------------
     def _get(self, edge: 'DirEdge') -> Optional[float]:
-        return self._tau.get(_edge_key(edge))
+        k = _edge_key(edge)
+        if k not in self._edge_repr and edge is not None:
+            self._edge_repr[k] = edge
+        return self._tau.get(k)
 
     def _set(self, edge: 'DirEdge', value: float) -> None:
         k = _edge_key(edge)
         self._tau[k] = value
-        if k not in self._edge_repr:
+        if k not in self._edge_repr and edge is not None:
             self._edge_repr[k] = edge
 
     # ------------------------------------------------------------------
@@ -312,10 +315,14 @@ class _TauView:
 
     def get(self, edge, default=None):
         from utils.pheromone import _edge_key
-        return self._tau.get(_edge_key(edge), default)
+        k = _edge_key(edge)
+        if k not in self._repr and edge is not None:
+            self._repr[k] = edge
+        return self._tau.get(k, default)
 
     def items(self):
-        return ((self._repr[k], v) for k, v in self._tau.items())
+        # Filter out empty representatives to avoid returning None keys
+        return ((self._repr[k], v) for k, v in self._tau.items() if k in self._repr)
 
     def values(self):
         return self._tau.values()
@@ -328,15 +335,21 @@ class _TauView:
 
     def __contains__(self, edge) -> bool:
         from utils.pheromone import _edge_key
-        return _edge_key(edge) in self._tau
+        k = _edge_key(edge)
+        if k not in self._repr and edge is not None:
+            self._repr[k] = edge
+        return k in self._tau
 
     def __getitem__(self, edge):
         from utils.pheromone import _edge_key
-        return self._tau[_edge_key(edge)]
+        k = _edge_key(edge)
+        if k not in self._repr and edge is not None:
+            self._repr[k] = edge
+        return self._tau[k]
 
     def __setitem__(self, edge, value):
         from utils.pheromone import _edge_key
         k = _edge_key(edge)
         self._tau[k] = value
-        if k not in self._repr:
+        if k not in self._repr and edge is not None:
             self._repr[k] = edge
