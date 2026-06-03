@@ -47,6 +47,16 @@ class TravelGraph:
         self.travel_graph: list[DirEdge] = []
         
         self._construct()
+        self._findShortestJourney_cached = lru_cache(maxsize=4096)(self._findShortestJourney_impl)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_findShortestJourney_cached", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._findShortestJourney_cached = lru_cache(maxsize=4096)(self._findShortestJourney_impl)
 
     def _generate_routes(self, route_generator: RouteGenerator, n_routes: int, n_points: int) -> list[Route]:
         routes = []
@@ -221,8 +231,10 @@ class TravelGraph:
         else:
             raise ValueError("[TRAVEL GRAPH] Invalid snap layer. Must be 1 or 3.")
     
-    @lru_cache(maxsize=4096)
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
+        return self._findShortestJourney_cached(start, end)
+
+    def _findShortestJourney_impl(self, start: Node, end: Node) -> list[DirEdge]:
         if start is None or end is None:
             raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
             

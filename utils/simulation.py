@@ -224,11 +224,13 @@ class Simulation:
     def run(self) -> SimulationResult:
         """Executes the headless simulation loop until max_ticks is reached."""
         from tqdm import tqdm
-        with tqdm(total=self.max_ticks, desc="Microscopic Simulation Ticks", leave=False) as pbar:
+        disable_tqdm = self.config.get("disable_tqdm", False)
+        with tqdm(total=self.max_ticks, desc="Microscopic Simulation Ticks", leave=False, disable=disable_tqdm) as pbar:
             while not self.is_complete:
                 self.update()
                 pbar.update(1)
         return self.evaluate_fitness()
+
 
     def run_until_drained(self, safety_cap: int = 100_000) -> SimulationResult:
         """Runs until every spawned passenger has completed their journey.
