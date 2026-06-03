@@ -153,16 +153,19 @@ def _worker_run(routes: List[Route]) -> SimulationResult:
         seconds_per_tick=seconds_per_tick
     )
     
+    worker_cfg = _WORKER_CONFIG.copy()
+    worker_cfg["disable_tqdm"] = True
     sim = Simulation(
-        city_query=_WORKER_CONFIG.get("city_graph", {}).get("name", "City"),
+        city_query=worker_cfg.get("city_graph", {}).get("name", "City"),
         bounds=_WORKER_CITY_GRAPH.get_bounds(),
         jeep_system=jeep_system,
         passenger_generator=passenger_generator,
         max_ticks=sim_cfg.get("num_ticks", 3600),
-        beta_penalty=float(_WORKER_CONFIG.get("BETA_PENALTY", 2.0)),
-        alpha_std_penalty=float(_WORKER_CONFIG.get("ALPHA_STD_PENALTY", 0.5)),
-        config=_WORKER_CONFIG
+        beta_penalty=float(worker_cfg.get("BETA_PENALTY", 2.0)),
+        alpha_std_penalty=float(worker_cfg.get("ALPHA_STD_PENALTY", 0.5)),
+        config=worker_cfg
     )
+
     
     # 3. Execute Simulation
     result = sim.run()
