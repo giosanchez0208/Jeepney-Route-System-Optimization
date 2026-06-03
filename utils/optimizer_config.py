@@ -130,7 +130,7 @@ class ExperimentConfig:
             jeep_capacity=int(sim.get("jeep_capacity", 16)),
             spawn_rate_per_hour=float(sim.get("spawn_rate_per_hour", 120.0)),
             spawn_stdev=float(sim.get("spawn_stdev", 10.0)),
-            weight_tolerance=float(sim.get("weight_tolerance", 50.0)),
+            weight_tolerance=float(sim.get("weight_tolerance", 14.44)),
             equidistant_spawn=bool(sim.get("equidistant_spawn", True))
         )
 

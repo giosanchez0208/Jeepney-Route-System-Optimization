@@ -453,6 +453,8 @@ class StaticSurrogateEvaluator:
         self.demand_sampler = demand_sampler
         self.num_samples = num_samples
         
+        self.eta_penalty = float(config.get("ETA_PENALTY", 2.5))
+        
         self.od_pairs = []
         for _ in range(self.num_samples):
             start = self.demand_sampler.get_point(only_drivable=False)
@@ -491,8 +493,11 @@ class StaticSurrogateEvaluator:
 
         fleet_operational_cost = sum(sum(e.getLength() for e in r.path) for r in routes)
 
+        # ADDED: Combine the routing cost with the eta-scaled fleet operational cost
+        final_surrogate_cost = total_weight + (self.eta_penalty * fleet_operational_cost)
+
         return SimulationResult(
-            surrogate_cost=total_weight,
+            surrogate_cost=final_surrogate_cost, # UPDATED: Use the combined cost
             metrics={
                 "passenger_routing_cost": total_weight,
                 "fleet_operational_cost": fleet_operational_cost,

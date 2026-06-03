@@ -53,7 +53,7 @@ simulation:
   spawn_rate_per_hour: 200
   spawn_stdev: 10.0
   total_allocatable_jeeps: 30
-  weight_tolerance: 50.0
+  weight_tolerance: 14.44 #"like" a transfer 
 surrogate:
   num_samples: 450
   transfer_multiplier: 2.5
