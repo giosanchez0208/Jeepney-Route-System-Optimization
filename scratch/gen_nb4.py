@@ -56,7 +56,7 @@ cells.append(code([
 # Cell 2: Setup markdown (from original)
 cells.append(md(md_cells[1]["source"]))
 
-# Cell 3: Setup code — FIXED: spawn_rate raised, surrogate_samples removed
+# Cell 3: Setup code with production-reasonable params
 cells.append(code([
     "cg = reuse_citygraph(\"results_and_discussion/pkl/profile_p1.pkl\")\n",
     "ddm = reuse_ddm(\"results_and_discussion/pkl/ddm_8am.pkl\")\n",
@@ -66,12 +66,13 @@ cells.append(code([
     "generate_dummy_yaml(\n",
     "    opt_yaml,\n",
     "    **{\n",
-    "        \"simulation.num_ticks\": 50,          # 50 ticks for fast execution\n",
-    "        \"simulation.total_allocatable_jeeps\": 8,\n",
-    "        \"simulation.spawn_rate_per_hour\": 60.0,  # FIX: raised from original to ensure passengers spawn\n",
-    "        \"optimization.n_population\": 4,        # Population size of 4\n",
+    "        \"simulation.num_ticks\": 300,\n",
+    "        \"simulation.total_allocatable_jeeps\": 40,\n",
+    "        \"simulation.spawn_rate_per_hour\": 120.0,\n",
+    "        \"optimization.n_population\": 8,\n",
     "        \"optimization.n_elite\": 1,\n",
-    "        \"optimization.g_max\": 2,               # 2 generations for speed\n",
+    "        \"optimization.g_max\": 15,\n",
+    "        \"optimization.k_tournament\": 3,\n",
     "        \"optimization.telemetry_interval\": 1,\n",
     "        \"optimization.checkpoint_interval\": 1,\n",
     "        \"optimization.output_root\": \"outputs/opt_nb4\",\n",
@@ -83,24 +84,27 @@ cells.append(code([
     "optimizer = build_optimizer(opt_yaml)\n",
     "optimizer.runner = None\n",
     "optimizer.engine.runner = None\n",
-    "print(f\"Optimizer run directory successfully established: {optimizer.run_dir}\")"
+    "print(f\"Run directory: {optimizer.run_dir}\")\n",
+    "print(f\"Config: pop={optimizer.config.n_population}, g_max={optimizer.config.g_max}, ticks={optimizer.config.max_ticks}, jeeps={optimizer.config.total_allocatable_jeeps}\")"
 ]))
 
 # Cell 4: Pipeline markdown (from original)
 cells.append(md(md_cells[2]["source"]))
 
-# Cell 5: Pipeline code — FIXED: preserve UIDs during deep copy
+# Cell 5: Pipeline code with verbose progress reporting
 cells.append(code([
+    "import time as _time\n",
     "all_populations = {}\n",
     "mutation_history = []\n",
+    "_pipeline_start = _time.time()\n",
     "\n",
-    "print(\"[OPTIMIZER] Initializing population (Generation 0)...\")\n",
+    "print(\"[GEN 0] Initializing population...\")\n",
+    "_t0 = _time.time()\n",
     "optimizer.state = optimizer.engine.initialize_state()\n",
     "optimizer.telemetry.log_lineage(optimizer.state.population)\n",
+    "print(f\"[GEN 0] Done in {_time.time()-_t0:.1f}s. Best={optimizer.state.best_fitness:.2f}\")\n",
     "\n",
-    "# FIX: Deep copy population but PRESERVE original UIDs for lineage tracking.\n",
-    "# The original code created new Chromosome objects which generated fresh uuid4 UIDs,\n",
-    "# breaking the parent-child UID chain used for ancestry tracing in Part 2.\n",
+    "# Deep copy population, preserving original UIDs for lineage tracking\n",
     "all_populations[0] = [Chromosome(\n",
     "    routes=[Route(path=r.path[:], city_graph=cg, id=r.id) for r in c.routes],\n",
     "    allocation=c.allocation.copy(),\n",
@@ -109,7 +113,7 @@ cells.append(code([
     ") for c in optimizer.state.population]\n",
     "for idx, c in enumerate(all_populations[0]):\n",
     "    c.cost = optimizer.state.population[idx].cost\n",
-    "    c.uid = optimizer.state.population[idx].uid      # Preserve original UID\n",
+    "    c.uid = optimizer.state.population[idx].uid\n",
     "    c.parents = optimizer.state.population[idx].parents\n",
     "\n",
     "mutation_history.append(optimizer.config.p_mutation)\n",
@@ -119,25 +123,25 @@ cells.append(code([
     "    p_local = optimizer.adaptive.get_local_search_prob(gen, g_max)\n",
     "    intensity = optimizer.adaptive.get_local_search_intensity(gen, g_max)\n",
     "    \n",
-    "    # Scale up mutation probability if stagnation counter > 0\n",
     "    current_mut = optimizer.config.p_mutation\n",
     "    if optimizer.state.stagnation_counter > 0:\n",
     "        stagnation_boost = optimizer.adaptive.update(optimizer.state.stagnation_counter) - optimizer.config.p_mutation\n",
     "        p_local = min(p_local + max(0.0, stagnation_boost), 0.95)\n",
     "        current_mut = min(optimizer.adaptive.update(optimizer.state.stagnation_counter), 0.95)\n",
-    "        \n",
-    "    print(f\"\\n--- Running generation {gen} / {g_max} (Stagnation: {optimizer.state.stagnation_counter}) ---\")\n",
+    "    \n",
+    "    _t0 = _time.time()\n",
     "    optimizer.state = optimizer.engine.step_generation(optimizer.state, p_local, intensity=intensity)\n",
     "    optimizer.state.generation = gen + 1\n",
+    "    _elapsed = _time.time() - _t0\n",
     "    \n",
     "    mean_cost = sum(c.cost for c in optimizer.state.population) / len(optimizer.state.population)\n",
+    "    total_elapsed = _time.time() - _pipeline_start\n",
+    "    print(f\"[GEN {gen}/{g_max}] {_elapsed:.1f}s | Best={optimizer.state.best_fitness:.2f} Mean={mean_cost:.2f} | Stag={optimizer.state.stagnation_counter} p_mut={current_mut:.3f} | Total={total_elapsed:.0f}s\")\n",
     "    \n",
-    "    # Log telemetries\n",
     "    optimizer.telemetry.log_lineage(optimizer.state.population)\n",
     "    optimizer.telemetry.log_generation(gen + 1, optimizer.state.best_fitness, mean_cost, p_local, optimizer.state.stagnation_counter)\n",
     "    optimizer.telemetry.export_json_snapshot(gen + 1, optimizer.state.best_fitness, mean_cost, optimizer.state.population)\n",
     "    \n",
-    "    # FIX: Deep copy chromosomes — PRESERVE UIDs to prevent lineage breakage\n",
     "    gen_pop = [Chromosome(\n",
     "        routes=[Route(path=r.path[:], city_graph=cg, id=r.id) for r in c.routes],\n",
     "        allocation=c.allocation.copy(),\n",
@@ -146,13 +150,13 @@ cells.append(code([
     "    ) for c in optimizer.state.population]\n",
     "    for idx, c in enumerate(gen_pop):\n",
     "        c.cost = optimizer.state.population[idx].cost\n",
-    "        c.uid = optimizer.state.population[idx].uid      # Preserve original UID\n",
+    "        c.uid = optimizer.state.population[idx].uid\n",
     "        c.parents = optimizer.state.population[idx].parents\n",
-    "        \n",
+    "    \n",
     "    all_populations[gen] = gen_pop\n",
     "    mutation_history.append(current_mut)\n",
     "\n",
-    "print(\"\\n[OPTIMIZER] Run complete! Telemetry successfully serialized.\")"
+    "print(f\"\\nPipeline complete. Total wall time: {_time.time()-_pipeline_start:.0f}s\")"
 ]))
 
 # Cell 6: Convergence markdown (from original)
@@ -283,7 +287,7 @@ cells.append(code([
     "        weights = [weights[i] for i in indices]\n",
     "    return coords, weights\n",
     "\n",
-    "print(\"[METRICS] Evaluating multi-dimensional population convergence trends...\")\n",
+    "print(f\"[METRICS] Computing phenotypic convergence across {g_max+1} generations...\")\n",
     "for gen in range(g_max + 1):\n",
     "    pop = all_populations[gen]\n",
     "    pop_sorted = sorted(pop, key=lambda c: c.cost)\n",
@@ -312,9 +316,9 @@ cells.append(code([
     "    mean_geds.append(np.mean(geds))\n",
     "    mean_wassersteins.append(np.mean(wassersteins))\n",
     "    \n",
-    "    # Record population fitness variance\n",
     "    costs = [c.cost for c in pop]\n",
     "    fitness_variances.append(np.var(costs))\n",
+    "    print(f\"  Gen {gen}: Jaccard={np.mean(jaccards):.4f} GED={np.mean(geds):.4f} Wass={np.mean(wassersteins):.6f} FitVar={np.var(costs):.2f}\")\n",
     "\n",
     "# Normalize GED and Wasserstein to start at 1.0 for visual comparison of convergence rates\n",
     "norm_jaccards = np.array(mean_jaccards)\n",
