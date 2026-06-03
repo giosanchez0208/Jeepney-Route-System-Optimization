@@ -222,8 +222,7 @@ class ACOLocalSearch:
         t_end = target_edge.end
 
         for k in range(1, k_max + 1):
-            # Randomly sample a subset of start positions to stay O(n) not O(n*k).
-            sample_size = min(n, max(8, n // 2))
+            sample_size = min(n, max(8, min(15, n // 2)))
             start_positions = random.sample(range(n), sample_size)
 
             for i in start_positions:
@@ -599,7 +598,10 @@ class ACOLocalSearch:
             # via A* here during candidate scoring, and use pheromone utility
             # only as a secondary tiebreaker between windows with similar κ.
             windows = []
-            for i in range(n):
+            # Sample a representative subset of window starting positions to stay performant.
+            sample_size = min(n, 30)
+            step = max(1, n // sample_size)
+            for i in range(0, n, step):
                 seg = [route.path[(i + d) % n] for d in range(W)]
 
                 # Gap-immunity: skip windows containing edges THIS route added
