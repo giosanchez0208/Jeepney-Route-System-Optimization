@@ -181,14 +181,21 @@ def run_simulation(tg: TravelGraph, yaml_file: str, jeep_system: JeepSystem, sam
         config = yaml.safe_load(f)
         
     sim_cfg = config.get('simulation', {})
+    seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
+    
     passenger_generator = PassengerGenerator(
         tg=tg,
         sampler=sampler,
         rate_per_hour=sim_cfg.get("spawn_rate_per_hour", 40.0),
         stdev=sim_cfg.get("spawn_stdev", 5.0),
-        speed=sim_cfg.get("passenger_speed_kmh", 5.0)
+        speed=sim_cfg.get("passenger_speed_kmh", 5.0),
+        seconds_per_tick=seconds_per_tick
     )
     
+    if jeep_system and jeep_system.jeeps:
+        for jeep in jeep_system.jeeps:
+            jeep.seconds_per_tick = seconds_per_tick
+            
     sim = Simulation(
         city_query=config.get("city_graph", {}).get("name", "City"),
         bounds=tg.cg.get_bounds(),
