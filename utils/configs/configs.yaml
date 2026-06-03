@@ -37,7 +37,7 @@ SPAWN_STDEV: 10.0         # Standard deviation for passenger generation
 # ---------------------------------------------------------
 # Jeep System Parameters
 # ---------------------------------------------------------
-WEIGHT_TOLERANCE: 50.0    # Max acceptable penalty for dynamic route substitution
+WEIGHT_TOLERANCE: 14.44    # Max acceptable penalty for dynamic route substitution
 EQUIDISTANT_SPAWN: true   # Prevent initial bus bunching
 
 # ---------------------------------------------------------
