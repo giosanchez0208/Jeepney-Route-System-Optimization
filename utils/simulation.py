@@ -58,13 +58,14 @@ class SimulationSetup:
         jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0) 
         jeep_capacity = sim_cfg.get("jeep_capacity", 16)
         weight_tol = sim_cfg.get("weight_tolerance", 50.0)
+        seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
 
         jeeps_per_route = max(1, total_jeeps // len(self.routes))
 
         for route in self.routes:
             for _ in range(jeeps_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
-                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity))
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity, seconds_per_tick=seconds_per_tick))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
@@ -79,7 +80,8 @@ class SimulationSetup:
             sampler=sampler,
             rate_per_hour=sim_cfg.get("spawn_rate_per_hour", 40.0),
             stdev=sim_cfg.get("spawn_stdev", 5.0),
-            speed=sim_cfg.get("passenger_speed_kmh", 5.0) 
+            speed=sim_cfg.get("passenger_speed_kmh", 5.0),
+            seconds_per_tick=seconds_per_tick
         )
         
         return Simulation(
@@ -387,10 +389,12 @@ class SimulationEvaluator:
             routes=routes
         )
         
+        seconds_per_tick = self.sim_cfg.get("seconds_per_tick", 1)
+
         for route in routes:
             for _ in range(jeeps_per_route):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
-                jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity))
+                jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity, seconds_per_tick=seconds_per_tick))
                 
         jeep_system = JeepSystem(
             jeeps=jeeps, 
@@ -404,7 +408,8 @@ class SimulationEvaluator:
             sampler=self.demand_sampler,
             rate_per_hour=self.spawn_rate,
             stdev=self.spawn_stdev,
-            speed=self.pax_speed
+            speed=self.pax_speed,
+            seconds_per_tick=seconds_per_tick
         )
         
         sim = Simulation(
