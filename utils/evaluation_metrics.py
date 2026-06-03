@@ -363,7 +363,7 @@ def shannon_entropy(frequencies: Union[List[float], Dict[Any, float]]) -> float:
     except TypeError:
         return 0.0
 
-    counts = list(frequencies.values()) if isinstance(frequencies, dict) else list(frequencies)
+    counts = list(frequencies.values()) if hasattr(frequencies, 'values') else list(frequencies)
     total = sum(counts)
     if total == 0:
         return 0.0
