@@ -16,7 +16,7 @@ from .optimizer_orchestrator_io import OptimizerBuilder, StatePreservationEngine
 from .optimizer_telemetry import TelemetryEngine
 from .optimizer_adaptive import AdaptiveController
 from .optimizer_engine import MemeticEngine
-from .simulation import SimulationEvaluator, StaticSurrogateEvaluator
+from .simulation import SimulationEvaluator
 from .simulation_parallel import ParallelSimulationRunner
 
 class Optimizer:
@@ -136,15 +136,7 @@ class Optimizer:
             demand_sampler=self.sampler
         )
 
-        # Instantiate the static surrogate for local-search mutation checks only.
-        self.surrogate = StaticSurrogateEvaluator(
-            config=self.raw_config,
-            city_graph=self.cg,
-            demand_sampler=self.sampler,
-            num_samples=100
-        )
         self.engine.algo.set_fitness_evaluator(self.fitness)
-        self.engine.algo.set_surrogate_evaluator(self.surrogate)
 
         self.preservation = StatePreservationEngine(self.run_dir)
         self.telemetry = TelemetryEngine(self.run_dir, self.config.city_bounds)
