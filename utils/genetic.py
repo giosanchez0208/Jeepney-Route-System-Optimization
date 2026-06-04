@@ -61,13 +61,9 @@ class MemeticAlgorithm:
         self.target_route_count: int = target_route_count
         self.verbose: bool = verbose
         self.fitness_evaluator: Any = None
-        self.surrogate_evaluator: Any = None
 
     def set_fitness_evaluator(self, evaluator: Any) -> None:
         self.fitness_evaluator = evaluator
-
-    def set_surrogate_evaluator(self, evaluator: Any) -> None:
-        self.surrogate_evaluator = evaluator
 
     def __str__(self) -> str:
         return f"MemeticAlgorithm(target_route_count={self.target_route_count}, verbose={self.verbose})"
@@ -242,14 +238,14 @@ class MemeticAlgorithm:
             chrom.pheromones.update_pheromones(sim_result)
             chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
 
-    def _evaluate_surrogate_cost(self, routes: list[Route]) -> float:
-        if self.surrogate_evaluator is None:
-            raise RuntimeError("[MEMETIC ALGO] Surrogate evaluator has not been configured.")
-
-        sim_result = self.surrogate_evaluator.evaluate(routes)
-        if sim_result.surrogate_cost is None:
-            raise ValueError("[MEMETIC ALGO] Surrogate evaluator did not return a surrogate cost.")
-        return sim_result.surrogate_cost
+    @staticmethod
+    def _total_disparity(gaps: dict) -> float:
+        """Total Proportional Demand-Service Disparity: the L1 distance between the
+        normalized demand and supply distributions ( sum |P_ij - S_ij| ). Zero means
+        demand and fleet supply are perfectly aligned across the network; lower is better."""
+        if not gaps:
+            return float("inf")
+        return sum(abs(g) for g in gaps.values())
 
     def apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0, evaluate_inline: bool = True) -> bool:
         if child is None:
@@ -257,13 +253,20 @@ class MemeticAlgorithm:
 
         original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
 
-        baseline_surrogate = self._evaluate_surrogate_cost(child.routes)
+        # Acceptance is gated on the Proportional Demand-Service Disparity -- the same
+        # pheromone-derived signal that STEERS the local-search operators -- so the
+        # direction and the acceptance of each move are unified under one signal, and no
+        # full re-simulation is needed per mutation. The authoritative F_sim is still
+        # computed afterward (evaluate_chromosome), keeping GA selection high-fidelity.
         child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        baseline_disparity = self._total_disparity(child.pheromones.gaps)
+
         self.local_search.optimize_system(child.routes, child.pheromones, intensity=intensity)
 
-        mutated_surrogate = self._evaluate_surrogate_cost(child.routes)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        mutated_disparity = self._total_disparity(child.pheromones.gaps)
 
-        if mutated_surrogate < baseline_surrogate:
+        if mutated_disparity < baseline_disparity:
             if evaluate_inline:
                 self.evaluate_chromosome(child, total_fleet)
             return True

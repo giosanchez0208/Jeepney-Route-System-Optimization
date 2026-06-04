@@ -10,21 +10,71 @@ This chapter evaluates the performance of the proposed memetic framework, transi
 To ensure the optimization relies on valid spatial and demographic data, the digital twin of Iligan City and the simulated passenger demand must first be verified.
 
 \subsection{\texttt{CityGraph} Arterial Network Pruning}
-\textbf{Visual 1:} Full Iligan City OpenStreetMap graph (all \texttt{DirEdge} connections). \\
-\textbf{Visual 2:} The filtered Arterial \texttt{CityGraph}. \\
-\textit{Discussion:} Proves the successful removal of residential dead-ends and non-traversable nodes, restricting \texttt{Jeep} agent movement to valid, navigable transit corridors while leaving the full network available for passenger walking access.
+The spatial foundation of the simulated environment requires the extraction and processing of the complete road network of Iligan City. Utilizing the geographic bounding box coordinates [8.1500,8.3300,124.1500,124.4000], raw OpenStreetMap (OSM) data was parsed to construct the foundational Layer 0 infrastructure object, referred to as the \texttt{CityGraph}. This initial extraction phase successfully constructed a comprehensive spatial graph comprising 36,866 valid topological nodes and 76,310 directed bidirectional edges (\texttt{DirEdge}).
+
+To computationally optimize the route generation search space and reflect realistic transit operations, the \texttt{RouteGenerator} must be strictly confined to viable transport corridors
+. Without this constraint, the metaheuristic would attempt to route vehicles through residential dead-ends or service alleys, leading to combinatorial explosion and operationally infeasible jeepney lines. Consequently, a Public Utility Jeepney (PUJ) arterial function was applied to evaluate and filter the full \texttt{CityGraph}. 
+
+Out of the 76,310 total network edges, 50,286 edges (65.9\%) were classified as non-drivable and pruned from the vehicular routing space. The remaining 26,024 edges (34.1\%) were successfully assigned the \texttt{is\_drivable=True} flag, forming the filtered arterial skeleton.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/citygraph_comparison.png}
+    \caption{Visual comparison of (a) the full \texttt{CityGraph} containing 76,310 \texttt{DirEdge} connections, and (b) the filtered arterial \texttt{CityGraph} containing 26,024 drivable edges. Major geographic landmarks such as MSU-IIT (8.2415, 124.2435) and Robinsons Place (8.2175, 124.2380) verify spatial alignment.}
+    \label{fig:citygraph_comparison}
+\end{figure}
+
+As illustrated in Figure \ref{fig:citygraph_comparison}, this filtering process proves the successful removal of residential dead-ends and non-traversable nodes, restricting \texttt{Jeep} agent movement to valid, navigable transit corridors
+. Furthermore, the inclusion of reference landmarks ensures the accurate topological and geographical alignment of the extracted graph
+. Critically, while the arterial filtering restricts vehicle routing, the pruned residential and minor roads are not deleted from the underlying \texttt{CityGraph}; they remain fully preserved to guarantee that the complete spatial network is available for modeling passenger walking access in the subsequent \texttt{TravelGraph} construction.
 
 \subsection{\texttt{DirectDemandModel} (DDM) Topography}
-\textbf{Visual 1:} Centrality-weighted nodes queried from the TomTom Traffic Flow API under Efraimidis \& Spirakis weighted-reservoir sampling. \\
-\textbf{Visual 2:} The Inverse Distance Weighting (IDW) heatmap showing spatial traffic-weight diffusion. \\
-\textbf{Visual 3:} Betweenness Centrality graph vs. the fused OD Centrality graph ($P_i = W_i^{\alpha} C_i^{\beta}$), side by side. \\
-\textbf{Visual 4:} Temporal DDM surfaces and their demand distributions for the 08:00, 13:00, and 17:00 query windows. \\
-\textbf{Visual 5:} DDM surface projected onto the full network vs. the arterial subset used for waypoint sampling. \\
-\textit{Discussion:} Demonstrates that OD Centrality, derived from live traffic fused with network topology, is a superior proxy for passenger flow than raw topological betweenness: corridors that are both structurally central and empirically congested dominate the surface, producing a spatially coherent demand gradient rather than scattered hot spots.
 
-\subsection{Demand-Responsive Route Generation}
-\textbf{Visual 1:} Representative generation-zero route loops produced by the \texttt{RouteGenerator}. \\
-\textit{Discussion:} Confirms that waypoints sampled from the DDM surface under the \texttt{only\_drivable} constraint yield structurally valid closed loops (passing loop continuity, Layer-2 isolation, and single out-pointer checks), biasing initial routes toward high-demand corridors.
+To generate realistic, demand-responsive origin and destination points, the environment utilizes a \texttt{DirectDemandModel} (DDM) that avoids uniform node sampling by assigning higher selection probability to locations exhibiting significant traffic activity and structural importance. From the complete network of 36,866 \texttt{CityGraph} nodes, a representative subset of 381 pre-impute centroid nodes was queried using centrality-weighted reservoir sampling [1]. Empirical travel times for these specific coordinates were extracted from the TomTom Traffic Flow API to compute localized traffic weights, defined formally as the ratio of free-flow travel time to dynamic travel time.
+
+Because querying every node is computationally prohibitive and prone to API throttling, an Inverse Distance Weighting (IDW) spatial interpolation utilizing the Haversine formula was applied to diffuse these discrete traffic weights across the unqueried nodes of the network. Temporal analysis of the IDW traffic weights demonstrates clear dynamic friction across discrete query windows. During the 08:00 morning peak, the spatial traffic weights exhibited a mean of 1.188 with a maximum localized friction multiplier of 3.013. Congestion measurably subsided during the 13:00 off-peak window (mean: 1.132, max: 2.547), before reaching its highest aggregate intensity during the 17:00 evening peak (mean: 1.228, max: 3.164). 
+
+To establish the final probability surface, these interpolated traffic weights ($W_i$) were fused with structural betweenness centrality ($C_i$) to calculate the final Origin-Destination (OD) Centrality score ($P_i = W_i^{\alpha} C_i^{\beta}$). This fused OD Centrality demonstrably serves as a superior proxy for passenger flow compared to raw topological betweenness alone. By synthesizing live traffic friction with network topology, corridors that are both structurally central and empirically congested dominate the probability surface. This mechanism successfully produces a spatially coherent demand gradient rather than isolated, scattered hot spots.
+
+Finally, while the continuous DDM surface is computed across the full 36,866-node infrastructure topography, the active sampling space for generating jeepney routes is projected strictly onto the filtered arterial subset. This \texttt{only\_drivable} constraint guarantees that the algorithm intelligently targets high-demand passenger clusters while strictly confining candidate waypoints to viable, navigable transit corridors.
+
+\vspace{1em}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{chap4/figures/ddm_pre_imputed.png}
+    \caption{Spatial distribution of the 381 pre-imputed centroid nodes queried from the TomTom Traffic Flow API, shaded by their raw congestion index (Travel Time / Free Flow).}
+    \label{fig:ddm_pre_impute}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{chap4/figures/ddm_3maps_comparison.png}
+    \caption{Visual comparison of the DDM components: (a) Raw topological Betweenness Centrality, (b) The IDW Traffic Weights heatmap showing spatial diffusion, and (c) The fused OD Centrality graph ($P_i = W_i^{\alpha} C_i^{\beta}$) producing a spatially coherent demand gradient.}
+    \label{fig:ddm_3maps}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/ddm_time_comparison.png}
+    \caption{Temporal DDM probability surfaces tracking the shifting demand gradients across the 08:00, 13:00, and 17:00 query windows.}
+    \label{fig:ddm_time_surfaces}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/ddm_distributions.png}
+    \caption{Log-scale frequency distributions of Betweenness Centrality, IDW Traffic Weights, and the combined OD Centrality probabilities across the three temporal query windows.}
+    \label{fig:ddm_distributions}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]
+    {chap4/figures/ddm_whole_vs_arterials.png}
+    \caption{Comparison of the OD Centrality surface projected onto (a) the full 36,866-node \texttt{CityGraph} and (b) the filtered arterial subset used exclusively for \texttt{RouteGenerator} waypoint sampling.}
+    \label{fig:ddm_arterial_projection}
+\end{figure}
 
 % ────────────────────────────────────────────────────────────
 \section{Architectural Validation}
@@ -32,12 +82,12 @@ To ensure the optimization relies on valid spatial and demographic data, the dig
 Prior to evolutionary optimization, the foundational mechanics of the multi-layer graph and the temporal physics engine are validated.
 
 \subsection{The Three-Layer \texttt{TravelGraph} Connectivity}
-\textbf{Visual 1:} A matrix of six isolated illustrations detailing the explicit layer transitions: Start Walk (SW), Wait (WA), Ride (RI), Alight (AL), End Walk (EW), and Transfer (TR). \\
-\textbf{Visual 2:} A sample \texttt{Journey} tracing a single \texttt{Passenger} agent navigating physical distance and transfer penalties, converted into Equivalent In-Vehicle Minutes (EIVM). \\
+\textbf{DONE 1:} A matrix of six isolated illustrations detailing the explicit layer transitions: Start Walk (SW), Wait (WA), Ride (RI), Alight (AL), End Walk (EW), and Transfer (TR). \\
+\textbf{DONE 2:} A sample \texttt{Journey} tracing a single \texttt{Passenger} agent navigating physical distance and transfer penalties, converted into Equivalent In-Vehicle Minutes (EIVM). \\
 \textit{Discussion:} Demonstrates that the A* pathfinder optimizes generalized cost across a single EIVM scale rather than raw geometric distance, and that route isolation prevents the ``teleportation anomaly'' between physically coincident routes.
 
 \subsection{Agent-Based Temporal Simulation}
-\textbf{Visual 1:} Tick-by-tick snapshots tracing \texttt{Passenger} and \texttt{Jeep} agents, showing boarding, capacity-limited waiting, alighting, and headway behavior. \\
+\textbf{DONE 1:} Tick-by-tick snapshots tracing \texttt{Passenger} and \texttt{Jeep} agents, showing boarding, capacity-limited waiting, alighting, and headway behavior. \\
 \textit{Discussion:} Validates that the engine reproduces the compounding micro-level effects that justify an agent-based model over static assignment: a full jeepney leaves passengers stranded in the \texttt{WAITING} state (accruing delay), while equidistant spawning suppresses early bus bunching.
 
 % ────────────────────────────────────────────────────────────
@@ -53,17 +103,26 @@ Prior to executing the framework on the full empirical data, hyperparameter cali
 \textit{Discussion:} All production runs fix the simulation time step at $\Delta t = 10\text{s}$ (\texttt{seconds\_per\_tick}). The only discretization error arises from sub-tick rounding when a vehicle reaches a stop; this error is unbiased, so across the large stochastic passenger population and the extended simulation horizon, individual overshoot and undershoot are independent and average toward zero. The residual noise is therefore dominated by, and absorbed into, the stochastic demand variance the optimizer already tolerates, while a 10-second step keeps per-evaluation runtime tractable. A standalone discretization sweep is consequently unnecessary.
 
 \subsection{Simulation Horizon and Demand-Volume Calibration}
-\textbf{Visual 1:} Passenger completion rate as a function of the simulation horizon \texttt{num\_ticks}, recorded cumulatively within a single long run. \\
-\textbf{Visual 2:} A line chart with shaded error bands ($\pm 1$ standard deviation) plotting passenger volume against mean simulation fitness ($F_{\text{sim}}$) and fitness variance ($\sigma^2$) across repeated runs of a static topology. \\
-\textit{Discussion:} Two coupled knobs govern both fidelity and per-evaluation runtime. The horizon must be long enough for the large majority of passengers to complete their journeys, since incomplete passengers are scored through the underservice penalty rather than realized cost; the production horizon is taken at the tick where the completion curve plateaus. The spawn rate is calibrated against fitness variance: under low passenger volumes the score is dominated by stochastic OD-sampling noise, producing extreme variance between identical runs, whereas the variance collapses past a critical volume. The production rate is selected just beyond this collapse, guaranteeing the \texttt{MemeticEngine} selects parents on true structural fitness rather than sampling luck while bounding the $\mathcal{O}(N)$ per-tick cost.
+The simulation exposes two coupled knobs that jointly govern evaluation fidelity and per-evaluation runtime: the fixed horizon \texttt{num\_ticks} at which each run is abruptly terminated, and the passenger arrival rate \texttt{spawn\_rate\_per\_hour}. Because the framework models a continuous stream of commuters truncated at a fixed horizon---mirroring the bounded operational window of a real service period---passengers still in transit at the cutoff are not discarded but scored through the underservice penalty term of the fitness function. Passenger completion fraction is therefore a diagnostic rather than a calibration target: under continuous arrivals it cannot approach unity, because a trailing cohort is always mid-journey when the clock stops. Both knobs were instead calibrated against the stability of the fitness score itself, quantified as the coefficient of variation (CV) of $F_{\text{sim}}$ across independent replications.
+
+Figure~\ref{fig:horizon_volume_calibration}(a) plots this CV against the simulation horizon at a fixed demand level. The CV falls steeply as the horizon lengthens---a longer run spawns more passengers, so the law of large numbers suppresses sampling noise---before flattening into a low-variance regime beyond roughly 60--80 simulated minutes. The production horizon was fixed at \texttt{num\_ticks}~$=540$ (90 minutes at $\Delta t = 10$\,s), comfortably inside this stable band. The faint rise near 80--100 minutes is the residual signature of completion bimodality (passengers flipping between completed and penalized states), but it is dominated by the passenger-count effect and remains within the stable band.
+
+Figure~\ref{fig:horizon_volume_calibration}(b) isolates the demand-volume axis, plotting the same CV against the total passenger spawn rate at a fixed horizon. Here the variance collapse is monotonic and pronounced: for the five-route production configuration the CV falls from approximately $0.076$ at $250$\,pax/hr to below the $5\%$ acceptance threshold beyond roughly $550$--$600$\,pax/hr, while denser ten-route systems satisfy the threshold by $500$\,pax/hr. The production spawn rate was therefore set to $600$\,pax/hr---the smallest rate placing the five-route configuration firmly under the $5\%$ CV ceiling---ensuring the \texttt{MemeticEngine} selects parents on genuine structural fitness rather than stochastic sampling luck, while bounding the $\mathcal{O}(N)$ per-tick cost. These curves were generated on unoptimized, randomly initialized baseline routes; the low absolute completion fractions they exhibit are a property of inefficient generation-zero topologies, not of the calibrated horizon.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/horizon_volume_calibration.png}
+    \caption{Calibration of the two simulation knobs against fitness stability. (a) Coefficient of variation of $F_{\text{sim}}$ versus the simulation horizon (with passenger completion overlaid as a secondary diagnostic), showing the variance flattening into a stable band that contains the production horizon of 540 ticks. (b) CV versus total passenger spawn rate, showing the monotonic variance collapse below the $5\%$ acceptance threshold and motivating the production rate of $600$\,pax/hr for the five-route configuration.}
+    \label{fig:horizon_volume_calibration}
+\end{figure}
 
 \subsection{Opportunistic Riding and Individual Travel-Delay Benefit}
 \textbf{Visual:} Distribution of the travel-time delta $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ for passengers who waited for their expected jeepney (Group~A) versus those who boarded an earlier alternative (Group~B), annotated with the Mann--Whitney $U$ test result. \\
 \textit{Discussion:} A positive boarding \texttt{weight\_tolerance} permits a passenger to board an acceptable earlier-arriving jeepney instead of strictly waiting for the single vehicle on their pre-computed least-cost journey. A simulation run with \texttt{weight\_tolerance} $> 0$ partitions completed passengers into Group~A (waited) and Group~B (rode opportunistically), and their travel-time deltas are compared with the non-parametric Mann--Whitney $U$ test. A statistically significant result with a lower median delay for Group~B proves that opportunistic riders experience a real reduction in travel delay, validating that the weight-tolerance mechanism confers an individual-level benefit rather than merely perturbing path choice. The underlying travel-graph cost weights were externally validated and are not re-tuned here.
 
-\subsection{Surrogate Ranking Fidelity (Spearman $\rho$)}
-\textbf{Visual:} Scatter plot mapping the $\mathcal{O}(1)$ static A* surrogate cost ($C_{\text{sur}}$) against the full temporal simulation fitness ($F_{\text{sim}}$). \\
-\textit{Discussion:} The surrogate is used only as an acceptance gate during Lamarckian local search, so its legitimacy rests on preserving the relative \emph{rank} of candidate solutions rather than their absolute cost. The Spearman ($\rho$) and Kendall ($\tau$) rank correlations, together with top-tier selection precision and recall, confirm that the surrogate never discards a truly optimal candidate, validating its use as a lightweight computational bypass.
+% (Surrogate Ranking Fidelity subsection removed: the static surrogate was dropped in
+% favor of gap-gated Lamarckian acceptance. See the methodology's "Gap-Gated Lamarckian
+% Acceptance" subsection. The Lamarckian operator mechanics below remain.)
 
 \subsection{Lamarckian Operator Mechanics}
 \textbf{Visual 1:} Pre-mutation vs. post-mutation snapshots on the Manhattan toy network demonstrating the three local-search mutations: Attraction toward high-demand corridors, Repulsion from oversupplied corridors, and Tortuosity reduction (pruning). \\
