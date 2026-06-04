@@ -25,15 +25,15 @@ travel_graph:
 simulation:
   mohring_sample_size: 450 # Updated based on variance collapse empirical test
   jeep_capacity: 16
-  num_ticks: 540               # Uniform High-Fi ticks (540 @ 10s = 90 min)
+  num_ticks: 7200               # Uniform High-Fi ticks (540 @ 10s = 90 min)
   jeep_speed_kmh: 20.0
   passenger_speed_kmh: 4.5
-  num_routes: 5
+  num_routes: 50
   total_allocatable_jeeps: 470 # P1: Standard True Fleet Size Anchor
-  weight_tolerance: 14.4
+  weight_tolerance: 100
   spawn_rate_per_hour: 200.0
   spawn_stdev: 10.0
-  seconds_per_tick: 10         # Uniform 10s Discretization Calibration
+  seconds_per_tick: 30         # Uniform 10s Discretization Calibration
 
 optimization:
   output_root: "outputs/iligan_runs"

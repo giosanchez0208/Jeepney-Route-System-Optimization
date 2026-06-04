@@ -570,6 +570,20 @@ class JeepSystem:
                             p.state = Passenger.RIDING
                             p.current_jeep = jeep
                             p.wait_ticks = 0
+                            
+                            # Track opportunistic riding: record which route they boarded
+                            if p.expected_route_idx is None:
+                                p.expected_route_idx = target_route_idx
+                            p.boarded_route_idx = route_idx
+                            
+                            # Mark if they took expected or alternative
+                            if target_route_idx == route_idx:
+                                p.boarded_expected = True
+                                p.took_alternative = False
+                            else:
+                                p.boarded_expected = False
+                                p.took_alternative = True
+                            
                             jeep.modify_passenger(1)
                             jeep.onboard_passengers.add(p)
                             self._waiting_coord_by_passenger.pop(p, None)
