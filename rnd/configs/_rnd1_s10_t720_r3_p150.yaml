@@ -64,4 +64,4 @@ travel_graph:
   ride_wt: 0.00632
   transfer_wt: 15.78
   wait_wt: 14.44
-  walk_wt: 0.563
+  walk_wt: 0.0563
