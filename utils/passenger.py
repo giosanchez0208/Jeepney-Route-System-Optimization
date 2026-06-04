@@ -61,6 +61,12 @@ class Passenger:
         self.spawn_tick: int = spawn_time
         self.despawn_tick: Optional[int] = None
 
+        # Track opportunistic riding: expected vs actual boarded route
+        self.expected_route_idx: Optional[int] = None  # The route they planned to board (from EIVM)
+        self.boarded_route_idx: Optional[int] = None   # The route they actually boarded
+        self.boarded_expected: bool = False            # True if they boarded their planned route
+        self.took_alternative: bool = False            # True if they boarded a different route
+
         self._cost_prefix_sums: list[float] = [0.0] * (len(self.journey) + 1)
         self._target_alight_nodes: list[Optional[Node]] = [None] * len(self.journey)
         self._planned_ride_weights: list[float] = [0.0] * len(self.journey)
