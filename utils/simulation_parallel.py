@@ -107,13 +107,27 @@ def _restore_route(route: Route, cg: CityGraph) -> Route:
 
 
 def _worker_run(routes: List[Route]) -> SimulationResult:
+    """Backward-compatible entry point. Runs with the frozen worker config (no overrides)."""
+    return _worker_run_override((routes, None))
+
+
+def _worker_run_override(arg) -> SimulationResult:
     """
     Executes a single simulation run within the worker process using the lightweight routes.
     Caches the TravelGraph so it's only rebuilt when the route set changes.
+
+    `arg` is a tuple ``(routes, overrides)``. ``overrides`` is an optional dict of
+    per-call simulation-parameter overrides (e.g. ``num_ticks``, ``spawn_rate_per_hour``,
+    ``seconds_per_tick``, ``total_allocatable_jeeps``). When ``None`` the frozen worker
+    config is used unchanged — byte-for-byte identical to the original behavior.
+    Crucially, none of the override keys affect the heavy objects (CityGraph,
+    DemandSampler, cached TravelGraph), so a PERSISTENT pool can sweep these scalars
+    without any worker re-initialization or TravelGraph rebuild.
     """
+    routes, overrides = arg
     global _WORKER_CONFIG, _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER
     global _WORKER_TG_CACHE, _WORKER_ROUTES_CACHE, _WORKER_ROUTES_KEY
-    
+
     if _WORKER_CITY_GRAPH is None or _WORKER_DEMAND_SAMPLER is None:
         raise RuntimeError(f"[Worker {os.getpid()}] process was not properly initialized with static objects.")
 
@@ -137,7 +151,9 @@ def _worker_run(routes: List[Route]) -> SimulationResult:
         print(f"[Worker {os.getpid()}] Built TravelGraph ({len(tg.travel_graph)} edges)")
 
     # 2. Build Local Heavy Objects
-    sim_cfg = _WORKER_CONFIG.get("simulation", {})
+    # Merge per-call overrides over the frozen worker config. When overrides is
+    # None this is an exact shallow copy of the original simulation config.
+    sim_cfg = {**_WORKER_CONFIG.get("simulation", {}), **(overrides or {})}
     total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
     jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0)
     jeep_capacity = sim_cfg.get("jeep_capacity", 16)
@@ -270,4 +286,41 @@ class ParallelSimulationRunner:
                     results.append(result)
                 
         print(f"[ParallelRunner] Successfully completed {len(results)} parallel simulations.")
+        return results
+
+    def run_parallel_overrides(self, routes_list: List[List[Route]], overrides_list: List[dict]) -> List[SimulationResult]:
+        """
+        Like run_parallel(), but applies a per-setup dict of simulation-parameter
+        overrides to each run. This lets a PERSISTENT pool sweep scalars such as
+        num_ticks / spawn_rate_per_hour / seconds_per_tick / total_allocatable_jeeps
+        WITHOUT re-initializing workers or rebuilding the cached TravelGraph — the
+        decisive speedup for parameter-sweep notebooks.
+
+        Args:
+            routes_list:    list of route-systems (one per setup).
+            overrides_list: list of override dicts (same length); each is merged over
+                            the frozen 'simulation' config for its setup.
+        """
+        if len(routes_list) != len(overrides_list):
+            raise ValueError("routes_list and overrides_list must have the same length.")
+
+        print(f"[ParallelRunner] Sweeping {len(routes_list)} setups across {self.max_workers} cores (override mode)...")
+        results = []
+        args = list(zip(routes_list, overrides_list))
+
+        if self._executor is not None:
+            # Persistent pool mode — reuse existing workers and their cached TravelGraph
+            for result in self._executor.map(_worker_run_override, args):
+                results.append(result)
+        else:
+            # One-shot mode (backward compatible)
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.max_workers,
+                initializer=_worker_init,
+                initargs=(self.config,)
+            ) as executor:
+                for result in executor.map(_worker_run_override, args):
+                    results.append(result)
+
+        print(f"[ParallelRunner] Completed {len(results)} simulations (override mode).")
         return results
