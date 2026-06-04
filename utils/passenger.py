@@ -53,6 +53,7 @@ class Passenger:
         
         self._edge_idx: int = 0
         self._edge_progress: float = 0.0
+        self._stepped_this_tick: bool = False  # double-step guard (reset by PassengerGenerator)
         
         self.current_jeep: Optional[Jeep] = None
         
@@ -122,6 +123,12 @@ class Passenger:
         self._lon = float(value)
 
     def update(self) -> None:
+        # Double-step guard: if we already advanced this tick, bail out.
+        # PassengerGenerator.update() clears the flag at the tick boundary.
+        if self._stepped_this_tick:
+            return
+        self._stepped_this_tick = True
+
         match self.state:
             case Passenger.DONE | Passenger.RIDING:
                 return
