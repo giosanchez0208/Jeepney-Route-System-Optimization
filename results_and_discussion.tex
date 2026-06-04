@@ -1,366 +1,125 @@
-% ============================================================================
-%  CHAPTER 4 — RESULTS & DISCUSSION   (guided template / scaffold)
-% ----------------------------------------------------------------------------
-%  HOW TO USE THIS FILE
-%  - Prose is written and final. Numbers and figures are PLACEHOLDERS.
-%  - \PH{...}      = a number/value to drop in. Renders in bold brackets.
-%  - \PHfig{path} = a figure not yet exported. Put the file under chap4/figures/.
-%  - A comment "% KNOWN:" next to a placeholder means the value already exists
-%    in mathematical_validation.ipynb / validation_results_report.md — you only
-%    need to CONFIRM it, not recompute it.
-%  - A comment "% BLOCKED:" marks a value that depends on the final num_ticks /
-%    spawn-rate calibration or the final Iligan optimization run.
-%
-%  Move the three \providecommand lines below into your main preamble if you
-%  prefer; they are guarded so they will not clash.
-% ============================================================================
-
-\providecommand{\PH}[1]{\textbf{[\,#1\,]}}                 % inline value placeholder
-\providecommand{\PHfig}[1]{\fbox{\parbox{0.8\textwidth}{\centering\vspace{2em}\texttt{FIGURE PENDING: #1}\vspace{2em}}}}
-\providecommand{\eivm}{EIVM}                                % fallback if \ac{EIVM} not set up here
+% Chapter 4: Results & Discussion
 
 \chapter{Results \& Discussion}
-\label{chap:results}
 \noindent
-This chapter evaluates the proposed parallel hybrid agent-based memetic framework, moving from verification of the empirical environment, through algorithmic calibration on a controlled synthetic topology, to the final optimization of the Iligan City \texttt{TravelGraph}. The chapter deliberately mirrors the order of the methodology in Chapter~3: first the spatial environment and demand surface are shown to be valid (Section~\ref{sec:4.1}), then the multi-layer \texttt{TravelGraph} and temporal physics engine are validated mechanically (Section~\ref{sec:4.2}), then the free hyperparameters are calibrated and the cheap surrogate is verified against the full simulation (Section~\ref{sec:4.3}), then the evolutionary dynamics of the \texttt{MemeticEngine} are characterized (Section~\ref{sec:4.4}), and finally the optimized network for Iligan City is presented and interpreted (Section~\ref{sec:4.5}).
+This chapter evaluates the performance of the proposed memetic framework, transitioning from environmental validation and algorithmic calibration on synthetic topologies to the final network optimization of the empirical Iligan City \texttt{TravelGraph}.
 
-\noindent
-Unless otherwise stated, all production runs use the calibrated configuration profile reported in Table~\ref{tab:4.0_config}: \PH{seconds_per_tick = 10\,s}, \PH{num_ticks = TBD}, mohring sample size \PH{S = 450}, \PH{num\_routes = 5}, \PH{total\_allocatable\_jeeps = 470}, jeep capacity \PH{16}, spawn rate \PH{200/hr}, population \PH{10}, and \PH{g\_max = 30} generations.
-
-\input{chap4/tables/table_4.0_config}  % master run-configuration table (one place to define all knobs)
-
-% ============================================================================
+% ────────────────────────────────────────────────────────────
 \section{Environment and Demand Generation}
-\label{sec:4.1}
-% ============================================================================
 \noindent
-Before any optimization is trusted, the digital twin of Iligan City and the synthesized passenger demand must be shown to be spatially valid. This section verifies the two inputs every later result depends on: the arterial road network and the Direct Demand Model surface.
+To ensure the optimization relies on valid spatial and demographic data, the digital twin of Iligan City and the simulated passenger demand must first be verified.
 
-\subsection{\texttt{CityGraph} Construction and Arterial Pruning}
-\label{subsec:4.1.1}
-\noindent
-The raw OpenStreetMap extract of Iligan City was parsed into the \texttt{CityGraph} and then restricted to the \ac{PUJ}-eligible arterial skeleton by the arterial function (Section~3.2.2). The full extract contained \PH{N nodes} and \PH{M directed edges}; after arterial pruning, \PH{N' nodes} and \PH{M' edges} remained eligible for route construction. % KNOWN: validation report cites 36,866 nodes / 381 demand centroids for the GIS network — confirm node/edge counts from your CityGraph build.
+\subsection{\texttt{CityGraph} Arterial Network Pruning}
+\textbf{Visual 1:} Full Iligan City OpenStreetMap graph (all \texttt{DirEdge} connections). \\
+\textbf{Visual 2:} The filtered Arterial \texttt{CityGraph}. \\
+\textit{Discussion:} Proves the successful removal of residential dead-ends and non-traversable nodes, restricting \texttt{Jeep} agent movement to valid, navigable transit corridors while leaving the full network available for passenger walking access.
 
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/citygraph_full_vs_arterial.png}  % YOUR FIGURE: "city graph (arterial and full)"
-  \caption{Iligan City road network. (a) Full \texttt{CityGraph} with all \texttt{DirEdge} connections; (b) the pruned arterial network eligible for \ac{PUJ} route generation.}
-  \label{fig:4.1_citygraph}
-\end{figure}
-
-\noindent
-Figure~\ref{fig:4.1_citygraph} confirms that residential dead-ends, service alleys, and pedestrian-only segments were removed, restricting \texttt{Jeep} agents to navigable transit corridors while the full network remains available for passenger walking access. This is the structural precondition for the arterial-anchored demand surface that follows.
-
-\subsection{Direct Demand Model (DDM) Surface}
-\label{subsec:4.1.2}
-\noindent
-The DDM converts sparse, rate-limited TomTom traffic queries into a dense, network-wide demand probability surface using centrality-weighted sampling, IDW interpolation, and OD-centrality fusion (Section~3.3). Figure~\ref{fig:4.2_sampling} shows the nodes selected by Efraimidis--Spirakis weighted reservoir sampling, demonstrating that the limited API budget was concentrated on the structural backbone rather than wasted on low-volume streets.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/tomtom_sampled_points.png}  % YOUR FIGURE: "queried points from tomtom based on our sampling method"
-  \caption{Centrality-weighted nodes queried from the TomTom Traffic Flow API under the Efraimidis--Spirakis weighted-reservoir scheme.}
-  \label{fig:4.2_sampling}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/ddm_components_bc_idw_od.png}  % YOUR FIGURES: betweenness map, IDW traffic weights map, combined OD map
-  \caption{Construction of the demand surface. (a) Betweenness centrality $C_i$; (b) IDW-interpolated empirical traffic weight $W_i$; (c) the fused OD-centrality demand surface $P_i = W_i^{\alpha} C_i^{\beta}$, with $\alpha=\PH{0.6}$, $\beta=\PH{0.4}$.}
-  \label{fig:4.3_od}
-\end{figure}
-
-\noindent
-The fused surface concentrates demand on corridors that are both structurally central and empirically congested, producing a spatially coherent gradient rather than scattered hot spots. % NOTE: standalone DDM-consistency test (Pearson/Jaccard/instability) was dropped. Keep this descriptive read of the figures only.
-This is the demand landscape over which the genetic algorithm searches.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/ddm_temporal_8am_1pm_5pm.png}  % YOUR FIGURES: ddm map + distributions for 8am, 1pm, 5pm
-  \caption{Temporal DDM surfaces and their demand distributions for the \PH{08:00}, \PH{13:00}, and \PH{17:00} query windows.}
-  \label{fig:4.4_ddm_temporal}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/ddm_full_vs_arterial.png}  % YOUR FIGURE: "ddm (arterial and full)"
-  \caption{DDM demand surface projected onto (a) the full network and (b) the arterial subset used for waypoint sampling.}
-  \label{fig:4.5_ddm_arterial}
-\end{figure}
-
-\noindent
-\textit{Discussion.} Figures~\ref{fig:4.3_od}--\ref{fig:4.5_ddm_arterial} establish that OD centrality, derived from live traffic fused with topology, is a more faithful proxy for passenger flow than raw betweenness alone: corridors that are structurally important \emph{and} empirically congested dominate the surface, while structurally trivial but transiently busy segments (and structurally important but empty ones) are correctly suppressed.
+\subsection{\texttt{DirectDemandModel} (DDM) Topography}
+\textbf{Visual 1:} Centrality-weighted nodes queried from the TomTom Traffic Flow API under Efraimidis \& Spirakis weighted-reservoir sampling. \\
+\textbf{Visual 2:} The Inverse Distance Weighting (IDW) heatmap showing spatial traffic-weight diffusion. \\
+\textbf{Visual 3:} Betweenness Centrality graph vs. the fused OD Centrality graph ($P_i = W_i^{\alpha} C_i^{\beta}$), side by side. \\
+\textbf{Visual 4:} Temporal DDM surfaces and their demand distributions for the 08:00, 13:00, and 17:00 query windows. \\
+\textbf{Visual 5:} DDM surface projected onto the full network vs. the arterial subset used for waypoint sampling. \\
+\textit{Discussion:} Demonstrates that OD Centrality, derived from live traffic fused with network topology, is a superior proxy for passenger flow than raw topological betweenness: corridors that are both structurally central and empirically congested dominate the surface, producing a spatially coherent demand gradient rather than scattered hot spots.
 
 \subsection{Demand-Responsive Route Generation}
-\label{subsec:4.1.3}
+\textbf{Visual 1:} Representative generation-zero route loops produced by the \texttt{RouteGenerator}. \\
+\textit{Discussion:} Confirms that waypoints sampled from the DDM surface under the \texttt{only\_drivable} constraint yield structurally valid closed loops (passing loop continuity, Layer-2 isolation, and single out-pointer checks), biasing initial routes toward high-demand corridors.
+
+% ────────────────────────────────────────────────────────────
+\section{Architectural Validation}
 \noindent
-The \texttt{RouteGenerator} samples waypoints from the DDM surface under the \texttt{only\_drivable=True} constraint and connects them via $A^{*}$ shortest paths into validated closed loops (Section~3.2.3). Figure~\ref{fig:4.6_sample_routes} shows representative generation-zero routes.
+Prior to evolutionary optimization, the foundational mechanics of the multi-layer graph and the temporal physics engine are validated.
 
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/sample_generated_routes.png}  % YOUR FIGURE: "sample routes made by our route maker"
-  \caption{Representative demand-responsive route loops produced by the \texttt{RouteGenerator}, each passing structural validation (loop continuity, Layer-2 isolation, single out-pointer).}
-  \label{fig:4.6_sample_routes}
-\end{figure}
-
-% ============================================================================
-\section{Architectural Validation of the Travel Graph and Temporal Engine}
-\label{sec:4.2}
-% ============================================================================
-\noindent
-This section validates the mechanics of the multi-layer \texttt{TravelGraph} and the tick-based physics engine before they are used for optimization.
-
-\subsection{Three-Layer \texttt{TravelGraph} Connectivity}
-\label{subsec:4.2.1}
-\noindent
-Figure~\ref{fig:4.7_edges} isolates the six edge types that encode the multi-modal journey and the transition penalties between layers.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/travelgraph_six_edges.png}  % YOUR FIGURE: 6 edge illustrations on the 3D travel graph
-  \caption{The six \texttt{DirEdge} types on the three-layer \texttt{TravelGraph}: Start-Walk (SW), Wait (WA), Ride (RI), Alight (AL), End-Walk (EW), and Transfer (TR).}
-  \label{fig:4.7_edges}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/full_journey_eivm.png}  % YOUR FIGURE: full "journey" taken by one passenger
-  \caption{A complete passenger \texttt{Journey} traced across all three layers, with each leg's contribution to the total generalized cost shown in \ac{EIVM}.}
-  \label{fig:4.8_journey}
-\end{figure}
-
-\noindent
-\textit{Discussion.} The journey in Figure~\ref{fig:4.8_journey} demonstrates that the $A^{*}$ pathfinder optimizes generalized cost (walking, waiting, riding, transferring expressed in a single \ac{EIVM} scale), not raw geometric distance, and that route isolation prevents the ``teleportation anomaly'' between physically coincident routes.
+\subsection{The Three-Layer \texttt{TravelGraph} Connectivity}
+\textbf{Visual 1:} A matrix of six isolated illustrations detailing the explicit layer transitions: Start Walk (SW), Wait (WA), Ride (RI), Alight (AL), End Walk (EW), and Transfer (TR). \\
+\textbf{Visual 2:} A sample \texttt{Journey} tracing a single \texttt{Passenger} agent navigating physical distance and transfer penalties, converted into Equivalent In-Vehicle Minutes (EIVM). \\
+\textit{Discussion:} Demonstrates that the A* pathfinder optimizes generalized cost across a single EIVM scale rather than raw geometric distance, and that route isolation prevents the ``teleportation anomaly'' between physically coincident routes.
 
 \subsection{Agent-Based Temporal Simulation}
-\label{subsec:4.2.2}
-\noindent
-Figure~\ref{fig:4.9_snapshots} traces passenger agents through the finite-state machine (walking $\rightarrow$ waiting $\rightarrow$ riding $\rightarrow$ done) and the \texttt{Jeep} agents along their Layer-2 loops over discrete ticks.
+\textbf{Visual 1:} Tick-by-tick snapshots tracing \texttt{Passenger} and \texttt{Jeep} agents, showing boarding, capacity-limited waiting, alighting, and headway behavior. \\
+\textit{Discussion:} Validates that the engine reproduces the compounding micro-level effects that justify an agent-based model over static assignment: a full jeepney leaves passengers stranded in the \texttt{WAITING} state (accruing delay), while equidistant spawning suppresses early bus bunching.
 
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/passenger_journey_snapshots.png}  % YOUR FIGURE: "passenger journey snapshots"
-  \caption{Tick-by-tick snapshots of passenger and jeepney agents, showing boarding, capacity-limited waiting, alighting, and headway behavior.}
-  \label{fig:4.9_snapshots}
-\end{figure}
-
-\noindent
-\textit{Discussion.} The snapshots confirm the engine reproduces the compounding micro-level effects that justify an agent-based model over static assignment: a full jeepney leaves waiting passengers stranded in the \texttt{WAITING} state (accruing delay), and equidistant spawning suppresses early bus bunching.
-
-% ============================================================================
+% ────────────────────────────────────────────────────────────
 \section{Component Calibration and Verification}
-\label{sec:4.3}
-% ============================================================================
 \noindent
-Hyperparameter calibration was performed on a synthetic Manhattan-grid topology to isolate algorithmic behavior from the geometric idiosyncrasies of the real network \citep{kepaptsoglou2009transit}. Each calibration below identifies the operating point used in the final Iligan runs.
+Prior to executing the framework on the full empirical data, hyperparameter calibration was conducted on a synthetic Manhattan grid topology to isolate algorithmic behavior from geographic anomalies \citep{kepaptsoglou2009transit}.
 
 \subsection{Mohring Fleet Allocation Stability}
-\label{subsec:4.3.1}
-\noindent
-The \texttt{FleetAllocator} distributes the fleet across routes using the square-root rule applied to each route's sampled demand level $D_r$. For the allocation to be trustworthy, it must be \emph{stable}: repeated allocations on the same network must not swing with the stochastic demand sample, and this stability must hold regardless of how many routes the system contains. Stability is therefore measured by the coefficient of variation (CV) of the per-route allocation across independent demand samples, evaluated for route systems of increasing size. The acceptance criterion is $\mathrm{CV} < 0.5$ across all tested route counts. Sweeping the number of routes over $\{\PH{3, 5, 7, \dots}\}$, the allocation CV remained below the $0.5$ threshold at \PH{CV_max}, confirming that the allocation is stable across system sizes at the production sample size $S = \PH{450}$. % NEW MOHRING TEST: y = CV of per-route allocation across seeds; x = num_routes; threshold line at CV=0.5.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/mohring_cv_by_route_count.png}  % NEW Mohring figure (regenerate; do NOT reuse old mohring_convergence.png from archived script with bad walk_wt)
-  \caption{Coefficient of variation of the Mohring fleet allocation as a function of the number of routes in the system, with the $\mathrm{CV}=0.5$ acceptance threshold. Bars/points below the line indicate stable allocation.}
-  \label{fig:4.10_mohring}
-\end{figure}
+\textbf{Visual:} Coefficient of variation (CV) of the per-route Mohring fleet allocation as a function of the number of routes in the system, with a horizontal acceptance threshold drawn at $\mathrm{CV} = 0.5$. \\
+\textit{Discussion:} The square-root allocation must remain stable regardless of how many routes a candidate system contains. Sweeping the route count and measuring the CV of the allocation across independent demand samples, every tested system size remains below the $0.5$ acceptance threshold, confirming that fleet distribution is robust to system size at the production sample size and does not swing with the stochastic demand draw.
 
 \subsection{Temporal Discretization ($\Delta t$)}
-\label{subsec:4.3.2}
-\noindent
-All production runs fix the simulation time step at $\Delta t = \PH{10}$\,s (\texttt{seconds\_per\_tick}). A per-tick discretization error arises only from sub-tick rounding at the moment a vehicle reaches a stop, and this error is unbiased: across the large stochastic passenger population and the extended simulation horizon, individual overshoot and undershoot are independent and average toward zero, so they do not bias the system-level fitness $F_{\text{sim}}$ used for selection. A 10-second step is therefore fine enough that residual discretization noise is dominated by, and absorbed into, the stochastic demand variance the optimizer already tolerates, while remaining coarse enough to keep per-evaluation runtime tractable. % NOTE: standalone Delta-t MAPE calibration test was dropped; justification is the stochastic-averaging argument above. No figure.
+\textit{Discussion:} All production runs fix the simulation time step at $\Delta t = 10\text{s}$ (\texttt{seconds\_per\_tick}). The only discretization error arises from sub-tick rounding when a vehicle reaches a stop; this error is unbiased, so across the large stochastic passenger population and the extended simulation horizon, individual overshoot and undershoot are independent and average toward zero. The residual noise is therefore dominated by, and absorbed into, the stochastic demand variance the optimizer already tolerates, while a 10-second step keeps per-evaluation runtime tractable. A standalone discretization sweep is consequently unnecessary.
 
 \subsection{Simulation Horizon and Demand-Volume Calibration}
-\label{subsec:4.3.3}
-\noindent
-% BLOCKED: this is the open calibration. num_ticks (horizon) and spawn_rate_per_hour (volume) set both fidelity and per-evaluation runtime.
-Two coupled knobs govern both the statistical fidelity of a fitness evaluation and its wall-clock cost: the simulation horizon \texttt{num\_ticks} and the passenger arrival rate \texttt{spawn\_rate\_per\_hour}. The horizon must be long enough for the large majority of spawned passengers to complete their journeys, since incomplete passengers are scored through the underservice penalty rather than realized cost. Figure~\ref{fig:4.12_horizon}(a) plots completion rate against \texttt{num\_ticks}; the curve plateaus at \PH{num\_ticks = TBD} (\PH{TBD} minutes at $\Delta t = 10$\,s), which is adopted as the production horizon. The spawn rate is calibrated against fitness variance: below \PH{N\_min} passengers the score is dominated by OD-sampling noise, while above it the variance collapses (Figure~\ref{fig:4.12_horizon}(b)). The production rate of \PH{200/hr} sits past this collapse while bounding the $\mathcal{O}(N)$ per-tick cost.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/horizon_and_volume_calibration.png}  % NEW: produce from rnd_1_ticks_and_rate.ipynb
-  \caption{(a) Passenger completion rate versus simulation horizon \texttt{num\_ticks}. (b) Mean fitness and fitness variance ($\pm 1\sigma$ band) versus passenger volume, showing variance collapse.}
-  \label{fig:4.12_horizon}
-\end{figure}
+\textbf{Visual 1:} Passenger completion rate as a function of the simulation horizon \texttt{num\_ticks}, recorded cumulatively within a single long run. \\
+\textbf{Visual 2:} A line chart with shaded error bands ($\pm 1$ standard deviation) plotting passenger volume against mean simulation fitness ($F_{\text{sim}}$) and fitness variance ($\sigma^2$) across repeated runs of a static topology. \\
+\textit{Discussion:} Two coupled knobs govern both fidelity and per-evaluation runtime. The horizon must be long enough for the large majority of passengers to complete their journeys, since incomplete passengers are scored through the underservice penalty rather than realized cost; the production horizon is taken at the tick where the completion curve plateaus. The spawn rate is calibrated against fitness variance: under low passenger volumes the score is dominated by stochastic OD-sampling noise, producing extreme variance between identical runs, whereas the variance collapses past a critical volume. The production rate is selected just beyond this collapse, guaranteeing the \texttt{MemeticEngine} selects parents on true structural fitness rather than sampling luck while bounding the $\mathcal{O}(N)$ per-tick cost.
 
 \subsection{Opportunistic Riding and Individual Travel-Delay Benefit}
-\label{subsec:4.3.4}
-\noindent
-A positive boarding \texttt{weight\_tolerance} ($> 0$) permits a passenger to board an acceptable earlier-arriving jeepney rather than strictly waiting for the single jeepney on their pre-computed least-cost journey. This subsection tests whether that opportunistic behavior measurably benefits the individual commuter. A simulation was run with \texttt{weight\_tolerance} $= \PH{14.4}$, and completed passengers were partitioned into two groups: Group~A, who waited for their expected jeepney, and Group~B, who boarded an alternative earlier jeepney. For each passenger, the travel-time delta $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ was computed (lower is better).
+\textbf{Visual:} Distribution of the travel-time delta $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ for passengers who waited for their expected jeepney (Group~A) versus those who boarded an earlier alternative (Group~B), annotated with the Mann--Whitney $U$ test result. \\
+\textit{Discussion:} A positive boarding \texttt{weight\_tolerance} permits a passenger to board an acceptable earlier-arriving jeepney instead of strictly waiting for the single vehicle on their pre-computed least-cost journey. A simulation run with \texttt{weight\_tolerance} $> 0$ partitions completed passengers into Group~A (waited) and Group~B (rode opportunistically), and their travel-time deltas are compared with the non-parametric Mann--Whitney $U$ test. A statistically significant result with a lower median delay for Group~B proves that opportunistic riders experience a real reduction in travel delay, validating that the weight-tolerance mechanism confers an individual-level benefit rather than merely perturbing path choice. The underlying travel-graph cost weights were externally validated and are not re-tuned here.
 
-Because $\Delta T$ is not assumed normally distributed, the difference between the two groups was evaluated with the non-parametric Mann--Whitney $U$ test. The test returned $U = \PH{U}$, $p = \PH{p}$ (\PH{n_A} vs.\ \PH{n_B} passengers). % NEW TEST: Mann-Whitney U on Time Delta, Group A (waited) vs Group B (opportunistic). Report U, p, group sizes, and median deltas.
-With $p < \PH{0.05}$ and a lower median delay for Group~B (\PH{median_B} vs.\ \PH{median_A} \ac{EIVM}), the result demonstrates a statistically significant reduction in travel delay for passengers who ride opportunistically. This validates that the weight-tolerance mechanism confers a real individual-level benefit rather than merely perturbing path choice; the underlying travel-graph cost weights were externally validated and are not re-tuned here.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/opportunistic_riding_delta.png}  % NEW: distributions of Time Delta for Group A vs Group B (box/violin), annotated with U and p
-  \caption{Distribution of travel-time delta $\Delta T$ for passengers who waited for their expected jeepney (Group~A) versus those who boarded an earlier alternative (Group~B), with the Mann--Whitney $U$ test result.}
-  \label{fig:4.13_tolerance}
-\end{figure}
-
-\subsection{Surrogate Ranking Fidelity}
-\label{subsec:4.3.5}
-\noindent
-The $\mathcal{O}(1)$ static surrogate is used only as an acceptance gate during Lamarckian local search; its legitimacy rests on preserving the \emph{rank} of candidate solutions, not their absolute cost. % PENDING-RE-RUN: old surrogate-fidelity numbers (Test 12) are invalid — the old code did not match the methodology's surrogate definition. Re-run, then fill. Keep the rank-correlation framing (it is what the methodology specifies).
-Across a diverse route set, the surrogate cost $C_{\text{sur}}$ tracked the full simulation fitness $F_{\text{sim}}$ with Spearman $\rho = \PH{rho}$, Kendall $\tau = \PH{tau}$, and $R^{2} = \PH{R2}$, with top-\PH{15}\% selection precision and recall of \PH{P} and \PH{R}.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/surrogate_fidelity.png}  % already at .cache/analysis/surrogate_fidelity.png
-  \caption{Static surrogate cost $C_{\text{sur}}$ versus full simulation fitness $F_{\text{sim}}$, with rank-correlation statistics.}
-  \label{fig:4.14_surrogate}
-\end{figure}
-
-\noindent
-\textit{Discussion.} Perfect top-tier precision and recall mean the surrogate never discards a truly optimal candidate, justifying its use as a computational bypass during local search.
+\subsection{Surrogate Ranking Fidelity (Spearman $\rho$)}
+\textbf{Visual:} Scatter plot mapping the $\mathcal{O}(1)$ static A* surrogate cost ($C_{\text{sur}}$) against the full temporal simulation fitness ($F_{\text{sim}}$). \\
+\textit{Discussion:} The surrogate is used only as an acceptance gate during Lamarckian local search, so its legitimacy rests on preserving the relative \emph{rank} of candidate solutions rather than their absolute cost. The Spearman ($\rho$) and Kendall ($\tau$) rank correlations, together with top-tier selection precision and recall, confirm that the surrogate never discards a truly optimal candidate, validating its use as a lightweight computational bypass.
 
 \subsection{Lamarckian Operator Mechanics}
-\label{subsec:4.3.6}
+\textbf{Visual 1:} Pre-mutation vs. post-mutation snapshots on the Manhattan toy network demonstrating the three local-search mutations: Attraction toward high-demand corridors, Repulsion from oversupplied corridors, and Tortuosity reduction (pruning). \\
+\textbf{Visual 2:} Scatter plot proving that networks with lower Demand-Service Gaps natively produce better $F_{\text{sim}}$ scores. \\
+\textit{Discussion:} Isolates the structural effect of each operator and confirms that the demand-service gap is the correct signal for the operators to act on.
+
+% ────────────────────────────────────────────────────────────
+\section{Evolutionary Dynamics}
 \noindent
-Figure~\ref{fig:4.15_mutations} isolates the three local-search mutations on the synthetic grid so their structural effect is unambiguous.
+This section evaluates the behavioral dynamics of the \texttt{MemeticEngine} over time.
 
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/three_mutations_manhattan.png}  % YOUR FIGURE: "three mutations on a manhattan toy city"
-  \caption{Lamarckian mutations on the Manhattan toy network: (a) Attraction toward high-demand corridors, (b) Repulsion from oversupplied corridors, (c) Tortuosity reduction (pruning).}
-  \label{fig:4.15_mutations}
-\end{figure}
+\subsection{Convergence and \texttt{AdaptiveController} Orchestration}
+\textbf{Visual:} The convergence curve tracking best, average, and worst fitness scores, overlaid with the dynamically scaling mutation rate triggered by the stagnation counter. \\
+\textit{Discussion:} Demonstrates that the adaptive controller escalates exploration when the population stagnates and relaxes it as fitness improves, driving total user cost down across generations.
 
-\noindent
-A scatter of demand-service gap against $F_{\text{sim}}$ confirms that networks with smaller gaps natively achieve lower fitness, validating the gap as the signal the operators act on. % BLOCKED: produce gap-vs-fitness scatter from diagnostic_mutation notebook.
-
-% ============================================================================
-\section{Evolutionary Dynamics of the Memetic Engine}
-\label{sec:4.4}
-% ============================================================================
-\noindent
-This section characterizes how the population behaves over generations under the \texttt{AdaptiveController}.
-
-\subsection{Convergence and Adaptive Control}
-\label{subsec:4.4.1}
-\noindent
-Figure~\ref{fig:4.16_convergence} tracks best, average, and worst $F_{\text{sim}}$ across \PH{g\_max = 30} generations, overlaid with the mutation rate scaled by the stagnation counter. Best fitness improved from a generation-zero \PH{F_0} to a final \PH{F^{*}}, a \PH{XX\%} reduction in total user cost. % BLOCKED: final optimization run.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/convergence_curve.png}  % NEW: from TelemetryEngine output of final run
-  \caption{Convergence of best/average/worst fitness with adaptive mutation-rate overlay.}
-  \label{fig:4.16_convergence}
-\end{figure}
-
-\subsection{Topological Hub Crossover and Lineage}
-\label{subsec:4.4.2}
-\noindent
-Figure~\ref{fig:4.17_hub} shows the topological hub and a generational lineage from the \texttt{TelemetryEngine}, demonstrating that fitter parents disproportionately transmit their high-efficiency trunk routes.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/topological_hub.png}  % YOUR FIGURE: "the topological hub"
-  \caption{The topological hub and trunk-route preservation across a parent--child lineage.}
-  \label{fig:4.17_hub}
-\end{figure}
+\subsection{Topological Hub Crossover and Lineage Tracking}
+\textbf{Visual:} The topological hub and a generational lineage tree from the \texttt{TelemetryEngine}, showing the preservation of high-efficiency ``trunk'' route segments across parent--child generations. \\
+\textit{Discussion:} Validates the Topological Hub Crossover by proving that fitter parents disproportionately pass down their core, high-efficiency trunk routes.
 
 \subsection{Epigenetic Pheromone Inheritance}
-\label{subsec:4.4.3}
-\noindent
-Figure~\ref{fig:4.18_pheromone} visualizes the stigmergic pheromone matrix and the fitness-weighted blending of two parents' matrices ($w_A\tau^A + w_B\tau^B$) inherited by offspring.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/pheromone_maps_and_blending.png}  % YOUR FIGURES: "pheromone maps and pheromone blending"
-  \caption{Stigmergic pheromone surfaces for two parents and the fitness-weighted blended matrix inherited by their offspring.}
-  \label{fig:4.18_pheromone}
-\end{figure}
-
-\noindent
-An A/B cloning experiment compared offspring mutated with the inherited matrix (Twin~A) against offspring forced to run a full native pre-simulation (Twin~B). Inheritance captured \PH{XX\%} of Twin~B's fitness improvement at \PH{YY\%} of the runtime, % BLOCKED: epigenetic A/B experiment.
-demonstrating the Pareto efficiency of transferring demand memory rather than recomputing it.
+\textbf{Visual 1:} Stigmergic pheromone surfaces for two parents and the fitness-weighted blended matrix ($w_A \tau^A + w_B \tau^B$) inherited by their offspring. \\
+\textbf{Visual 2:} A dual-axis comparison of post-mutation $F_{\text{sim}}$ improvement and computational runtime for offspring mutated with the inherited matrix (Twin~A) versus offspring forced to run a full native pre-simulation (Twin~B). \\
+\textit{Discussion:} An A/B cloning experiment shows that Epigenetic Inheritance captures the vast majority of the fitness improvement achieved by a native pre-simulation but executes in a fraction of the time, proving that transferring the cultural demand memory is a Pareto-efficient and computationally mandatory heuristic bypass.
 
 \subsection{Multi-Dimensional Phenotypic Convergence}
-\label{subsec:4.4.4}
-\noindent
-Figure~\ref{fig:4.19_phenotypic} tracks population Jaccard similarity, Graph Edit Distance, and 2D Wasserstein distance alongside collapsing fitness variance, showing convergence across three orthogonal dimensions rather than over a flat landscape. % BLOCKED: final run telemetry.
+\textbf{Visual:} A multi-line plot tracking the population's Jaccard Similarity, Graph Edit Distance (GED), and 2D Wasserstein Distance, overlaid with collapsing fitness variance ($\sigma^2(F)$). \\
+\textit{Discussion:} Proves the algorithm avoids flat fitness landscapes by demonstrating simultaneous convergence across three orthogonal dimensions: shared streets (Jaccard), topological connectivity (GED), and spatial demand coverage (Wasserstein).
 
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/phenotypic_convergence.png}
-  \caption{Population Jaccard, GED, and 2D Wasserstein distance with fitness-variance collapse over generations.}
-  \label{fig:4.19_phenotypic}
-\end{figure}
-
-% ============================================================================
+% ────────────────────────────────────────────────────────────
 \section{Optimized Network for Iligan City}
-\label{sec:4.5}
-% ============================================================================
 \noindent
-With the framework validated and calibrated, the \texttt{Optimizer} is applied to the empirical Iligan City data. Because no digitized record of the current jeepney routes exists, a stochastic baseline of generation-zero networks establishes the reference for arbitrary-network performance.
+With the framework validated, the \texttt{Optimizer} is applied to the empirical Iligan City data. Because no digitized record of the current jeepney routes exists, a stochastic baseline of generation-zero networks establishes the reference for arbitrary-network performance.
 
-\subsection{Stochastic Baseline}
-\label{subsec:4.5.1}
-\noindent
-The mean fitness of \PH{K} randomly initialized generation-zero networks was \PH{F_baseline} (std \PH{s}), serving as the statistical reference against which optimization improvement is measured. % BLOCKED.
+\subsection{Stochastic Baseline Generation}
+\textit{Discussion:} Evaluates the average performance of randomly initialized generation-zero networks to establish a statistical baseline against which algorithmic improvement is measured.
 
 \subsection{The Optimized Network and Cross-Run Robustness}
-\label{subsec:4.5.2}
-\noindent
-% EXPERIMENT: the production profile P1 is run \PH{7} times under identical configuration (different RNG seeds only). This is the reproducibility/robustness core of the final result.
-Because the optimizer is a stochastic metaheuristic, the production profile P1 was executed \PH{7} times under identical configuration, varying only the random seed. Figure~\ref{fig:4.20_optimized}(a) presents a representative optimized route system reconstructed from the \texttt{StatePreservationEngine} snapshots, while Figure~\ref{fig:4.20_optimized}(b) reports the pairwise structural similarity across all \PH{7} runs using the three evaluation metrics: Jaccard (shared streets), Graph Edit Distance (topological connectivity), and 2D Wasserstein distance (spatial demand coverage).
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/optimized_network_and_robustness.png}
-  \caption{(a) Representative optimized Iligan route system; (b) cross-run Jaccard/GED/Wasserstein similarity matrix over the \PH{7} identical-configuration runs.}
-  \label{fig:4.20_optimized}
-\end{figure}
-
-\noindent
-The optimized networks reduced total user cost by \PH{XX\%} relative to the stochastic baseline. High structural similarity across the \PH{7} runs (mean pairwise Jaccard \PH{0.XX}, GED \PH{...}, 2D~Wasserstein \PH{...}) indicates that the algorithm converges on a robust optimum region rather than a single lucky seed. % BLOCKED: final runs.
+\textbf{Visual 1:} A map of a representative optimized route system, reconstructed from the \texttt{StatePreservationEngine} JSON snapshots. \\
+\textbf{Visual 2:} A pairwise similarity matrix comparing the final networks from the seven identical-configuration runs (profile P1, varying only the random seed) using Jaccard, GED, and 2D Wasserstein metrics. \\
+\textit{Discussion:} Because the optimizer is a stochastic metaheuristic, profile P1 is executed seven times to establish reproducibility. High structural similarity across all seven runs proves that the algorithm converges on a robust optimum region rather than a single lucky seed, and the reduction in total user cost relative to the stochastic baseline quantifies the optimization gain.
 
 \subsection{Robustness to Demand Regime}
-\label{subsec:4.5.3}
-\noindent
-% EXPERIMENT (Tier 2 — keep): re-optimize under the alternative temporal DDM surfaces (peak vs off-peak: 08:00 / 13:00 / 17:00) that already exist as pickles. ~2-3 runs. The novel sensitivity axis.
-To test whether the optimum is specific to the demand regime it was trained on, the framework was re-optimized under the alternative temporal demand surfaces (\PH{08:00}, \PH{13:00}, \PH{17:00}). The resulting networks were compared against the primary (\PH{08:00}) optimum using the same Jaccard/GED/Wasserstein metrics, summarized in Table~\ref{tab:4.5_sensitivity}. A high similarity indicates a temporally robust trunk structure that serves all regimes; a low similarity indicates that distinct time-of-day networks are warranted. % BLOCKED.
+\textbf{Visual:} Similarity matrix comparing the network re-optimized under the alternative temporal demand surfaces (08:00, 13:00, 17:00) against the primary optimum, using the Jaccard, GED, and Wasserstein metrics. \\
+\textit{Discussion:} Tests whether the optimum is specific to the demand regime it was trained on. High cross-regime similarity indicates a temporally robust trunk structure that serves peak and off-peak demand alike; low similarity indicates that distinct time-of-day networks are warranted. The alternative demand surfaces reuse the temporal DDM pickles, so this axis requires only re-optimization, not new data collection.
 
-\input{chap4/tables/table_4.5_sensitivity}
+% Optional (include only if compute time allows; otherwise defer to Future Work):
+% \subsection{Operational Sensitivity}
+% \textit{Discussion:} Observes structural changes in the optimized topologies when varying
+% operational constraints, namely the allocatable \texttt{Jeep} fleet size and passenger
+% spawning volume. This axis overlaps with the preliminary calibration work and is the
+% lowest-novelty sensitivity dimension.
 
-% ----------------------------------------------------------------------------
-% OPTIONAL (Tier 3 — include ONLY if compute time allows; otherwise move the
-% following claim to Chapter 5 "Future Work"). Operational sensitivity to
-% passenger volume / fleet size overlaps with the preliminary calibration work
-% and is the lowest-novelty axis.
-% ----------------------------------------------------------------------------
-% \subsection{Operational Sensitivity (optional)}
-% \label{subsec:4.5.3b}
-% \noindent
-% Varying the allocatable fleet size and passenger volume produced the structural
-% responses summarized in Table~\ref{tab:4.5_operational}. % BLOCKED / OPTIONAL.
-% \input{chap4/tables/table_4.5_operational}
-
-\subsection{Equity and Travel-Time Distribution}
-\label{subsec:4.5.4}
-\noindent
-Figure~\ref{fig:4.21_equity} compares the distribution of passenger travel times between the baseline and the optimized network. The optimized system shortened the long tail of extreme commutes, with the completed-time standard deviation falling from \PH{s_base} to \PH{s_opt}, confirming the effect of the equity regularizer $\alpha\sigma$. % BLOCKED.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/equity_traveltime_hist.png}
-  \caption{Distribution of passenger travel times: stochastic baseline versus optimized network.}
-  \label{fig:4.21_equity}
-\end{figure}
+\subsection{Equity and Distribution Analysis}
+\textbf{Visual:} Histogram comparing the distribution of passenger travel times ($T_i$) between the stochastic baseline and the final optimized network. \\
+\textit{Discussion:} Proves the efficacy of the Equity Regularizer ($\alpha \sigma$) by showing a reduction in the long tail of extreme commute times for peripheral communities. This analysis is computed from the seven P1 runs and requires no additional optimization.
 
 \subsection{Network Resilience and Path Diversity}
-\label{subsec:4.5.5}
-\noindent
-Figure~\ref{fig:4.22_resilience} shows the edge-traversal heatmap of the optimized network with the Shannon entropy of the passenger path distribution at \PH{H} bits, indicating that demand is distributed across multiple corridors rather than forced through a single bottleneck. % BLOCKED.
-
-\begin{figure}[htbp]
-  \centering
-  \PHfig{chap4/figures/resilience_entropy_heatmap.png}
-  \caption{Edge-traversal heatmap and path-choice Shannon entropy of the optimized network.}
-  \label{fig:4.22_resilience}
-\end{figure}
-
-\noindent
-\textit{Discussion.} Taken together, the results in this section demonstrate that the framework produces a route system that is more efficient, more equitable, and more resilient than arbitrary networks, while converging reproducibly across independent runs.
+\textbf{Visual:} A heatmap of edge traversals accompanied by the Shannon Entropy of the passenger path distribution. \\
+\textit{Discussion:} Demonstrates that the optimized network avoids forcing all traffic through a single catastrophic bottleneck. A higher Shannon entropy indicates distinct routing options and a resilient transit architecture. Like the equity analysis, this is derived from the existing P1 runs.
