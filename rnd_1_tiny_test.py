@@ -2,23 +2,22 @@
 rnd_1_tiny_test.py — TINY smoke test + timing probe for rnd_1_ticks_and_rate.ipynb
 
 WHY THIS EXISTS
-  Run this on a small/slow box (e.g. a 4-core, no-GPU laptop) BEFORE handing the
-  full notebook to thesismates. It does two things:
-    1. Confirms the whole calibration machinery runs end-to-end with no anomaly
-       (workers spawn, TravelGraph caches, sims return valid scores/completions).
-    2. Prints the wall-clock runtime of each part ON THIS MACHINE, so per-eval
-       costs are known before committing to the full sweep.
+  Run this on a small/slow box (4-core, no-GPU) BEFORE handing the full notebook to
+  thesismates. It (1) confirms the machinery runs end-to-end with no anomaly, and
+  (2) prints the wall-clock runtime of each part ON THIS MACHINE.
 
-  It uses the SAME code paths as the full notebook (persistent pool + per-call
-  overrides via run_reps_overrides), just with a tiny grid: one route count,
-  few replications, short horizons, low density.
+MODEL: CONTINUOUS ARRIVALS + FIXED HORIZON (abrupt stop at num_ticks)
+  This matches production: the simulation is cut off after a fixed number of ticks,
+  and passengers still in-flight at the cutoff are scored by the underservice penalty.
+  Completion fraction is therefore a DIAGNOSTIC, not a target — at short horizons it
+  is expected to be low. The health checks below are: workers don't crash, the
+  TravelGraph cache engages (first eval slower than later ones), and CV is finite.
+
+  Driven via per-call overrides through ONE persistent pool, so there is no ~90s
+  worker reload and no TravelGraph rebuild per evaluation.
 
 RUN
-  python rnd_1_tiny_test.py
-
-NOTE
-  Standalone multiprocessing scripts MUST guard execution under
-  `if __name__ == "__main__":` on Windows (spawn re-imports this module).
+  python rnd_1_tiny_test.py     (use the venv interpreter: .venv\\Scripts\\python.exe)
 """
 import os
 import sys
@@ -30,15 +29,14 @@ import numpy as np
 sys.path.insert(0, os.getcwd())
 
 # ── TINY CONFIG (intentionally small) ────────────────────────────────────────
-ROUTE_COUNTS     = [5]            # one production-sized route set is enough to smoke-test
-HORIZON_TICKS    = [60, 120, 180] # 10 / 20 / 30 simulated minutes at SPT=10
-PAX_PER_ROUTE_HR = [50, 150]      # two densities for the volume sweep
-REPLICATIONS     = 3              # CV needs >= 2; 3 keeps it to ~one wave on a 4-core box
-JEEPS_PER_ROUTE  = 10
-SPT              = 10             # Δt fixed at 10s (matches the full notebook)
-HORIZON_DENSITY  = 50             # low density held fixed during the horizon sweep
-VOLUME_TICKS     = 120            # short horizon held fixed during the volume sweep
-CV_THRESHOLD     = 0.05
+ROUTES            = 5
+HORIZON_TICKS     = [60, 120, 180]   # 10 / 20 / 30 simulated minutes at SPT=10
+HORIZON_DENSITY   = 50               # pax/route/hr held fixed during the horizon sweep
+PAX_PER_ROUTE_HR  = [50, 150]        # densities for the volume sweep
+VOLUME_TICKS      = 120              # horizon held fixed during the volume sweep
+REPLICATIONS      = 3                # CV needs >= 2
+JEEPS_PER_ROUTE   = 10
+SPT               = 10
 
 CG_PKL  = "rnd/pkl/profile_p1.pkl"
 DDM_PKL = "rnd/pkl/ddm_8am.pkl"
@@ -62,28 +60,21 @@ def main():
     from utils.simulation_parallel import ParallelSimulationRunner
     import yaml
 
-    timings = []   # [(phase_name, seconds)]
-    eval_log = []  # [{tag, ticks, rate, n_ok, cv, completion, wall}]
-
+    timings, eval_log = [], []
     n_cores = os.cpu_count() or 1
     workers = min(REPLICATIONS, max(1, n_cores - 1))
-    waves_per_eval = -(-REPLICATIONS // workers)  # ceil division
 
     print("=" * 66)
-    print("TINY TEST — rnd_1_ticks_and_rate")
-    print(f"This machine: {n_cores} cores -> {workers} workers | "
-          f"{REPLICATIONS} reps = {waves_per_eval} wave(s) per eval")
+    print("TINY TEST — rnd_1_ticks_and_rate  (continuous arrivals + fixed horizon)")
+    print(f"This machine: {n_cores} cores -> {workers} workers | {REPLICATIONS} reps/eval")
     print("=" * 66)
 
-    # ── load heavy objects ──
     t0 = time.time()
     G_city = reuse_citygraph(CG_PKL)
     ddm = reuse_ddm(DDM_PKL)
-    dt = time.time() - t0
-    timings.append(("load CityGraph+DDM", dt))
-    print(f"[load]  {len(G_city.nodes)} nodes, {len(G_city.graph)} edges | {dt:.1f}s")
+    timings.append(("load CityGraph+DDM", time.time() - t0))
+    print(f"[load]  {len(G_city.nodes)} nodes, {len(G_city.graph)} edges | {timings[-1][1]:.1f}s")
 
-    # ── open ONE persistent pool ──
     with open("configs/profile_p1.yaml", encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
     base_cfg["cg_pkl"] = CG_PKL
@@ -92,9 +83,8 @@ def main():
     runner = ParallelSimulationRunner(config=base_cfg, max_workers=workers)
     t0 = time.time()
     runner.open_pool()
-    dt = time.time() - t0
-    timings.append(("open worker pool", dt))
-    print(f"[pool]  opened {workers} workers | {dt:.1f}s")
+    timings.append(("open worker pool", time.time() - t0))
+    print(f"[pool]  opened {workers} workers | {timings[-1][1]:.1f}s")
 
     def eval_point(routes, num_ticks, rate, n_jeeps, tag):
         overrides = {
@@ -130,24 +120,21 @@ def main():
         return rec
 
     try:
-        for n_routes in ROUTE_COUNTS:
-            random.seed(42 + n_routes)
-            np.random.seed(42 + n_routes)
+        random.seed(42 + ROUTES)
+        np.random.seed(42 + ROUTES)
+        t0 = time.time()
+        routes = generate_route_system(ROUTES, G_city, ddm)
+        timings.append((f"route gen (R={ROUTES})", time.time() - t0))
+        n_jeeps = ROUTES * JEEPS_PER_ROUTE
+        print(f"[routes] R={ROUTES} | {timings[-1][1]:.1f}s")
 
-            t0 = time.time()
-            routes = generate_route_system(n_routes, G_city, ddm)
-            dt = time.time() - t0
-            timings.append((f"route gen (R={n_routes})", dt))
-            n_jeeps = n_routes * JEEPS_PER_ROUTE
-            print(f"[routes] R={n_routes} | {dt:.1f}s")
-
-            # horizon sweep (first eval also builds + caches the TravelGraph per worker)
-            for i, T in enumerate(HORIZON_TICKS):
-                eval_point(routes, T, HORIZON_DENSITY * n_routes, n_jeeps,
-                           "horizon(1st)" if i == 0 else "horizon")
-            # volume sweep
-            for d in PAX_PER_ROUTE_HR:
-                eval_point(routes, VOLUME_TICKS, d * n_routes, n_jeeps, "volume")
+        # horizon sweep (first eval also builds + caches the TravelGraph per worker)
+        for i, T in enumerate(HORIZON_TICKS):
+            eval_point(routes, T, HORIZON_DENSITY * ROUTES, n_jeeps,
+                       "horizon(1st)" if i == 0 else "horizon")
+        # volume sweep
+        for d in PAX_PER_ROUTE_HR:
+            eval_point(routes, VOLUME_TICKS, d * ROUTES, n_jeeps, "volume")
     finally:
         t0 = time.time()
         runner.close_pool()
@@ -166,8 +153,9 @@ def main():
             problems.append(f"{rec['tag']} ticks={rec['ticks']}: completion out of [0,1] ({comp})")
         if not (rec["cv"] == rec["cv"] and rec["cv"] >= 0):
             problems.append(f"{rec['tag']} ticks={rec['ticks']}: CV not finite/non-negative ({rec['cv']})")
+    # NOTE: completion magnitude is NOT gated — under continuous+fixed it is expected
+    # to be low at short horizons. The cache check below is the real machinery gate.
 
-    # caching check: the first eval (TravelGraph build) should be slower than later cached evals
     first = next((r for r in eval_log if r["tag"] == "horizon(1st)"), None)
     later = [r for r in eval_log if r["tag"] in ("horizon", "volume")]
     if first and later:

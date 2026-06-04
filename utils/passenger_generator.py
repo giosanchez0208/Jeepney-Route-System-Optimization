@@ -47,6 +47,12 @@ class PassengerGenerator:
         
         self.tick_counter: int = 0
         self.spawn_schedule: list[int] = [0 for _ in range(100)]
+
+        # Double-step guard architecture: each Passenger carries a
+        # _stepped_this_tick flag (set True by Passenger.update(), reset here
+        # at each tick boundary).  This ensures a passenger is never advanced
+        # twice per tick, even if a future code path accidentally adds a second
+        # stepping call.  See Passenger.update() and the reset loop below.
         
         self._generate_schedule()
 
@@ -63,10 +69,17 @@ class PassengerGenerator:
 
     def update(self) -> None:
         self.new_passengers_this_tick = []
-        
+
+        # ── Tick boundary: reset every passenger's double-step guard ────────
+        # This is the ONE place that demarcates the start of a new tick.
+        # Passenger.update() sets _stepped_this_tick = True on the first call,
+        # then refuses to advance again until we reset it here.
+        for p in self.passengers:
+            p._stepped_this_tick = False
+
         if self.tick_counter > 0 and self.tick_counter % 100 == 0:
             self._generate_schedule()
-            
+
         spawns_now = self.spawn_schedule[self.tick_counter % 100]
         
         for _ in range(spawns_now):
@@ -86,10 +99,13 @@ class PassengerGenerator:
                 self.new_passengers_this_tick.append(p)
                 self.total_spawned += 1
 
+        # Passenger stepping is owned SOLELY by JeepSystem.update() (the
+        # simulation's stepping authority).  PassengerGenerator MUST NOT call
+        # p.update() here — doing so would advance every walking passenger
+        # twice per tick (the "double-step" bug).  This loop only reaps
+        # finished passengers using the state that JeepSystem already set.
         active_passengers = []
         for p in self.passengers:
-            p.update()
-            
             if p.state == Passenger.DONE:
                 if getattr(p, 'despawn_tick', None) is None:
                     p.despawn_tick = self.simulated_time
