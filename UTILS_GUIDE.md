@@ -754,64 +754,110 @@ Manages stochastic passenger spawning and lifecycle tracking.
 ### direct_demand_sampler.py
 
 - **Top-Level Helper Functions**
-  - `_get_betweenness_centrality(cg: CityGraph) -> dict[Node, float]`
-    - Parameters:
-      - `cg` (CityGraph): Road network.
-    - Outputs: dict mapping Node to centrality score.
-    - Primary Purpose: Internal helper using NetworkX to calculate street node betweenness centrality.
+  - `_node_cache_key(node: Node) -> tuple[float, float, Optional[int]]`
+    - Parameters: Node object.
+    - Outputs: tuple of longitude, latitude, and layer.
+    - Primary Purpose: Computes a deterministic cache key representation for a Node.
+  - `_city_cache_signature(city: NetworkGraph) -> str`
+    - Parameters: NetworkGraph city.
+    - Outputs: MD5 hash string.
+    - Primary Purpose: Computes a signature of all node coordinates in the city graph to validate cached DDM configurations.
+  - `_config_signature(config: DDMConfig) -> str`
+    - Parameters: DDMConfig configuration.
+    - Outputs: str description.
+    - Primary Purpose: Generates a hashable signature representing the parameters of the DDMConfig object.
 
 #### DDMConfig
 Demand Sampler configuration container.
 
 - **Attributes**
-  - `beta_traffic` (float): TomTom weight coefficient.
-  - `beta_centrality` (float): Structural centrality weight coefficient.
-  - `beta_pop` (float): Population density weight coefficient.
-  - `power_base` (float): Power scaling value.
-  - `traffic_csv` (Optional[str]): TomTom data file path.
-  - `pop_density_tif` (Optional[str]): Population raster file path.
-  - `cache_prefix` (str): Cache prefix name.
+  - `alpha` (float): TomTom traffic congestion weight coefficient (defaults to 0.6).
+  - `beta` (float): Centrality weight coefficient (defaults to 0.4).
+  - `cache_dir` (str): Base cache directory (defaults to "utils/.cache").
+  - `target_time` (Optional[datetime]): Target evaluation date/time for predictive routing mode. If None, queries the TomTom live flow segment API.
+  - `z_score` (float): Cochran's Formula Z-score (95% confidence level defaults to 1.96).
+  - `proportion` (float): Cochran's Formula proportion parameter (defaults to 0.5).
+  - `margin_error` (float): Cochran's Formula margin of error (defaults to 0.05).
+  - `api_limit_override` (Optional[int]): Hard override for the number of API queries to execute, bypassing Cochran's calculation.
 
 - **Methods**
-  - `__init__(self, beta_traffic: float = 0.5, beta_centrality: float = 0.5, beta_pop: float = 0.0, power_base: float = 1.0, traffic_csv: Optional[str] = None, pop_density_tif: Optional[str] = None, cache_prefix: str = "ddm") -> None`
+  - `__init__(self, alpha: float = 0.6, beta: float = 0.4, cache_dir: str = "utils/.cache", target_time: Optional[datetime] = None, z_score: float = 1.96, proportion: float = 0.5, margin_error: float = 0.05, api_limit_override: Optional[int] = None) -> None`
     - Primary Purpose: Instantiates the DDMConfig data container.
 
-#### DirectDemandSampler
-Models passenger demand by employing centrality-weighted spatial sampling to direct limited TomTom API queries toward the network's arterial backbone, then blending empirical and imputed traffic flows with structural centrality.
+#### TrafficClient
+Decouples TomTom API request logic and JSON payload caching from the mathematical DDM sampler.
 
 - **Attributes**
-  - `city` (CityGraph): City road network.
-  - `config` (DDMConfig): Sampler configurations.
-  - `drivable_nodes` (set[Node]): Set of drivable street nodes.
-  - `node_probabilities` (dict[Node, float]): Map of nodes to demand probabilities.
-  - `max_prob` (float): Maximum probability value.
-  - `prob` (list[float]): Alias method probability table.
-  - `alias` (list[int]): Alias method index table.
+  - `api_key` (Optional[str]): TomTom API key string.
+  - `verbose` (bool): If True, prints verbose network log summaries.
+  - `target_time` (Optional[datetime]): Reference datetime for historical route queries.
+  - `cache_dir` (str): Dedicated subdirectory path for raw TomTom API JSON files (`cache_dir/tomtom_api`).
 
 - **Methods**
-  - `__init__(self, city: CityGraph, config: DDMConfig, verbose: bool = False) -> None`
-    - Parameters: CityGraph, configurations, and verbose mode.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the sampler using Efraimidis & Spirakis weighted sampling to select high-centrality nodes, queries TomTom API for those nodes, imputes remaining traffic via IDW anchored to arterials, calculates centrality, blends weights, and builds O(1) Walker's Alias tables.
-  - `_impute_missing_traffic(self, traffic_data: dict) -> dict[Node, float]`
-    - Parameters:
-      - `traffic_data` (dict): Raw traffic flow data from sampled nodes.
-    - Outputs: dict mapping Node to imputed traffic weight.
-    - Primary Purpose: Internal helper using Inverse Distance Weighting (IDW) with Haversine distance to impute missing TomTom traffic flows. Because known data points are concentrated on arterials (due to centrality-weighted sampling), the interpolation naturally mirrors real-world traffic diffusion from major corridors to local streets.
+  - `__init__(self, api_key: Optional[str], cache_dir: str, target_time: Optional[datetime] = None, verbose: bool = False) -> None`
+    - Primary Purpose: Instantiates the client, verifying API key presence and initializing the cache directory.
+  - `gather_empirical_traffic(self, target_nodes: list[Node]) -> dict[Node, float]`
+    - Parameters: list of Node objects to query.
+    - Outputs: dict mapping Node to float congestion weight.
+    - Primary Purpose: Iterates over selected target nodes, queries the TomTom API (or cached json files), and returns empirical traffic weights.
+  - `_query_api(self, node: Node) -> Optional[float]`
+    - Parameters: Node to probe.
+    - Outputs: Optional float penalty factor.
+    - Primary Purpose: Executes standard GET requests. In predictive mode, queries calculateRoute with `computeTravelTimeFor=all` to measure travelTime / noTrafficTravelTime congestion ratio. In live mode, queries flowSegmentData for freeFlowSpeed / currentSpeed ratio. Stores and reads results from local MD5-hashed JSON files.
+
+#### DirectDemandSampler
+Models passenger demand by employing centrality-weighted spatial sampling to select nodes for TomTom API queries, then blending empirical and imputed traffic flows with structural centrality.
+
+- **Attributes**
+  - `city` (NetworkGraph): Road network graph.
+  - `config` (DDMConfig): Sampler configurations.
+  - `verbose` (bool): Prints statistics and details.
+  - `use_cache` (bool): If True, serializes and loads pre-computed models.
+  - `drivable_nodes` (set[Node]): Drivable street nodes.
+  - `target_nodes` (set[Node]): Target population nodes.
+  - `node_list` (list[Node]): Deterministically sorted list of nodes.
+  - `n` (int): Count of target nodes.
+  - `api_sample_limit` (int): Calculated sample size.
+  - `prob` (list[float]): Alias table probability values.
+  - `alias` (list[int]): Alias table backup index values.
+  - `node_probabilities` (dict[Node, float]): Normalized DDM probability map.
+  - `max_prob` (float): Maximum probability in map.
+  - `centrality_scores` (dict[Node, float]): Approximate betweenness centrality map.
+  - `target_centroids` (list[Node]): Sampled query nodes.
+  - `empirical_traffic` (dict[Node, float]): Queried TomTom traffic values.
+  - `traffic_weights` (dict[Node, float]): Network-wide traffic values.
+  - `raw_probabilities` (list[float]): Raw combined demand scores.
+  - `traffic_client` (Optional[TrafficClient]): Reference client.
+
+- **Methods**
+  - `__init__(self, city: NetworkGraph, config: DDMConfig = DDMConfig(), verbose: bool = False, use_cache: bool = True) -> None`
+    - Parameters: NetworkGraph, configurations, verbose flag, and caching flag.
+    - Primary Purpose: Builds or loads the demand sampler. Computes Cochran's optimal sample size, selects high-centrality query centroids, queries TomTom, IDW-imputes missing traffic, computes centrality, blends values via DDM equation, and structures Walker's Alias tables.
+  - `_calculate_optimal_sample_size(self) -> int`
+    - Outputs: int sample count.
+    - Primary Purpose: Implements Cochran's Sample Size Formula for finite populations.
+  - `_compute_centrality(self) -> dict[Node, float]`
+    - Outputs: dict mapping Node to centrality.
+    - Primary Purpose: Uses NetworkX betweenness centrality on the road network subgraph.
+  - `_select_query_centroids(self) -> list[Node]`
+    - Outputs: list of selected nodes.
+    - Primary Purpose: Implements centrality-weighted random sampling without replacement to select target nodes.
+  - `_impute_traffic(self, empirical: dict[Node, float]) -> dict[Node, float]`
+    - Parameters: dict of queried traffic weights.
+    - Outputs: dict mapping all nodes to traffic weights.
+    - Primary Purpose: Performs Inverse Distance Weighting (IDW) interpolation using Haversine distance.
+  - `_apply_ddm(self, traffic: dict[Node, float], centrality: dict[Node, float]) -> list[float]`
+    - Parameters: traffic map, centrality map.
+    - Outputs: list of raw demand scores.
+    - Primary Purpose: Computes $P_i \propto (W_i^\alpha \times C_i^\beta)$.
   - `_build_alias_tables(self, raw_probs: list[float]) -> None`
-    - Parameters:
-      - `raw_probs` (list[float]): Raw demand scores.
-    - Outputs: None.
-    - Primary Purpose: Constructs Walker's Alias Method tables for O(1) sampling.
+    - Primary Purpose: Constructs Walker's Alias tables for $O(1)$ sampling.
   - `get_point(self, only_drivable: bool = False) -> Node`
-    - Parameters:
-      - `only_drivable` (bool): Filter nodes, defaults to False.
+    - Parameters: only_drivable filter flag.
     - Outputs: Node.
-    - Primary Purpose: Returns a Node sampled proportional to its demand probability in O(1) time.
-  - `draw_density(self, img_map: PIL.Image.Image, context: tuple, num_points: int = 2000, only_drivable: bool = False) -> None`
-    - Parameters: Image canvas, bounds context, sample points count, and filter toggle.
-    - Outputs: None.
-    - Primary Purpose: Overlays a demand density heatmap (blue to yellow to red scatter dots) on the canvas.
+    - Primary Purpose: Samples a Node in $O(1)$ time proportional to demand.
+  - `draw_density(self, img_map: Image.Image, context: tuple, num_points: int = 5000, only_drivable: bool = False) -> None`
+    - Primary Purpose: Draws a multi-colored demand density scatter overlay on a PIL canvas.
 
 ---
 
@@ -819,10 +865,7 @@ Models passenger demand by employing centrality-weighted spatial sampling to dir
 
 - **Top-Level Helper Functions**
   - `_edge_key(edge: DirEdge) -> tuple[tuple[float, float], tuple[float, float]]`
-    - Parameters:
-      - `edge` (DirEdge): The edge to key.
-    - Outputs: Tuple of start and end coordinates.
-    - Primary Purpose: Maps an edge object to its immutable coordinate-pair tuple.
+    - Primary Purpose: Maps an edge object to its coordinate-pair key `((start_lon, start_lat), (end_lon, end_lat))`.
 
 #### PheromoneMatrix
 Tracks spatial network demand and passenger traffic history across the city graph.
@@ -839,59 +882,21 @@ Tracks spatial network demand and passenger traffic history across the city grap
 
 - **Methods**
   - `__init__(self, all_edges: Iterable[DirEdge], config: dict, sim_result: Optional[SimulationResult] = None) -> None`
-    - Parameters: All edges list, configuration dictionary, and simulation results.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the spatial pheromone matrix, mapping duplicate physical segments to a single logical corridor and optionally seeding values.
-  - `_get(self, edge: DirEdge) -> Optional[float]`
-    - Parameters:
-      - `edge` (DirEdge): The edge to query.
-    - Outputs: Optional[float] pheromone value.
-    - Primary Purpose: Internal helper looking up pheromone values by coordinate key.
-  - `_set(self, edge: DirEdge, value: float) -> None`
-    - Parameters: Edge and value.
-    - Outputs: None.
-    - Primary Purpose: Internal helper updating coordinate pheromones and caching edge representatives.
+    - Primary Purpose: Instantiates the spatial pheromone matrix.
   - `update_pheromones(self, sim_result: SimulationResult) -> None`
-    - Parameters:
-      - `sim_result` (SimulationResult): Headless simulation result.
-    - Outputs: None.
-    - Primary Purpose: Updates pheromone values: evaporates values by factor `rho` and deposits `Q / cost` along simulated passenger paths.
-  - `calculate_demand_service_gaps(self, jeep_system: JeepSystem) -> dict[DirEdge, float]`
-    - Parameters:
-      - `jeep_system` (JeepSystem): Deployed system.
+    - Parameters: SimulationResult containing recorded passenger journeys.
+    - Primary Purpose: Evaporates pheromones by $(1 - \rho)$ and deposits $Q / C$ along passenger paths.
+  - `calculate_demand_service_gaps(self, jeep_system: JeepSystem | list[Route]) -> dict[DirEdge, float]`
+    - Parameters: deployed JeepSystem OR a list of Route objects.
     - Outputs: dict[DirEdge, float] mapping edges to gap values.
-    - Primary Purpose: Computes the demand-service gap (`gap = demand - supply`) for all tracked corridors.
-  - `draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: PIL.Image.Image) -> PIL.Image.Image`
-    - Parameters: Bounds context and image canvas.
-    - Outputs: PIL.Image.Image.
-    - Primary Purpose: Renders a high-contrast demand heatmap (purple to yellow) onto a square PIL image.
-  - `draw_pheromone_difference(self, other: PheromoneMatrix, context: tuple, image: PIL.Image.Image, global_max: float = None) -> PIL.Image.Image`
-    - Parameters: Comparison matrix, bounds, canvas, and scale cap.
-    - Outputs: PIL.Image.Image.
+    - Primary Purpose: Computes the normalized proportional disparity gap: $\text{gap}_{e} = (\tau_e / \sum \tau) - (\text{supply}_e / \sum \text{supply})$.
+  - `draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image) -> Image.Image`
+    - Primary Purpose: Renders a high-contrast demand heatmap (purple to yellow) onto a PIL image.
+  - `draw_pheromone_difference(self, other: PheromoneMatrix, context: tuple, image: Image.Image, global_max: float = None) -> Image.Image`
     - Primary Purpose: Renders the absolute difference between two matrices as a red color gradient.
 
 #### _TauView
 A read-only dict view of the pheromone store keyed by representative DirEdge.
-
-- **Methods**
-  - `__init__(self, tau_store: dict, repr_store: dict) -> None`
-    - Primary Purpose: Instantiates the read-only dict view helper.
-  - `__iter__(self)`
-    - Primary Purpose: Iterates over cached representative edges.
-  - `get(self, edge, default=None)`
-    - Primary Purpose: Looks up coordinate-mapped values.
-  - `items(self)`
-    - Primary Purpose: Iterates over `(edge_repr, float)` items.
-  - `values(self)`
-    - Primary Purpose: Iterates over raw float values.
-  - `keys(self)`
-    - Primary Purpose: Iterates over representative edges.
-  - `__contains__(self, edge) -> bool`
-    - Primary Purpose: Checks if coordinate key is mapped.
-  - `__getitem__(self, edge)`
-    - Primary Purpose: Retrieves coordinate-mapped value.
-  - `__setitem__(self, edge, value)`
-    - Primary Purpose: Sets coordinate-mapped value.
 
 ---
 
@@ -899,13 +904,8 @@ A read-only dict view of the pheromone store keyed by representative DirEdge.
 
 - **Top-Level Helper Functions**
   - `build_toy_city(config: ToyCityConfig = ToyCityConfig()) -> CityGraph`
-    - Parameters:
-      - `config` (ToyCityConfig): Geometry configurations.
-    - Outputs: CityGraph.
     - Primary Purpose: Generates a Manhattan-grid road network of Node and DirEdge objects.
   - `toy_setup_from_yaml(yaml_path: str = "configs/toy_city_configs.yaml", verbose: bool = True) -> tuple[CityGraph, ToyDDM, dict]`
-    - Parameters: Config file path and verbose mode.
-    - Outputs: tuple of CityGraph, ToyDDM, and parsed configurations dictionary.
     - Primary Purpose: Loader constructing synthetic grids and ToyDDM demand samplers in milliseconds.
 
 #### ToyHotspot
@@ -947,154 +947,105 @@ Spatially-varied demand sampler for synthetic toy grids.
 
 - **Methods**
   - `__init__(self, city: CityGraph, config: ToyDDMConfig = ToyDDMConfig(), verbose: bool = False) -> None`
-    - Parameters: CityGraph, configurations, and verbose mode.
-    - Outputs: None.
     - Primary Purpose: Instantiates the synthetic sampler, computing IDW demand scores and building Walker's Alias tables.
-  - `_extract_drivable_nodes(self) -> set[Node]`
-    - Parameters: None.
-    - Outputs: set[Node].
-    - Primary Purpose: Internal helper extracting nodes connected by drivable edges.
-  - `_compute_raw_probs(self) -> list[float]`
-    - Parameters: None.
-    - Outputs: list[float] of raw probabilities.
-    - Primary Purpose: Internal helper evaluating IDW demand scores using hotspot weights.
-  - `_build_alias_tables(self, raw_probs: list[float]) -> None`
-    - Parameters: Raw probabilities.
-    - Outputs: None.
-    - Primary Purpose: Constructs Walker's Alias Method tables.
   - `get_point(self, only_drivable: bool = False) -> Node`
-    - Parameters:
-      - `only_drivable` (bool): Filter nodes.
-    - Outputs: Node.
     - Primary Purpose: Returns a Node sampled proportional to its demand probability in O(1) time.
-  - `draw_density(self, img_map: PIL.Image.Image, context: tuple, num_points: int = 2000, only_drivable: bool = False) -> None`
-    - Parameters: Image canvas, bounds, sample count, and filter.
-    - Outputs: None.
+  - `draw_density(self, img_map: Image.Image, context: tuple, num_points: int = 2000, only_drivable: bool = False) -> None`
     - Primary Purpose: Overlays a demand density heatmap on the canvas.
 
 ---
 
-## 5. Evolutionary Optimization
+## 5. Evolutionary Optimization & Orchestration
 
 ### genetic.py
 
 #### Chromosome
-Represents a specific transit route layout and fleet allocation in the GA population.
+Represents a candidate route layout and fleet allocation in the Memetic Algorithm population, pairing the genotype with acquired phenotype attributes (pheromones and service gaps).
 
 - **Attributes**
-  - `uid` (str): Unique chromosome ID.
-  - `routes` (list[Route]): Deployed transit routes.
-  - `allocation` (dict[Route, int]): Fleet allocation counts.
-  - `pheromones` (PheromoneMatrix): Demand pheromone matrix.
+  - `uid` (str): Unique identifier generated using a shortened UUID.
   - `generation` (int): Birth generation index.
-  - `parents` (list[str]): Parent ID references.
-  - `cost` (float): Cost score.
+  - `parents` (list[str]): List of parent UIDs.
+  - `routes` (list[Route]): Deployed transit routes (genotype).
+  - `allocation` (dict[Route, int]): Fleet allocation distribution (genotype).
+  - `pheromones` (PheromoneMatrix): Demand pheromone matrix acquired from simulation (phenotype/epigenetic layer).
+  - `cost` (float): System fitness score (lower is better).
 
 - **Methods**
   - `__init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix, generation: int = 0, parents: Optional[list[str]] = None) -> None`
-    - Parameters: Routes, allocation dict, pheromones, generation index, parent IDs.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the chromosome, setting up initial properties.
+    - Primary Purpose: Instantiates a Chromosome representing a candidate solution.
   - `__str__(self) -> str`
-    - Parameters: None.
-    - Outputs: str.
-    - Primary Purpose: Returns formatted status overview text.
+    - Primary Purpose: Returns a summary description of the Chromosome.
 
 #### MemeticAlgorithm
-Integrates Lamarckian local search with genetic operators to optimize route networks.
+Coordinates evolutionary operations including topological hub crossover, epigenetic pheromone inheritance, and Lamarckian local search evaluations.
 
 - **Attributes**
-  - `cg` (CityGraph): City road network.
-  - `local_search` (ACOLocalSearch): Mutation search operator engine.
-  - `target_route_count` (int): Number of routes in each network layout.
+  - `cg` (Any): City road network CityGraph.
+  - `local_search` (ACOLocalSearch): Heuristic local search operator database.
+  - `target_route_count` (int): Number of routes in each candidate layout.
   - `verbose` (bool): Prints search progress details.
+  - `fitness_evaluator` (Any): Handle to SimulationEvaluator.
+  - `surrogate_evaluator` (Any): Handle to StaticSurrogateEvaluator.
 
 - **Methods**
   - `__init__(self, cg: Any, local_search: ACOLocalSearch, target_route_count: int, verbose: bool = False) -> None`
-    - Parameters: Graph, local search engine, target route count, and verbose mode.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the genetic search coordinator.
-  - `_get_hub_edges(self, routes: list[Route], pheromones: PheromoneMatrix) -> set[Any]`
-    - Parameters: Routes list and pheromone matrix.
-    - Outputs: set of hub edge objects.
-    - Primary Purpose: Internal helper identifying the top 10% highest-demand edges (hubs) based on their pheromone values.
-  - `crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route]`
-    - Parameters: Parent chromosomes.
-    - Outputs: list of Route objects.
-    - Primary Purpose: Executes topological crossover: extracts Parent A's routes touching high-demand hub edges and completes the route set with non-overlapping routes from Parent B.
-  - `inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix`
-    - Parameters: Parent chromosomes.
-    - Outputs: PheromoneMatrix.
-    - Primary Purpose: Blends parent pheromone matrices using inverse fitness-weighted interpolation.
-  - `evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float`
-    - Parameters: Chromosome and fleet size.
-    - Outputs: float (fitness cost score).
-    - Primary Purpose: Evaluates the chromosome with the microscopic fitness score used by GA selection and replacement.
+    - Primary Purpose: Instantiates the memetic coordinator.
   - `set_fitness_evaluator(self, evaluator: Any) -> None`
+    - Primary Purpose: Sets the microscopic fitness evaluator.
   - `set_surrogate_evaluator(self, evaluator: Any) -> None`
-  - `apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool`
-    - Parameters: Child chromosome, fleet size, and mutation intensity.
-    - Outputs: bool (True if mutation was accepted).
-    - Primary Purpose: Triggers local search mutation, using surrogate cost only as a gate before recomputing the full fitness score.
+    - Primary Purpose: Sets the static surrogate evaluator.
+  - `_get_hub_edges(self, routes: list[Route], pheromones: PheromoneMatrix) -> set[Any]`
+    - Primary Purpose: Identifies the high-value sub-graph of the top 10% highest-demand edges based on pheromone concentration.
+  - `crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route]`
+    - Primary Purpose: Generates offspring route paths by harvesting high-demand corridor sub-graphs from Parent A and completing remaining routes using Parent B's non-overlapping paths.
+  - `inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix`
+    - Primary Purpose: Blends parental pheromone matrices using an inverse fitness-weighted arithmetic crossover.
+  - `evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float`
+    - Primary Purpose: Runs the microscopic simulation fitness objective, updates the chromosome cost, deposits pheromones, and updates demand-service gaps.
+  - `evaluate_population(self, population: list[Chromosome], runner: Any) -> None`
+    - Primary Purpose: Evaluates a batch of chromosomes in parallel using the ParallelSimulationRunner, updating fitness scores and pheromones.
+  - `_evaluate_surrogate_cost(self, routes: list[Route]) -> float`
+    - Primary Purpose: Computes fast approximate travel cost using the StaticSurrogateEvaluator.
+  - `apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0, evaluate_inline: bool = True) -> bool`
+    - Primary Purpose: Applies ACOLocalSearch mutations. Compares surrogate cost before and after the modification, keeping the edits only if they improve the surrogate score. If accepted and `evaluate_inline` is True, evaluates the full chromosome fitness.
 
 ---
 
 ### local_search.py
 
 #### ACOLocalSearch
-Applies demand-driven mutations and spatial heuristics to optimize route systems.
+Applies demand-driven mutations and spatial heuristics to optimize transit route geometries.
 
 - **Attributes**
-  - `cg` (CityGraph): City road network.
-  - `p_attraction` (float): Demand-driven attraction mutation probability.
-  - `p_repulsion` (float): Redundancy repulsion mutation probability.
-  - `p_pruning` (float): Demand-aware tortuosity pruning mutation probability.
-  - `base_window_size` (int): Window size for segment manipulation.
+  - `cg` (Any): City road network CityGraph.
+  - `p_attraction` (float): Demand attraction probability.
+  - `p_repulsion` (float): Overlap repulsion probability.
+  - `p_pruning` (float): Tortuosity pruning probability.
+  - `base_window_size` (int): Sliding window size for local path splits.
 
 - **Methods**
   - `__init__(self, cg: Any, p_attraction: float = 0.4, p_repulsion: float = 0.4, p_pruning: float = 0.6, base_window_size: int = 15) -> None`
-    - Parameters: CityGraph, mutation probabilities, and window size.
-    - Outputs: None.
     - Primary Purpose: Instantiates the search engine.
   - `calculate_route_similarity(self, route_a: Route, route_b: Route) -> float`
-    - Parameters: Route objects.
-    - Outputs: float (similarity score).
-    - Primary Purpose: Evaluates route similarity using the discrete Fréchet distance algorithm over node coordinates.
+    - Primary Purpose: Evaluates similarity between two routes using the discrete Fréchet distance.
   - `_get_shortest_path_edges(self, start_node: Any, end_node: Any) -> list[Any]`
-    - Parameters: Start and end nodes.
-    - Outputs: list of edges.
-    - Primary Purpose: Internal helper returning A* shortest path street edges between two nodes.
-  - `_stitch_path(self, raw_edges: list) -> Optional[list]`
-    - Parameters: Unstitched edges.
-    - Outputs: Optional list of edges.
-    - Primary Purpose: Internal helper sequentially connecting disjoint edges and closing the circular loop.
-  - `_safe_splice(self, path: list, start_idx: int, end_idx: int, new_segment: list) -> Optional[list]`
-    - Parameters: Original path, splice indexes, and replacement segment.
-    - Outputs: Optional list of edges.
-    - Primary Purpose: Internal helper safely replacing a path slice and re-stitching the circular path.
-  - `_edge_id(self, edge: Any) -> Any`
-    - Parameters: Edge.
-    - Outputs: ID value.
-    - Primary Purpose: Internal helper extracting a stable identifier for an edge.
+    - Primary Purpose: Internal helper retrieving the A* shortest path edges.
+  - `_path_length(self, path: list[DirEdge]) -> float`
+    - Primary Purpose: Internal helper summing length attributes across a list of directed edges.
+  - `_is_valid_loop(self, path: list[DirEdge]) -> bool`
+    - Primary Purpose: Internal helper checking that an edge list represents a contiguous, closed loop.
   - `_finalize_path(self, raw_path: list) -> list`
-    - Parameters: Edge list.
-    - Outputs: list of Layer 2 edges.
-    - Primary Purpose: Internal helper converting a mixed-layer path to a strictly compliant Layer 2 transit loop.
+    - Primary Purpose: Internal helper mapping a sequence of physical edges to Layer 2 transit edges.
+  - `_build_loop(self, edge_list: list[DirEdge]) -> list[DirEdge]`
+    - Primary Purpose: Internal helper ensuring a path forms a closed loop.
   - `strategy_spatial_attraction(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`
-    - Parameters: Routes list, pheromones, and intensity scalar.
-    - Outputs: Optional[Route].
     - Primary Purpose: Detours routes toward underserved demand corridors (positive gap scores) using continuous Or-opt segment transplants.
   - `strategy_redundancy_repulsion(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> Optional[Route]`
-    - Parameters: Routes list, pheromones, and intensity scalar.
-    - Outputs: Optional[Route].
     - Primary Purpose: Detours routes away from overserved corridors (negative gap scores) by executing localized 2-opt geometric reversals.
   - `strategy_tortuosity_pruning(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> tuple[int, Optional[Route]]`
-    - Parameters: Routes list, pheromones, and intensity.
-    - Outputs: tuple of prunes count and the modified Route.
-    - Primary Purpose: Smooths out geometrically inefficient wiggles in routes utilizing true $A^*$ geometric tortuosity ratios ($\kappa$) and gap immunity.
+    - Primary Purpose: Smooths out geometrically inefficient wiggles using A* search based on local tortuosity ratios ($\kappa$) and gap immunity.
   - `optimize_system(self, routes: list[Route], pheromones: PheromoneMatrix, intensity: float = 1.0) -> dict`
-    - Parameters: Routes list, pheromones, and intensity.
-    - Outputs: dict of actions taken.
     - Primary Purpose: One-shot coordinator applying all active mutation operators stochastically.
 
 ---
@@ -1106,43 +1057,39 @@ Dynamically scales mutation probabilities to escape local optima and decays loca
 
 - **Attributes**
   - `base_mutation` (float): Baseline mutation probability.
-  - `stagnation_limit` (int): Maximum generation count before hard capping.
-  - `max_mutation` (float): Maximum mutation probability limit.
+  - `stagnation_limit` (int): Maximum stagnation generations before hard capping.
+  - `max_mutation` (float): Upper limit for mutation scaling.
   - `current_mutation` (float): Active mutation probability.
 
 - **Methods**
   - `__init__(self, base_mutation: float, stagnation_limit: int, max_mutation: float = 0.8) -> None`
-    - Parameters: Baseline, stagnation limit, and max mutation limit.
-    - Outputs: None.
     - Primary Purpose: Instantiates the controller.
   - `update(self, stagnation_counter: int) -> float`
-    - Parameters:
-      - `stagnation_counter` (int): Generations without improvement.
-    - Outputs: float (updated mutation probability).
-    - Primary Purpose: Non-linearly scales mutation intensity as stagnation increases, resetting to base immediately upon improvement.
+    - Primary Purpose: Non-linearly scales mutation intensity quadratically as stagnation increases: $P_{mut} = P_{base} + (P_{max} - P_{base}) \times (\min(s/S_{limit}, 1.0))^2$. Resets immediately to baseline when stagnation is 0.
   - `get_local_search_prob(self, generation: int, g_max: int, p_min: float = 0.05, p_max: float = 0.8) -> float`
-    - Primary Purpose: Computes the linearly decaying local search mutation probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) * (1 - g / G_{max})$.
+    - Primary Purpose: Computes linearly decaying local search probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) \times (1 - g / G_{max})$.
   - `get_local_search_intensity(self, generation: int, g_max: int, i_min: float = 0.1, i_max: float = 1.0) -> float`
-    - Primary Purpose: Computes the dynamically tightening local search intensity/radius: $I_{local}(g) = I_{min} + (I_{max} - I_{min}) * (1 - g / G_{max})$.
+    - Primary Purpose: Computes decaying local search intensity: $I_{local}(g) = I_{min} + (I_{max} - I_{min}) \times (1 - g / G_{max})$.
 
 ---
 
 ### optimizer_config.py
 
 #### ExperimentConfig
-Configuration container handling YAML ingestion, type validation, and boundary definitions.
+An immutable configuration dataclass holding all system, travel-graph, genetic, local search, and simulation parameters.
 
 - **Attributes**
-  - `output_root` (Path): Root directory for output logs and checkpoints.
+  - `output_root` (Path): Path to store telemetry and checkpoints.
   - `telemetry_interval` (int): Frequency of logging generations.
   - `checkpoint_interval` (int): Frequency of serializing states.
   - `n_population` (int): Population size.
-  - `g_max` (int): Maximum GA generations.
+  - `g_max` (int): Maximum generations.
   - `n_stagnation` (int): Stagnation limit.
-  - `n_elite` (int): Count of elite survivors.
+  - `n_elite` (int): Elite survivor count.
   - `k_tournament` (int): Tournament size.
   - `p_mutation` (float): Mutation rate.
   - `gamma_crossover` (float): Crossover blend rate.
+  - `jaccard_patience` (int): Patience limit for Jaccard elite similarity convergence.
   - `initial_tau` (float): Pheromone base score.
   - `rho` (float): Pheromone decay rate.
   - `q` (float): Pheromone scaling weight.
@@ -1163,20 +1110,18 @@ Configuration container handling YAML ingestion, type validation, and boundary d
 
 - **Methods**
   - `from_yaml(cls, path: str | Path) -> ExperimentConfig`
-    - Parameters: Configuration YAML file path.
-    - Outputs: ExperimentConfig.
-    - Primary Purpose: Ingests, parses, and validates the configurations.
+    - Primary Purpose: Ingests, parses, and validates configurations from a YAML file.
 
 #### OptimizationState
-Structured state tracker.
+Structured state tracker storing active evolutionary variables.
 
 - **Attributes**
   - `generation` (int): Active generation index.
   - `stagnation_counter` (int): Generations without improvement.
   - `best_fitness` (float): Best fitness score.
-  - `population` (list): Live Chromosome population.
-  - `pheromones` (PheromoneMatrix): Active pheromone matrix.
-  - `random_state` (Optional[tuple]): Captured pseudorandom state (`random.getstate()`) for deterministic Pause/Resume recovery.
+  - `population` (list[Chromosome]): Active Chromosome population.
+  - `pheromones` (PheromoneMatrix): Active master pheromone matrix.
+  - `random_state` (Optional[tuple]): Captured pseudorandom state (`random.getstate()`) for deterministic recovery.
 
 ---
 
@@ -1191,16 +1136,10 @@ Manages serialized optimization state checkpoints.
 
 - **Methods**
   - `__init__(self, run_dir: Path) -> None`
-    - Parameters: Active run directory.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the engine, creating target checkpoint directories.
+    - Primary Purpose: Instantiates the engine, creating directories.
   - `save_state(self, state: OptimizationState) -> None`
-    - Parameters: Active optimization state.
-    - Outputs: None.
-    - Primary Purpose: Serializes the state using an atomic write pattern (`.tmp` write then atomic replace) to prevent corruption.
+    - Primary Purpose: Serializes state via an atomic write pattern (`.tmp` write then atomic replace) to prevent corruption.
   - `load_state(self, filepath: Path) -> OptimizationState`
-    - Parameters: Checkpoint file path.
-    - Outputs: OptimizationState.
     - Primary Purpose: Deserializes the checkpoint file.
 
 #### OptimizerBuilder
@@ -1208,12 +1147,8 @@ Constructs isolated optimization environments and resumes runs.
 
 - **Methods**
   - `build_new_run(config_path: str | Path) -> tuple[ExperimentConfig, Path]`
-    - Parameters: YAML config file path.
-    - Outputs: tuple of ExperimentConfig and the output Path.
     - Primary Purpose: Sets up a fresh, isolated run directory, copying configurations to ensure reproducibility.
   - `resume_run(run_dir: str | Path) -> tuple[ExperimentConfig, OptimizationState, Path]`
-    - Parameters: Run directory path.
-    - Outputs: tuple of ExperimentConfig, loaded OptimizationState, and the run directory Path.
     - Primary Purpose: Resumes an existing run by loading the configuration and deserializing the latest checkpoint file.
 
 ---
@@ -1227,7 +1162,7 @@ Constructs isolated optimization environments and resumes runs.
     - Mocks environments to fulfill PheromoneMatrix gap calculation requirements.
 
 #### TelemetryEngine
-Handles synchronous metrics logging, lineage tracking, and JSON exports.
+Handles metrics logging, lineage tracking, and JSON exports.
 
 - **Attributes**
   - `run_dir` (Path): Active run directory.
@@ -1238,25 +1173,72 @@ Handles synchronous metrics logging, lineage tracking, and JSON exports.
 
 - **Methods**
   - `__init__(self, run_dir: Path, bounds: tuple[float, float, float, float]) -> None`
-    - Parameters: Run directory and spatial coordinate bounds.
-    - Outputs: None.
     - Primary Purpose: Instantiates the telemetry logger.
-  - `_init_csvs(self) -> None`
-    - Parameters: None.
-    - Outputs: None.
-    - Primary Purpose: Internal helper initializing CSV structures if they do not exist.
   - `log_generation(self, gen: int, best_cost: float, mean_cost: float, mut_rate: float, stag: int) -> None`
-    - Parameters: Logging parameters for generation, costs, rates, and stagnation.
-    - Outputs: None.
     - Primary Purpose: Appends generation performance metrics to `history.csv`.
-  - `log_lineage(self, population: list) -> None`
-    - Parameters: Active chromosome population.
-    - Outputs: None.
+  - `log_lineage(self, population: list[Chromosome]) -> None`
     - Primary Purpose: Logs UIDs, costs, and parent lineage mappings to `lineage.csv`.
-  - `export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, population: list) -> None`
-    - Parameters: Generation details and population.
-    - Outputs: None.
-    - Primary Purpose: Exports a complete network snapshot (routes, pheromone intensities, unserved gaps, and cost distributions) in JSON format.
+  - `export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, population: list[Chromosome]) -> None`
+    - Primary Purpose: Exports a complete network snapshot (routes, pheromones, unserved gaps, cost distributions) in JSON format.
+
+---
+
+### optimizer_engine.py
+
+#### MemeticEngine
+Coordinates Phases A through D of the memetic optimization algorithm.
+
+- **Attributes**
+  - `config` (ExperimentConfig): Immutable experiment configurations.
+  - `cg` (CityGraph): Drivable city network.
+  - `sampler` (Optional[Any]): Passenger demand sampler.
+  - `current_generation` (int): Generation counter index.
+  - `local_search` (ACOLocalSearch): Heuristic local search operator database.
+  - `algo` (MemeticAlgorithm): Evolutionary genetic operator suite.
+
+- **Methods**
+  - `__init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None) -> None`
+    - Primary Purpose: Instantiates components, wiring local search and genetic algorithm.
+  - `initialize_state(self) -> OptimizationState`
+    - Primary Purpose: Generates the initial population of chromosomes, instantiating fresh, decoupled PheromoneMatrix objects, evaluating initial costs.
+  - `step_generation(self, state: OptimizationState, current_mutation_rate: float) -> OptimizationState`
+    - Primary Purpose: Implements elitism (directly retaining the fittest), tournament selection, crossover, pheromone inheritance, Lamarckian mutations, and increments generation counters.
+
+---
+
+### optimizer.py
+
+#### Optimizer
+The master user-facing orchestrator coordinating the entire memetic search process, handling keyboard interrupts, and managing telemetry systems.
+
+- **Attributes**
+  - `config` (ExperimentConfig): System configuration settings.
+  - `state` (OptimizationState): Evolutionary search state.
+  - `run_dir` (Path): Output run folder.
+  - `cg` (CityGraph): Underlying drivable street network.
+  - `sampler` (DirectDemandSampler): Demand distribution model.
+  - `raw_config` (dict): Raw YAML parsed dictionary.
+  - `engine` (MemeticEngine): Main algorithm engine.
+  - `surrogate` (StaticSurrogateEvaluator): Fast surrogate evaluator.
+  - `preservation` (StatePreservationEngine): State checkpointing engine.
+  - `telemetry` (TelemetryEngine): Telemetry logger engine.
+  - `adaptive` (AdaptiveController): Stagnation mutation scaler.
+
+- **Methods**
+  - `__init__(self, run_dir: Path) -> None`
+    - Primary Purpose: Instantiates the optimizer by loading the configuration and deserializing checkpoint data.
+  - `create(cls, config_path: str | Path) -> Optimizer`
+    - Primary Purpose: Instantiates a fresh optimizer run, creating standard workspace outputs.
+  - `_init_engines(self) -> None`
+    - Primary Purpose: Initializes components, maps synthetic and real city geometries, configures evaluators, and wires GA scoring to the microscopic fitness score.
+  - `start(self) -> None`
+    - Primary Purpose: Executes the main generational search loop. Tracks stagnation, Jaccard similarity, fitness variance, logs telemetry, saves checkpoints, and handles interrupts.
+  - `calculate_elite_jaccard(self, population: list[Chromosome]) -> float`
+    - Primary Purpose: Computes average Jaccard similarity of route edge sets among the top 10% elite chromosomes.
+  - `calculate_fitness_variance(self, population: list[Chromosome]) -> float`
+    - Primary Purpose: Computes variance of chromosome costs to detect genetic convergence.
+
+---
 
 ---
 
@@ -1423,6 +1405,33 @@ Evaluates route configurations against pre-sampled Origin-Destination pairs to a
 
 ---
 
+### simulation_parallel.py
+
+#### ParallelSimulationRunner
+Manages concurrent simulation executions across a process pool, optimizing CPU utilization during genetic evaluations by performing worker-side graph and demand sampler caching.
+
+- **Attributes**
+  - `config` (dict): Complete configuration dictionary.
+  - `max_workers` (int): Number of worker processes in the pool.
+
+- **Methods**
+  - `__init__(self, config: dict, max_workers: Optional[int] = None) -> None`
+    - Primary Purpose: Instantiates the runner, determining the optimal process count based on CPU cores.
+  - `run_parallel(self, routes_list: list[list[Route]]) -> list[SimulationResult]`
+    - Parameters: list of route sets to evaluate.
+    - Outputs: list of SimulationResult objects.
+    - Primary Purpose: Executes simulation runs concurrently by serializing tasks to worker processes. Reconstructs full route geometry inside the worker process to avoid heavy pickling overhead.
+
+- **Worker Inter-Process Communication Helpers**
+  - `_worker_init(city_bytes: bytes, sampler_bytes: bytes, raw_cfg: dict)`
+    - Primary Purpose: Global worker initializer deserializing and caching heavy graph and demand sampler objects once per process.
+  - `_worker_run(sim_id: str, routes_data: list[tuple[list[tuple[float, float]], int]], max_ticks: int, beta_penalty: float, alpha_std_penalty: float) -> SimulationResult`
+    - Primary Purpose: Worker execution loop task handler that restores routes, builds mock systems, runs the simulation, and returns results.
+  - `_restore_route(path_coords: list[tuple[float, float]], city: NetworkGraph) -> Route`
+    - Primary Purpose: Re-maps coordinates to cached memory-efficient graph edge structures within the worker process.
+
+---
+
 ## 7. Visualization and Support Interfaces
 
 ### visualization.py
@@ -1476,6 +1485,28 @@ A threaded Tkinter GUI class for real-time simulation playback.
 
 ---
 
+### travel_graph_3d_vis.py
+
+#### TravelGraph3DVisualizer
+Generates 3D multi-layered spatial visualizations of the road, walking, and waiting graph networks.
+
+- **Attributes**
+  - `base_edges` (list[DirEdge]): The core road/pedestrian networks to render.
+  - `highlight_edges` (list[DirEdge]): Specific routes or journeys to draw in high-contrast overlay.
+  - `mode` (MapMode): Style mode (e.g. "light_nolabels", "dark_nolabels").
+  - `edge_thickness` (float): Baseline line width.
+  - `journey_thickness` (float): Highlight route line width.
+  - `node_radius` (float): Scale factor for drawing node intersections.
+  - `layer_opacity` (float): Translucency opacity for layering separation.
+
+- **Methods**
+  - `__init__(self, base_edges: list[DirEdge], highlight_edges: Optional[list[DirEdge]] = None, *, mode: MapMode = "light_nolabels", edge_thickness: float = 2.6, journey_thickness: float = 4.2, node_radius: float = 42, layer_opacity: float = 0.56) -> None`
+    - Primary Purpose: Instantiates the 3D map visualizer, projecting 2D coordinates into a 3D coordinate frame separated by layer offsets.
+  - `draw(self, *, display_walk: bool = True, display_wait: bool = True, display_ride: bool = True, display_alight: bool = True, display_end_walk: bool = True, display_transfer: bool = True, display_direct: bool = True, labels_on: bool = False, legend_on: bool = True, nodes_on: bool = False, mode: Optional[MapMode] = None, edge_thickness: Optional[float] = None, journey_thickness: Optional[float] = None, node_radius: Optional[float] = None, layer_opacity: Optional[float] = None) -> Image.Image`
+    - Primary Purpose: Renders the multi-layered networks as a static 2.5D perspective image frame using Matplotlib 3D projection.
+
+---
+
 ### __init__.py
 
 - **Package Level Interface**
@@ -1499,389 +1530,82 @@ A threaded Tkinter GUI class for real-time simulation playback.
 
 ---
 
-## 8. Genetic and Evolutionary Optimization Utilities
+## 8. Post-Optimization Evaluation
 
-### genetic.py
+### evaluation_metrics.py
+Pure, stateless mathematical functions for evaluating transit route systems. These functions operate on primitive data types (sets, lists, tuples, dicts) and have no direct knowledge of paratransit domain objects.
 
-#### Chromosome
-A data structure representing a candidate route system and fleet allocation configuration within the genetic algorithm.
+- **Topological Similarity Metrics**
+  - `jaccard_similarity(set_a: Iterable[Any], set_b: Iterable[Any]) -> float`
+    - Primary Purpose: Computes the structural Jaccard overlap index: $J(A, B) = |A \cap B| / |A \cup B|$.
+  - `cosine_similarity(vector_a: Dict[Any, float], vector_b: Dict[Any, float]) -> float`
+    - Primary Purpose: Projects two sparse dict vectors (e.g., node degree distributions) into a shared space and computes cosine alignment.
+  - `graph_edit_distance(edges_a: Iterable[Any], edges_b: Iterable[Any], max_nodes: int = 15) -> float`
+    - Primary Purpose: Computes the minimum number of edge/node edits (insertions, deletions, substitutions) required to transform one graph topology into another.
 
-- **Attributes**
-  - `uid` (str): A unique identifier string generated using uuid.
-  - `generation` (int): The evolutionary generation index at which the chromosome was born.
-  - `parents` (list[str]): A list of parent chromosome UIDs if bred from a crossover, else empty.
-  - `routes` (list[Route]): The list of closed transit Route objects in this candidate solution.
-  - `allocation` (dict[Route, int]): The optimal fleet allocation mapping each Route to its assigned number of jeepneys.
-  - `pheromones` (PheromoneMatrix): The localized epigenetic PheromoneMatrix instance mapped to this chromosome.
-  - `cost` (float): The calculated overall system fitness cost (lower is better).
+- **Geometric Similarity Metrics**
+  - `discrete_frechet_distance(P: List[Tuple[float, float]], Q: List[Tuple[float, float]]) -> float`
+    - Primary Purpose: Evaluates spatial alignment between two ordered coordinate paths, accounting for sequential flow and direction.
 
-- **Methods**
-  - `__init__(self, routes: list[Route], allocation: dict[Route, int], pheromones: PheromoneMatrix, generation: int = 0, parents: Optional[list[str]] = None) -> None`
-    - Parameters:
-      - `routes` (list[Route]): Target candidate route paths.
-      - `allocation` (dict[Route, int]): Fleet allocation map.
-      - `pheromones` (PheromoneMatrix): Decoupled pheromone database.
-      - `generation` (int): Evolutionary birth index, defaults to 0.
-      - `parents` (Optional[list[str]]): List of parent chromosome UIDs, defaults to None.
-    - Outputs: None.
-    - Primary Purpose: Instantiates a candidate solution chromosome with a unique identifier and tracks lineage relationships.
-  - `__str__(self) -> str`
-    - Parameters: None.
-    - Outputs: str.
-    - Primary Purpose: Returns a summary string including UID, generation, cost, and number of routes.
+- **Distributional Distance Metrics**
+  - `wasserstein_1d(u_samples: Iterable[float], v_samples: Iterable[float]) -> float`
+    - Primary Purpose: Computes the 1D Earth Mover's Distance between travel time distributions.
+  - `wasserstein_2d(coords_u: List[Tuple[float, float]], weights_u: List[float], coords_v: List[Tuple[float, float]], weights_v: List[float]) -> float`
+    - Primary Purpose: Computes the 2D Wasserstein distance to measure spatial shifts in passenger demand coverage.
+  - `ks_test(u_samples: Iterable[float], v_samples: Iterable[float]) -> Tuple[float, float]`
+    - Primary Purpose: Executes the two-sample Kolmogorov-Smirnov statistical test to compare distributions.
 
-#### MemeticAlgorithm
-The class executing Lamarckian evolutionary operations on candidate Chromosome systems.
+- **Diversity & Structural Metrics**
+  - `shannon_entropy(class_counts: Dict[Any, int]) -> float`
+    - Primary Purpose: Calculates the Shannon entropy (in bits) over passenger routing choices.
+  - `coefficient_of_variation(values: Iterable[float]) -> float`
+    - Primary Purpose: Measures travel headway or path length relative dispersion ($CV = \sigma / \mu$).
 
-- **Attributes**
-  - `cg` (Any): The active CityGraph instance.
-  - `local_search` (ACOLocalSearch): The local search operator engine.
-  - `target_route_count` (int): The required number of routes per candidate system.
-  - `verbose` (bool): Verbosity flag for standard out.
-
-- **Methods**
-  - `__init__(self, cg: Any, local_search: ACOLocalSearch, target_route_count: int, verbose: bool = False) -> None`
-    - Parameters:
-      - `cg` (Any): Base spatial graph database.
-      - `local_search` (ACOLocalSearch): Heuristic local search operator.
-      - `target_route_count` (int): Target number of route tracks.
-      - `verbose` (bool): Console reporting verbosity flag.
-    - Outputs: None.
-    - Primary Purpose: Instantiates and configures the Lamarckian operator suite, checking parameters for valid bounds.
-  - `_get_hub_edges(self, routes: list[Route], pheromones: PheromoneMatrix) -> set[Any]`
-    - Parameters:
-      - `routes` (list[Route]): Route system.
-      - `pheromones` (PheromoneMatrix): Edge pheromone density matrix.
-    - Outputs: set[Any].
-    - Primary Purpose: Identifies the high-value topological corridor sub-graph consisting of the top 10% highest demand edges.
-  - `crossover_topological_hub(self, parent_a: Chromosome, parent_b: Chromosome) -> list[Route]`
-    - Parameters:
-      - `parent_a` (Chromosome): Fitter parent candidate.
-      - `parent_b` (Chromosome): Less fit parent candidate.
-    - Outputs: list[Route].
-    - Primary Purpose: Generates offspring routes by extracting high-demand hub corridors from Parent A and completing remaining slots using distinct, non-overlapping routes from Parent B.
-  - `inherit_pheromones(self, parent_a: Chromosome, parent_b: Chromosome) -> PheromoneMatrix`
-    - Parameters:
-      - `parent_a` (Chromosome): Parent A candidate.
-      - `parent_b` (Chromosome): Parent B candidate.
-    - Outputs: PheromoneMatrix.
-    - Primary Purpose: Blends parent pheromone databases using a fitness-weighted arithmetic crossover to construct the child's epigenetic matrix.
-  - `evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float`
-    - Parameters:
-      - `chrom` (Chromosome): Candidate system to evaluate.
-      - `total_fleet` (int): Total allocatable fleet size.
-    - Outputs: float (fitness score).
-    - Primary Purpose: Runs the microscopic simulation fitness objective, updates pheromones from the resulting passenger paths, and stores the fitness score on the chromosome.
-   - `apply_lamarckian_mutation(self, child: Chromosome, total_fleet: int, intensity: float = 1.0) -> bool`
-     - Parameters:
-       - `child` (Chromosome): Candidate chromosome to mutate.
-       - `total_fleet` (int): Total vehicle fleet size.
-       - `intensity` (float): Local search intensity multiplier.
-     - Outputs: bool (whether mutation succeeded in lowering cost and was retained).
-     - Primary Purpose: Applies ACOLocalSearch mutation on the chromosome's routes, compares surrogate cost before and after the edit, and only then recomputes the full fitness score if the mutation is accepted.
-    - Primary Purpose: Calculates unserved demand corridors, applies heuristic local searches (attraction, repulsion, pruning) on route geometries, evaluates results, and retains improvements.
+- **Ranking Fidelity Metrics**
+  - `spearman_correlation(x: List[float], y: List[float]) -> float`
+  - `kendall_tau(x: List[float], y: List[float]) -> float`
+  - `pearson_correlation(x: List[float], y: List[float]) -> float`
+  - `top_k_overlap(list_a: List[Any], list_b: List[Any], k: int) -> Tuple[float, float]`
+  - `normalized_rmse(predicted: List[float], actual: List[float]) -> float`
+  - `mape(actual: List[float], predicted: List[float]) -> float`
 
 ---
 
-### optimizer_config.py
+### post_evaluation.py
+Domain-specific evaluation workflows that operate on Route, Chromosome, and SimulationResult structures, delegating raw mathematics to `evaluation_metrics.py`.
 
-#### ExperimentConfig
-A frozen, immutable dataclass containing all system, travel-graph, genetic, local search, and simulation parameters.
+- **Route Similarity**
+  - `compare_routes_geometric(route_a: Any, route_b: Any) -> float`
+    - Primary Purpose: Measures sequential geometric similarity using Discrete Fréchet Distance on node coordinate paths.
+  - `compare_routes_topological(route_a: Any, route_b: Any) -> float`
+    - Primary Purpose: Measures Jaccard edge-set overlap between individual routes, ignoring order.
 
-- **Attributes**
-  - `output_root` (Path): Path to store telemetry and checkpoints.
-  - `telemetry_interval` (int): Generational interval for exporting lineage and snapshots.
-  - `checkpoint_interval` (int): Generational interval for saving serialized states.
-  - `n_population` (int): Chromosome population size.
-  - `g_max` (int): Maximum evolutionary generations.
-  - `n_stagnation` (int): Generations before search termination due to stagnation.
-  - `n_elite` (int): Number of top chromosomes preserved directly across generations.
-  - `k_tournament` (int): Tournament selection size.
-  - `p_mutation` (float): Base probability of mutation.
-  - `gamma_crossover` (float): Crossover blending coefficient.
-  - `jaccard_patience` (int): Number of consecutive generations that elite Jaccard similarity must remain >= 0.95 to trigger phenotypic convergence termination.
-  - `initial_tau` (float): Base pheromone concentration value.
-  - `rho` (float): Generational pheromone evaporation rate.
-  - `q` (float): Pheromone deposition scaling factor.
-  - `p_ls_attraction` (float): Local search attraction probability.
-  - `p_ls_repulsion` (float): Local search repulsion probability.
-  - `p_ls_pruning` (float): Local search pruning probability.
-  - `default_jeep_weight` (float): Fleet allocator default weight.
-  - `alpha_std_penalty` (float): Headway variance penalty coefficient.
-  - `beta_penalty` (float): Underservice penalty coefficient.
-  - `num_routes` (int): Required routes in route systems.
-  - `total_allocatable_jeeps` (int): Total jeepney count.
-  - `city_bounds` (tuple): Geographical bounding box.
-  - `walk_wt` (float): Travel graph walking weight penalty.
-  - `ride_wt` (float): Travel graph riding weight penalty.
-  - `wait_wt` (float): Travel graph waiting weight penalty.
-  - `transfer_wt` (float): Travel graph transfer weight penalty.
-  - `max_ticks` (int): Simulation run duration ticks.
-  - `passenger_speed` (float): Walking speed in km/h.
-  - `jeep_speed` (float): Vehicle movement speed in km/h.
-  - `jeep_capacity` (int): Maximum passengers per vehicle.
-  - `spawn_rate_per_hour` (float): Base passenger spawn rate.
-  - `spawn_stdev` (float): Passenger spawn normal distribution standard deviation.
-  - `weight_tolerance` (float): Waiting tolerance limit.
-  - `equidistant_spawn` (bool): Dispatch spacing flag.
+- **System Similarity**
+  - `compare_systems_topological(chrom_a: Any, chrom_b: Any) -> float`
+    - Primary Purpose: Computes Jaccard similarity across the union of all routes' edge IDs.
+  - `compare_systems_structural(chrom_a: Any, chrom_b: Any, max_nodes: int = 15) -> float`
+    - Primary Purpose: Measures Graph Edit Distance between system hub graph structures.
+  - `compare_systems_degree_distribution(chrom_a: Any, chrom_b: Any) -> float`
+    - Primary Purpose: Evaluates similarity of urban hub distributions using Cosine Similarity on node degrees.
+  - `compare_systems_demand_coverage(chrom_a: Any, chrom_b: Any, sampler: Any) -> float`
+    - Primary Purpose: Measures differences in spatial demand coverage using 2D Wasserstein distance.
 
-- **Methods**
-  - `from_yaml(cls, path: str | Path) -> ExperimentConfig`
-    - Parameters:
-      - `path` (str | Path): Config file path.
-    - Outputs: ExperimentConfig.
-    - Primary Purpose: Instantiates an immutable config dataclass, loading parameters and parsing fallback bounding boxes for synthetic toy cities and real OSM cities.
+- **Generational Tracking**
+  - `track_topological_drift(gen_chromosomes: List[Any]) -> List[float]`
+    - Primary Purpose: Computes consecutive pairwise Jaccard similarities to trace topological evolution.
+  - `track_fitness_correlation(gen_chromosomes: List[Any]) -> Tuple[float, List[float], List[float]]`
+    - Primary Purpose: Correlates generational topological changes ($1 - J$) with objective fitness updates ($\Delta cost$).
+  - `compute_path_diversity(recorded_paths: List[Tuple[Any, float]]) -> float`
+    - Primary Purpose: Evaluates passenger path distribution diversity using Shannon entropy.
 
-#### OptimizationState
-A mutable dataclass tracking live generational state.
+- **Surrogate Fidelity**
+  - `validate_surrogate_ranking(surrogate_scores: List[float], true_scores: List[float]) -> Dict[str, float]`
+    - Primary Purpose: Validates surrogate ranking quality, returning Spearman $\rho$, Kendall $\tau$, NRMSE, and MAPE.
+  - `validate_surrogate_top_k(surrogate_ranking: List[Any], true_ranking: List[Any], k: int) -> Tuple[float, float]`
+    - Primary Purpose: Computes precision and recall of the top-$k$ candidates.
+  - `validate_distribution_consistency(dist_a: List[float], dist_b: List[float]) -> Dict[str, float]`
+    - Primary Purpose: Performs a Kolmogorov-Smirnov consistency check to confirm if two runs belong to the same probability distribution.
 
-- **Attributes**
-  - `generation` (int): Active generation index.
-  - `stagnation_counter` (int): Generations passed without fitness improvements.
-  - `best_fitness` (float): Fittest score registered so far.
-  - `population` (list[Chromosome]): Fittest chromosomes in active generation.
-  - `pheromones` (PheromoneMatrix): Master pheromone database.
-  - `random_state` (Optional[tuple]): Captured state tuple for deterministic auditing.
-
----
-
-### optimizer_adaptive.py
-
-#### AdaptiveController
-A controller dynamically scaling mutation probability using stagnation metrics to assist search loops in escaping local optima and decaying local search parameters.
-
-- **Attributes**
-  - `base_mutation` (float): Base mutation rate.
-  - `stagnation_limit` (int): Stagnation threshold.
-  - `max_mutation` (float): Maximum mutation cap limit.
-  - `current_mutation` (float): Active scaling mutation rate.
-
-- **Methods**
-  - `__init__(self, base_mutation: float, stagnation_limit: int, max_mutation: float = 0.8) -> None`
-    - Parameters:
-      - `base_mutation` (float): Minimum mutation rate.
-      - `stagnation_limit` (int): Maximum stagnation generation length.
-      - `max_mutation` (float): Maximum cap, defaults to 0.8.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the controller, verifying bounds are correct.
-  - `update(self, stagnation_counter: int) -> float`
-    - Parameters:
-      - `stagnation_counter` (int): Live stagnation counter.
-    - Outputs: float (scaled mutation rate).
-    - Primary Purpose: Scales mutation intensity quadratically as stagnation persists, and resets instantly to baseline once improvements occur.
-  - `get_local_search_prob(self, generation: int, g_max: int, p_min: float = 0.05, p_max: float = 0.8) -> float`
-    - Primary Purpose: Computes the linearly decaying local search mutation probability: $P_{local}(g) = P_{min} + (P_{max} - P_{min}) * (1 - g / G_{max})$.
-  - `get_local_search_intensity(self, generation: int, g_max: int, i_min: float = 0.1, i_max: float = 1.0) -> float`
-    - Primary Purpose: Computes the dynamically tightening local search intensity/radius: $I_{local}(g) = I_{min} + (I_{max} - I_{min}) * (1 - g / G_{max})$.
-
----
-
-### optimizer_telemetry.py
-
-#### TelemetryEngine
-The engine responsible for metric logging, lineage tracking, and continuous JSON state exports.
-
-- **Attributes**
-  - `run_dir` (Path): Path to output workspace.
-  - `bounds` (tuple): Geographical bounding box boundary.
-  - `history_file` (Path): Path to history.csv log.
-  - `lineage_file` (Path): Path to lineage.csv log.
-  - `snapshots_dir` (Path): Subdirectory for JSON snapshots.
-
-- **Methods**
-  - `__init__(self, run_dir: Path, bounds: tuple[float, float, float, float]) -> None`
-    - Parameters:
-      - `run_dir` (Path): Target outputs directory.
-      - `bounds` (tuple): Bounding box bounds.
-    - Outputs: None.
-    - Primary Purpose: Prepares directory paths, creates snapshots folder, and initializes tracking files.
-  - `_init_csvs(self) -> None`
-    - Parameters: None.
-    - Outputs: None.
-    - Primary Purpose: Initializes csv logs with headers only if they do not exist, protecting data on resumes.
-  - `log_generation(self, gen: int, best_cost: float, mean_cost: float, mut_rate: float, stag: int) -> None`
-    - Parameters: Generation, best fitness, mean cost, active mutation rate, stagnation.
-    - Outputs: None.
-    - Primary Purpose: Appends overall generational fitness telemetry to history.csv.
-  - `log_lineage(self, population: list[Chromosome]) -> None`
-    - Parameters: Active population list.
-    - Outputs: None.
-    - Primary Purpose: Appends genealogical parent-child relationships and chromosome costs to lineage.csv.
-  - `export_json_snapshot(self, generation: int, best_cost: float, mean_cost: float, population: list[Chromosome]) -> None`
-    - Parameters: Generation, best cost, mean cost, active population.
-    - Outputs: None.
-    - Primary Purpose: Exports high-fidelity, client-compatible JSON files containing routes geometry, high-intensity pheromone coordinates, and demand chokepoints.
-
----
-
-### consistency_engine.py
-
-#### ConsistencyEngine
-Automated post-optimization comparison class responsible for proving solution consistency across distinct configuration profiles through topological and degree distribution comparisons.
-
-- **Methods**
-  - `extract_active_elements(chromosome: Any) -> tuple[set[str], dict[str, int]]`
-    - Parameters: Candidate Chromosome object.
-    - Outputs: Tuple of set of active edge IDs, and a dict of active node degree counts.
-    - Primary Purpose: Isolates active spatial edge structures and node degrees for topological analysis.
-  - `calculate_jaccard_similarity(cls, edges_a: set[str], edges_b: set[str]) -> float`
-    - Parameters: Active edge set from profile A, active edge set from profile B.
-    - Outputs: float (Topological edge Jaccard similarity score).
-    - Primary Purpose: Computes edge set overlap similarity: $J(G_A, G_B) = |E_A \cap E_B| / |E_A \cup E_B|$.
-  - `calculate_degree_cosine_similarity(cls, degrees_a: dict[str, int], degrees_b: dict[str, int]) -> float`
-    - Parameters: Node degree map from profile A, node degree map from profile B.
-    - Outputs: float (Degree distribution Cosine similarity score).
-    - Primary Purpose: Projects identical node spaces across different configuration results into vector space and computes cosine alignment.
-  - `analyze_consistency(cls, chromosomes: list[Any]) -> dict`
-    - Parameters: List of optimized Chromosome instances representing varying parameter runs.
-    - Outputs: Dictionary containing the edge Jaccard similarity matrix, degree distribution Cosine similarity matrix, average similarity values, and a success boolean.
-    - Primary Purpose: Evaluates cross-profile consistency, enforcing a success threshold of $\bar{J}_{topological} \ge 0.80$ to establish structural stability.
-
----
-
-### sensitivity_testing.py
-
-#### SensitivitySuite
-Post-optimization sensitivity testing and validation suite responsible for evaluating final optimized paratransit solutions under demand disruptions, speed variations, and behavioral sweeps.
-
-- **Methods**
-  - `calculate_operator_fleet_variance(chromosome: Any) -> float`
-    - Parameters: Candidate Chromosome object.
-    - Outputs: float (Variance of the route path lengths).
-    - Primary Purpose: Computes operator fleet/length variance of the active paratransit system.
-  - `run_demand_perturbation(cls, evaluator: Any, chromosome: Any, sigma2: float) -> dict`
-    - Parameters: Surrogate evaluator, Chromosome under test, noise variance $\sigma^2$.
-    - Outputs: Dict of commute cost, operator variance, and unserved demand under Gaussian demand perturbations.
-    - Primary Purpose: Evaluates spatial network robustness under stochastic demand shifts.
-  - `run_congestion_scaling(cls, evaluator: Any, chromosome: Any, gamma: float) -> dict`
-    - Parameters: Surrogate evaluator, Chromosome, congestion scaling factor $\gamma$.
-    - Outputs: Dict of metrics under scaled jeepney speeds ($v_{jeep} \times \gamma$).
-    - Primary Purpose: Simulates systemic commute impact of uniform traffic congestion shifts.
-  - `run_behavioral_sweep(cls, evaluator: Any, chromosome: Any, epsilon: float, transfer_wt: float) -> dict`
-    - Parameters: Evaluator, Chromosome, boarding tolerance ($\epsilon$), transfer penalty ($w_{transfer\_wt}$).
-    - Outputs: Dict of sweep outcomes.
-    - Primary Purpose: Analyzes passenger modal sensitivity to transfer frictions and boarding decision margins.
-  - `execute_sensitivity_suite(cls, evaluator: Any, chromosome: Any, output_plot_path: str) -> dict`
-    - Parameters: Surrogate evaluator, Chromosome, target 3D scatter plot output file path.
-    - Outputs: Dictionary summarizing all run metrics and output plot path.
-    - Primary Purpose: Runs the complete multi-scenario sensitivity suite and exports the 3D Pareto frontier plot.
-
----
-
-### optimizer_orchestrator_io.py
-
-#### StatePreservationEngine
-The engine handling binary pickling and serialization of evolutionary state checkpoints.
-
-- **Attributes**
-  - `run_dir` (Path): Workspace root path.
-  - `checkpoints_dir` (Path): Checkpoint file storage directory.
-
-- **Methods**
-  - `__init__(self, run_dir: Path) -> None`
-    - Parameters: Workspace root.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the engine and creates checkpoints folder.
-  - `save_state(self, state: OptimizationState) -> None`
-    - Parameters: Active state object.
-    - Outputs: None.
-    - Primary Purpose: Serializes optimization state using an atomic write pattern (writing to `.tmp` first, then replacing), preventing corruptions from sudden interrupts.
-  - `load_state(self, filepath: Path) -> OptimizationState`
-    - Parameters: Pickled file path.
-    - Outputs: OptimizationState.
-    - Primary Purpose: Deserializes the pickling stream to restore optimization execution.
-
-#### OptimizerBuilder
-A static builder factory to construct new runs or resume existing ones.
-
-- **Methods**
-  - `build_new_run(config_path: str | Path) -> tuple[ExperimentConfig, Path]`
-    - Parameters:
-      - `config_path` (str | Path): Config file path.
-    - Outputs: tuple[ExperimentConfig, Path] (parsed config and run workspace path).
-    - Primary Purpose: Creates a new timestamped output directory and copies the configuration YAML for absolute reproducibility.
-  - `resume_run(run_dir: str | Path) -> tuple[ExperimentConfig, OptimizationState, Path]`
-    - Parameters:
-      - `run_dir` (str | Path): Path to a past run workspace.
-    - Outputs: tuple[ExperimentConfig, OptimizationState, Path] (loaded config, deserialized state, workspace path).
-    - Primary Purpose: Reconstructs runtime state, locating the most recent valid pickle checkpoint.
-
----
-
-### optimizer_engine.py
-
-#### MemeticEngine
-The core engine coordinating Phases A through D of the memetic optimization algorithm.
-
-- **Attributes**
-  - `config` (ExperimentConfig): Immutable experiment configurations.
-  - `cg` (CityGraph): Drivable city network.
-  - `sampler` (Optional[Any]): Passenger demand sampler.
-  - `current_generation` (int): Generation counter index.
-  - `local_search` (ACOLocalSearch): Heuristic local search operator database.
-  - `algo` (MemeticAlgorithm): High-level genetic operator suite.
-
-- **Methods**
-  - `__init__(self, config: ExperimentConfig, cg: CityGraph, sampler: Optional[Any] = None) -> None`
-    - Parameters: Immutable configurations, city graph, optional demand sampler.
-    - Outputs: None.
-    - Primary Purpose: Instantiates engines and configures the local search and genetic classes.
-  - `initialize_state(self) -> OptimizationState`
-    - Parameters: None.
-    - Outputs: OptimizationState.
-    - Primary Purpose: Generates the initial population of chromosomes, instantiating fresh, decoupled PheromoneMatrix objects for each, evaluating initial costs, and loading the fittest.
-  - `step_generation(self, state: OptimizationState, current_mutation_rate: float) -> OptimizationState`
-    - Parameters:
-      - `state` (OptimizationState): Active optimization state.
-      - `current_mutation_rate` (float): Scaled mutation rate.
-    - Outputs: OptimizationState (the next generational state).
-    - Primary Purpose: Implements elitism (directly retaining the fittest), executes tournament selection, triggers crossover and epigenetic inheritance, performs Lamarckian local search mutations, and increments generation counters.
-
----
-
-### optimizer.py
-
-#### Optimizer
-The master user-facing orchestrator class coordinating the entire memetic search process, handling keyboard interrupts, and managing telemetry systems.
-
-- **Attributes**
-  - `config` (ExperimentConfig): System configuration settings.
-  - `state` (OptimizationState): Evolutionary search state.
-  - `run_dir` (Path): Output run folder.
-  - `cg` (CityGraph): Underlying drivable street network.
-  - `sampler` (DirectDemandSampler): Demand distribution model.
-  - `raw_config` (dict): raw YAML parsed dictionary.
-  - `engine` (MemeticEngine): Main algorithm engine.
-  - `surrogate` (StaticSurrogateEvaluator): Fast surrogate evaluator used only for local-search mutation checks.
-  - `preservation` (StatePreservationEngine): State checkpointing engine.
-  - `telemetry` (TelemetryEngine): Telemetry logger engine.
-  - `adaptive` (AdaptiveController): Stagnation mutation scaler.
-
-- **Methods**
-  - `__init__(self, run_dir: Path) -> None`
-    - Parameters: Past run folder to resume.
-    - Outputs: None.
-    - Primary Purpose: Instantiates the optimizer by loading the configuration and deserializing checkpoint data.
-  - `create(cls, config_path: str | Path) -> Optimizer`
-    - Parameters: YAML config path.
-    - Outputs: Optimizer instance.
-    - Primary Purpose: Instantiates a fresh optimizer run, creating standard workspace outputs.
-  - `_init_engines(self) -> None`
-    - Parameters: None.
-    - Outputs: None.
-    - Primary Purpose: Initializes components, maps synthetic and real city geometries, configures both evaluators, and wires GA scoring to the microscopic fitness score while reserving the surrogate for local-search mutation checks.
-  - `start(self) -> None`
-    - Parameters: None.
-    - Outputs: None.
-    - Primary Purpose: Executes the main generational search loop. Tracks stagnation, evaluates multi-dimensional Jaccard phenotypic convergence and fitness variance, logs lineage history and JSON snapshot telemetry, saves periodic checkpoints, and guarantees atomic state serialization upon manual keyboard interrupts.
-  - `calculate_elite_jaccard(self, population: list) -> float`
-    - Parameters: Active population list.
-    - Outputs: float.
-    - Primary Purpose: Computes the average Jaccard similarity of route edge sets among the top 10% elite chromosomes (Goldberg, 1989).
-  - `calculate_fitness_variance(self, population: list) -> float`
-    - Parameters: Active population list.
-    - Outputs: float.
-    - Primary Purpose: Computes the variance of chromosome costs to detect genetic convergence.
 
 ---
 
@@ -1894,7 +1618,7 @@ Load your project configuration (YAML) and initialize the base spatial graph.
 ```python
 import yaml
 from utils.city_graph import CityGraph
-from utils.direct_demand_sampler import DirectDemandSampler
+from utils.direct_demand_sampler import DirectDemandSampler, DDMConfig
 
 # Load config
 with open('configs/iligan_configs.yaml', 'r') as f:
@@ -1904,7 +1628,8 @@ with open('configs/iligan_configs.yaml', 'r') as f:
 city = CityGraph(bbox=tuple(cfg["city_graph"]["bbox"]))
 
 # Initialize Sampler (Demand Surface)
-sampler = DirectDemandSampler(city=city, config=cfg.get("ddm"))
+ddm_cfg = DDMConfig(**cfg.get("ddm", {}))
+sampler = DirectDemandSampler(city=city, config=ddm_cfg)
 ```
 
 ### Step 2: Transit Infrastructure
@@ -1973,3 +1698,94 @@ from utils.visualization import compile_to_gif
 
 gif_bytes = compile_to_gif(sim.frames, fps=10, export_to="utils/.cache/latest_sim.gif")
 ```
+
+---
+
+## 10. Simplified Utility Facade (`utils_simplified.py`)
+
+For rapid prototyping, batch processing, and running evaluations without writing extensive boilerplate setup code, `utils_simplified.py` exposes a high-level, procedural facade over all core components.
+
+### 10.1 Key API Reference
+
+#### Environment & Graph Instantiation
+- `build_citygraph(yaml_file: str, pkl_path: Optional[str] = None) -> CityGraph`
+  - Loads a configuration file, creates a `CityGraph` instance, and optionally pickles it.
+- `reuse_citygraph(pkl_file: str) -> CityGraph`
+  - Loads a serialized `CityGraph` from a pickle file.
+- `build_ddm(yaml_file: str, cg: CityGraph, target_time: Optional[datetime], pkl_path: Optional[str] = None) -> DirectDemandSampler`
+  - Configures and initializes a `DirectDemandSampler`, bypassing cache constraints to force fresh updates.
+- `reuse_ddm(pkl_file: str) -> DirectDemandSampler`
+  - Loads a serialized `DirectDemandSampler` from a pickle file.
+- `build_travelgraph(cg: CityGraph, yaml_file: str, routes: list[Route], pkl_path: Optional[str] = None) -> TravelGraph`
+  - Builds and stitches the multimodal `TravelGraph`.
+- `reuse_travelgraph(pkl_file: str) -> TravelGraph`
+  - Loads a serialized `TravelGraph` from a pickle file.
+
+#### Transit & Fleet Setup
+- `generate_route_system(num_routes: int, cg: CityGraph, sampler: DirectDemandSampler) -> list[Route]`
+  - Standardized generator to obtain a set of demand-weighted routes.
+- `generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDemandSampler, tg: TravelGraph, mohring_sample_size=200) -> JeepSystem`
+  - Balances the vehicles using the Mohring effect and creates a spacing-headway-aligned `JeepSystem`.
+
+#### Simulation Execution
+- `run_simulation(tg: TravelGraph, yaml_file: str, jeep_system: JeepSystem, sampler: DirectDemandSampler, delete_yaml_when_done=False) -> Simulation`
+  - Configures passenger generation parameters, updates seconds-per-tick settings on the fleet, and runs a simulation run.
+- `run_simulation_env(env: SimEnvironment) -> Simulation`
+  - Executes a simulation using a unified `SimEnvironment` container.
+- `run_simulations_parallel(envs: list[SimEnvironment], max_workers: Optional[int] = None) -> list[SimulationResult]`
+  - Spawns multiple parallel workers to evaluate distinct simulations concurrently using multiprocess workers.
+- `collect_metrics(sim: Simulation, export_loc: str) -> SimulationResult`
+  - Evaluates system fitness and exports a structured JSON report.
+
+#### Pheromones & Mutation
+- `build_pheromone_matrix(cg: CityGraph, sim_result: SimulationResult) -> PheromoneMatrix`
+  - Creates a `PheromoneMatrix` pre-loaded with simulated passenger flows and calculated demand-service gaps.
+- `blend_pheromone_matrix(parentA, parentB, cg: CityGraph) -> PheromoneMatrix`
+  - Executes fitness-weighted pheromone inheritance between parent structures.
+- `mutate_attraction(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]`
+  - Mutates the routes using the spatial attraction operator.
+- `mutate_repulsion(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]`
+  - Mutates the routes using the redundancy repulsion operator.
+- `mutate_pruning(matrix: PheromoneMatrix, route_system: list[Route], cg: CityGraph, intensity: float = 1.0) -> list[Route]`
+  - Mutates the routes using the tortuosity pruning operator.
+- `crossover_routes(routesA: list[Route], matrixA: PheromoneMatrix, routesB: list[Route], cg: CityGraph, target_route_count: int = 4) -> list[Route]`
+  - Swaps and recomposes routes between two parents using the topological hub crossover algorithm.
+
+#### Optimization Telemetry
+- `build_optimizer(yaml_file: str, resume_dir: Optional[str] = None) -> Optimizer`
+  - Instantiates or resumes a generational optimization engine run.
+- `process_telemetry(run_dir: str) -> dict`
+  - Loads and parses `history.csv` and `lineage.csv` from an optimizer run into pandas DataFrames.
+- `load_generation_snapshot(run_dir: str, generation: int) -> dict`
+  - Loads a JSON network state snapshot of a specific optimization generation.
+
+### 10.2 Getting Started Example using the Facade
+```python
+from datetime import datetime
+from utils_simplified import (
+    build_citygraph,
+    build_ddm,
+    generate_route_system,
+    build_travelgraph,
+    generate_jeep_system,
+    run_simulation,
+    collect_metrics
+)
+
+# 1. Setup base layers
+cg = build_citygraph("configs/iligan_configs.yaml")
+ddm = build_ddm("configs/iligan_configs.yaml", cg, target_time=datetime(2026, 6, 4, 8, 30))
+
+# 2. Build transit networks
+routes = generate_route_system(num_routes=3, cg=cg, sampler=ddm)
+tg = build_travelgraph(cg, "configs/iligan_configs.yaml", routes)
+
+# 3. Provision fleet & run simulation
+jeep_sys = generate_jeep_system(routes, num_jeeps=15, sampler=ddm, tg=tg)
+sim = run_simulation(tg, "configs/iligan_configs.yaml", jeep_sys, ddm)
+
+# 4. Evaluate metrics
+result = collect_metrics(sim, "utils/.cache/report.json")
+print(f"Simulation Cost: {result.metrics['fitness_score']}")
+```
+
