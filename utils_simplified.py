@@ -302,15 +302,34 @@ def run_simulations_with_runner(runner: ParallelSimulationRunner, envs: list[Sim
     
     routes_list = [env.jeep_system.routes for env in envs]
     results = runner.run_parallel(routes_list)
-    
+
     for env in envs:
         if env.delete_yaml_when_done:
             try:
                 os.remove(env.yaml_file)
             except OSError:
                 pass
-    
+
     return results
+
+def run_reps_overrides(runner: ParallelSimulationRunner, routes: list[Route], n_reps: int, overrides: dict) -> list[SimulationResult]:
+    """
+    Runs `n_reps` stochastic replications of the SAME route system through a
+    (persistent) ParallelSimulationRunner, applying `overrides` to every replication.
+
+    Because num_ticks / spawn_rate_per_hour / seconds_per_tick / total_allocatable_jeeps
+    are passed as per-call overrides, a persistent pool reuses its workers and cached
+    TravelGraph across the entire sweep — no ~90s worker reload, no TravelGraph rebuild.
+
+    Example:
+        results = run_reps_overrides(runner, routes, 7,
+                                     {"num_ticks": 540, "spawn_rate_per_hour": 900,
+                                      "seconds_per_tick": 10, "total_allocatable_jeeps": 50})
+        scores = [r.score for r in results if r is not None]
+    """
+    routes_list = [routes for _ in range(n_reps)]
+    overrides_list = [overrides for _ in range(n_reps)]
+    return runner.run_parallel_overrides(routes_list, overrides_list)
 
 
 # =========================================================
