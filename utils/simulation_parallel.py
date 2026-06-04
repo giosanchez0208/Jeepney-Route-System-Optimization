@@ -189,16 +189,13 @@ def _worker_run(routes: List[Route]) -> SimulationResult:
     # to prevent ProcessPoolExecutor from pickling it.
     result.jeep_system = None
     
-    # Force delete heavy objects
-    del tg
+    # Delete only the local simulation objects.
+    # Do NOT delete tg / restored_routes — they are aliased to the global
+    # _WORKER_TG_CACHE / _WORKER_ROUTES_CACHE and must survive for reuse.
     del passenger_generator
     del jeep_system
     del sim
     del jeeps
-    del restored_routes
-    
-    # Trigger garbage collection to reclaim memory instantly
-    gc.collect()
     
     # Return the lightweight object
     return result
@@ -207,10 +204,42 @@ def _worker_run(routes: List[Route]) -> SimulationResult:
 class ParallelSimulationRunner:
     """
     Manages a pool of worker processes to execute multiple simulations concurrently.
+    
+    Supports two modes:
+    1. One-shot (original): Each run_parallel() call creates and destroys a pool.
+    2. Persistent pool: Call open_pool() / close_pool() or use as a context manager
+       to keep workers alive across multiple run_parallel() calls. This avoids
+       the ~90s-per-call worker initialization overhead in sweep loops.
     """
     def __init__(self, config: dict, max_workers: int = None):
         self.config = config
         self.max_workers = max_workers or max(1, os.cpu_count() - 1)
+        self._executor = None
+        
+    def open_pool(self):
+        """Starts a persistent worker pool. Workers survive across run_parallel() calls."""
+        if self._executor is not None:
+            return  # Already open
+        self._executor = concurrent.futures.ProcessPoolExecutor(
+            max_workers=self.max_workers,
+            initializer=_worker_init,
+            initargs=(self.config,)
+        )
+        print(f"[ParallelRunner] Opened persistent pool with {self.max_workers} workers.")
+        
+    def close_pool(self):
+        """Shuts down the persistent worker pool."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            print("[ParallelRunner] Persistent pool closed.")
+            
+    def __enter__(self):
+        self.open_pool()
+        return self
+        
+    def __exit__(self, *args):
+        self.close_pool()
         
     def run_parallel(self, routes_list: List[List[Route]]) -> List[SimulationResult]:
         """
@@ -226,16 +255,19 @@ class ParallelSimulationRunner:
         print(f"[ParallelRunner] Starting parallel execution across {self.max_workers} CPU cores for {len(routes_list)} setups...")
         results = []
         
-        # We pass the config to the worker initializer
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=self.max_workers,
-            initializer=_worker_init,
-            initargs=(self.config,)
-        ) as executor:
-            # Map the _worker_run function over the array of setups
-            # As completed, results will be yielded in the same order
-            for result in executor.map(_worker_run, routes_list):
+        if self._executor is not None:
+            # Persistent pool mode — reuse existing workers
+            for result in self._executor.map(_worker_run, routes_list):
                 results.append(result)
+        else:
+            # One-shot mode (backward compatible) — create and destroy pool
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.max_workers,
+                initializer=_worker_init,
+                initargs=(self.config,)
+            ) as executor:
+                for result in executor.map(_worker_run, routes_list):
+                    results.append(result)
                 
         print(f"[ParallelRunner] Successfully completed {len(results)} parallel simulations.")
         return results

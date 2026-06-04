@@ -266,6 +266,53 @@ def run_simulations_parallel(envs: list[SimEnvironment], max_workers: Optional[i
                 
     return results
 
+def create_persistent_runner(yaml_file: str, max_workers: Optional[int] = None) -> ParallelSimulationRunner:
+    """
+    Creates a ParallelSimulationRunner with a persistent worker pool.
+    
+    Workers are initialized ONCE and survive across multiple run_parallel() calls.
+    This eliminates the ~90s per-call overhead of loading CityGraph + DDM pickles
+    in each worker process — critical for sweep notebooks that call evaluate dozens
+    of times.
+    
+    Usage:
+        runner = create_persistent_runner("configs/profile_p1.yaml")
+        runner.open_pool()      # workers start and load heavy objects once
+        ...
+        results = run_simulations_with_runner(runner, envs)
+        results = run_simulations_with_runner(runner, envs2)  # reuses same workers
+        ...
+        runner.close_pool()     # cleanup when done
+        
+    Or as a context manager:
+        with create_persistent_runner("configs/profile_p1.yaml") as runner:
+            results = run_simulations_with_runner(runner, envs)
+    """
+    with open(yaml_file, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    return ParallelSimulationRunner(config=config, max_workers=max_workers)
+
+def run_simulations_with_runner(runner: ParallelSimulationRunner, envs: list[SimEnvironment]) -> list[SimulationResult]:
+    """
+    Runs simulations using an existing (potentially persistent) ParallelSimulationRunner.
+    Unlike run_simulations_parallel(), this does NOT create a new runner per call.
+    """
+    if not envs:
+        return []
+    
+    routes_list = [env.jeep_system.routes for env in envs]
+    results = runner.run_parallel(routes_list)
+    
+    for env in envs:
+        if env.delete_yaml_when_done:
+            try:
+                os.remove(env.yaml_file)
+            except OSError:
+                pass
+    
+    return results
+
+
 # =========================================================
 # Pheromones and Mutators
 # =========================================================
