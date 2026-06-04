@@ -15,7 +15,7 @@ ddm:
   beta: 0.4
 
 travel_graph:
-  walk_wt: 0.5630
+  walk_wt: 0.0563
   ride_wt: 0.00632
   wait_wt: 14.44
   transfer_wt: 15.78
