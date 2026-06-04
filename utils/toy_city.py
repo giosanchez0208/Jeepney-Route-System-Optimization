@@ -65,6 +65,7 @@ class ToyCityConfig:
 @dataclass
 class ToyDDMConfig:
     """Demand surface config: IDW power and hotspot list."""
+    idw_power: float = 2.0
     hotspots: list[ToyHotspot] = field(default_factory=lambda: [
         ToyHotspot("Market District",   124.202, 8.207, 12.0),
         ToyHotspot("Jeepney Terminal",  124.208, 8.201,  9.0),
@@ -394,6 +395,7 @@ def toy_setup_from_yaml(
         hotspots = ToyDDMConfig().hotspots  # fall back to defaults
 
     ddm_config = ToyDDMConfig(
+        idw_power=float(td_raw.get("idw_power", 2.0)),
         hotspots=hotspots,
     )
 

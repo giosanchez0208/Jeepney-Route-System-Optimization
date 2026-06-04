@@ -413,7 +413,8 @@ class TravelGraph:
     ) -> 'Image.Image':
         from .travel_graph_3d_vis import TravelGraph3DVisualizer
 
-        visualizer = TravelGraph3DVisualizer(self, journey=journey)
+        visualizer = TravelGraph3DVisualizer(self.travel_graph, highlight_edges=journey)
+        
         return visualizer.draw(
             display_walk=display_walk,
             display_wait=display_wait,
