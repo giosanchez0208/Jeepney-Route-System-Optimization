@@ -1,0 +1,81 @@
+toy_city:
+  grid_size: 50
+  origin_lon: 124.200
+  origin_lat: 8.200
+  step_deg: 0.001
+
+toy_ddm:
+  idw_power: 2.0
+  hotspots:
+    - name: Tambo Market
+      lon: 124.259580
+      lat: 8.243070
+      weight: 12.0
+    - name: Tambo Terminal
+      lon: 124.260997
+      lat: 8.241541
+      weight: 9.0
+    - name: MSUIIT
+      lon: 124.245897
+      lat: 8.240974
+      weight: 6.0
+    - name: Iligan City Public Market
+      lon: 124.233369
+      lat: 8.228675
+      weight: 6.0
+    - name: Residential North
+      lon: 124.208
+      lat: 8.208
+      weight: 2.0
+    - name: Industrial South
+      lon: 124.201
+      lat: 8.201
+      weight: 4.0
+
+travel_graph:
+  walk_wt: 0.5630
+  ride_wt: 0.00632
+  wait_wt: 14.44
+  transfer_wt: 15.78
+  direct_wt: 0.0
+  alight_wt: 0.0
+
+simulation:
+  num_routes: 5
+  total_allocatable_jeeps: 25
+  jeep_speed_kmh: 40.0
+  jeep_capacity: 16
+  passenger_speed_kmh: 5.0
+  spawn_rate_per_hour: 40.0
+  spawn_stdev: 5.0
+  seconds_per_tick: 1
+  num_ticks: 300
+  weight_tolerance: 50.0
+  equidistant_spawn: true
+
+optimization:
+  output_root: outputs/
+  telemetry_interval: 5
+  checkpoint_interval: 10
+  n_population: 20
+  g_max: 50
+  n_stagnation: 10
+  n_elite: 2
+  k_tournament: 3
+  p_mutation: 0.2
+  gamma_crossover: 0.5
+  jaccard_patience: 30
+  initial_tau: 1.0
+  rho: 0.1
+  q: 1000.0
+  p_ls_attraction: 0.4
+  p_ls_repulsion: 0.4
+  p_ls_pruning: 0.6
+  default_jeep_weight: 1.0
+  alpha_std_penalty: 0.5
+  beta_penalty: 2.0
+
+BETA_PENALTY: 2.0
+ALPHA_STD_PENALTY: 0.5
+ETA_PENALTY: 2.5
+disable_tqdm: false
