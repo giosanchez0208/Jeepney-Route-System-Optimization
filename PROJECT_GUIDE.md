@@ -37,6 +37,9 @@
 - [EvaluationMetrics](#EvaluationMetrics)
 - [PostEvaluation](#PostEvaluation)
 
+**Simplified Facade**
+- [SimplifiedFacade](#SimplifiedFacade)
+
 ___
 # Core Modules
 ___
@@ -647,11 +650,17 @@ To prevent this, the pheromone values are used as weighted probabilities during 
     - **Deposition:** The algorithm iterates through the recorded passenger journeys. It deposits new pheromones inversely proportional to the path cost $C$, utilizing the deposition constant $Q$:$$\Delta\tau_{ij} = \frac{Q}{C}$$        
 3. **Demand-Service Gap Computation**
     
-    The module actively computes the Demand-Service Gap for every edge to evaluate spatial transit coverage. It calculates the total pheromone demand ($\tau$) on a specific corridor and subtracts the current service supply (the number of jeeps currently assigned to traverse that edge multiplied by a `default_jeep_weight`).
+    The module actively computes the Demand-Service Gap for every edge to evaluate spatial transit coverage. Instead of raw differences, it calculates the normalized proportional disparity gap:
+    $$\text{gap}_e = \frac{\tau_e}{\sum \tau} - \frac{\text{supply}_e}{\sum \text{supply}}$$
+    where:
+    - $\tau_e$ is the pheromone density on edge $e$.
+    - $\sum \tau$ is the sum of all pheromone densities across all edges.
+    - $\text{supply}_e$ is the service supply on edge $e$, computed as the sum of fleet sizes of all routes traversing edge $e$ multiplied by `default_jeep_weight`.
+    - $\sum \text{supply}$ is the sum of service supplies across all edges.
 	
-	- A **positive gap** indicates an underserved corridor (demand exceeds supply).
+	- A **positive gap** indicates an underserved corridor (the edge's share of network demand exceeds its share of fleet supply).
 	    
-	- A **negative gap** indicates an over-served corridor.
+	- A **negative gap** indicates an over-served corridor (the edge receives a larger share of the fleet than its demand warrants).
 	    
     This metric is cached and directly utilized by the GA operators to intelligently guide spatial mutation. By tracking both positive and negative values, the framework generates a comprehensive topological map of service disparities across the city. The GA uses this full spectrum to dynamically adjust mutation parameters (Eiben et al., 1999). It mathematically biases the algorithm to pull route topologies away from heavily negative, over-served regions and push them toward highly positive, underserved corridors. Once the physical routes are spatially balanced by this push and pull dynamic, the framework defers the actual vehicle volume distribution to the `FleetAllocator` utilizing the Mohring allocation.
 
@@ -1216,7 +1225,63 @@ It is the post-run analysis layer for answering questions about the final score 
 
 **TODO:** Integrate `track_topological_drift` into the `TelemetryEngine` to automatically log structural evolution alongside fitness convergence.
 
+
 **TODO:** Establish baseline path diversity (Shannon entropy) thresholds for the Iligan City network using historical jeepney route data.
+
+___
+## SimplifiedFacade
+
+### Logic
+
+The `utils_simplified.py` file implements a unified Facade Pattern to simplify interactions with the complex paratransit optimization system. The backend consists of multi-layered road networks, agent-based simulations, TomTom traffic clients, genetic algorithms, and local search operators. Managing their interdependencies requires extensive boilerplate. The facade hides these complex details behind high-level, procedural functions, making the optimization framework more accessible for research, testing, and pipeline orchestration.
+
+### Key API Functions
+
+#### 1. City Graph
+- `build_citygraph(yaml_file: str, pkl_path: Optional[str] = None) -> CityGraph`
+  - Loads a YAML configuration file, extracts the bounding box and parameters, instantiates a `CityGraph` representing the street layer (Layer 0), and optionally serializes it to a pickle file for high-performance reuse.
+- `reuse_citygraph(pkl_file: str) -> CityGraph`
+  - Deserializes a cached `CityGraph` from a pickle file to bypass expensive road network parsing.
+
+#### 2. Direct Demand Model
+- `build_ddm(yaml_file: str, cg: CityGraph, target_time: Optional[datetime], pkl_path: Optional[str] = None) -> DirectDemandSampler`
+  - Instantiates `DDMConfig` and `DirectDemandSampler`, queries the TomTom API for traffic data matching the target time, and optionally caches the sampler.
+- `reuse_ddm(pkl_file: str) -> DirectDemandSampler`
+  - Deserializes a cached `DirectDemandSampler` from a pickle file.
+
+#### 3. Travel Graph and Transit Infrastructure
+- `generate_route_system(num_routes: int, cg: CityGraph, sampler: DirectDemandSampler) -> list[Route]`
+  - Generates a set of transit routes using a `RouteGenerator` weighted by spatial passenger demand.
+- `build_travelgraph(cg: CityGraph, yaml_file: str, routes: list[Route], pkl_path: Optional[str] = None) -> TravelGraph`
+  - Compiles the multi-layer topological graph (`TravelGraph`) by stitching together the street layer and the transit routes.
+- `reuse_travelgraph(pkl_file: str) -> TravelGraph`
+  - Deserializes a cached `TravelGraph` from a pickle file.
+
+#### 4. Simulation Execution
+- `generate_jeep_system(routes: list[Route], num_jeeps: int, sampler: DirectDemandSampler, tg: TravelGraph, mohring_sample_size=200) -> JeepSystem`
+  - Allocates fleet vehicles across the routes using Mohring square-root demand balancing and instantiates a `JeepSystem` with equidistant vehicle spacing.
+- `run_simulation(tg: TravelGraph, yaml_file: str, jeep_system: JeepSystem, sampler: DirectDemandSampler, delete_yaml_when_done=False) -> Simulation`
+  - Initializes and runs a microscopic agent-based simulation for the configured number of ticks.
+- `run_simulation_env(env: SimEnvironment) -> Simulation`
+  - A helper function that executes a simulation using a lightweight `SimEnvironment` container object.
+- `run_simulations_parallel(envs: list[SimEnvironment], max_workers: Optional[int] = None) -> list[SimulationResult]`
+  - Runs multiple simulation setups in parallel using the `ParallelSimulationRunner` to leverage multi-core processors.
+
+#### 5. Pheromones and Local Search Mutators
+- `build_pheromone_matrix(cg: CityGraph, sim_result: SimulationResult) -> PheromoneMatrix`
+  - Initializes a `PheromoneMatrix` and registers passenger travel paths and demand-service gaps.
+- `blend_pheromone_matrix(parentA, parentB, cg: CityGraph) -> PheromoneMatrix`
+  - Blends two parent pheromone distributions using a fitness-weighted arithmetic crossover.
+- `mutate_attraction`, `mutate_repulsion`, and `mutate_pruning`
+  - High-level wrappers for applying individual local search operations (`strategy_spatial_attraction`, `strategy_redundancy_repulsion`, and `strategy_tortuosity_pruning`) to a route system.
+
+#### 6. Optimizer and Telemetry
+- `build_optimizer(yaml_file: str, resume_dir: Optional[str] = None) -> Optimizer`
+  - Constructs or resumes a multi-generational evolutionary search run.
+- `process_telemetry(run_dir: str) -> dict`
+  - Parses an optimizer run's `history.csv` and `lineage.csv` files into pandas DataFrames for downstream data analysis and plotting.
+- `load_generation_snapshot(run_dir: str, generation: int) -> dict`
+  - Loads a JSON snapshot representing the network state at a specific generation.
 
 # References
 

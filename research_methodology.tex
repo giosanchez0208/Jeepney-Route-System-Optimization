@@ -1,6 +1,5 @@
 \chapter{Research Methodology}
-\noindent{This study employed a multi-phase methodology to develop, calibrate, and validate a parallel hybrid agent-based metaheuristic optimization model for multi-route jeepney networks in Iligan City. The overall methodological framework integrates primary data collection through a structured behavioral survey, empirical derivation of travel cost parameters, construction of a multi-layered travel graph, simulation of passenger behavior through agent-based modeling, and optimization of route configurations using a metaheuristic algorithm. The present chapter describes each of these phases in detail, beginning with the design and execution of the commuter survey, which served as the principal source of behavioral data for the entire modeling pipeline.
-}
+\noindent{This study employed a multi-phase methodology to develop, calibrate, and validate a parallel hybrid agent-based metaheuristic optimization model for multi-route jeepney networks in Iligan City. The overall methodological framework integrates primary data collection through a structured behavioral survey, empirical derivation of travel cost parameters, construction of a multi-layered travel graph, simulation of passenger behavior through agent-based modeling, and optimization of route configurations using a metaheuristic algorithm. The present chapter describes each of these phases in detail, beginning with the design and execution of the commuter survey, which served as the principal source of behavioral data for the entire modeling pipeline.}
 
 % 3.1. Survey Design and Data Collection
 
@@ -27,19 +26,15 @@ The survey was accordingly designed to fulfill four specific objectives: (1) to 
 
 \indent\textbf{Usual Trip (Questions A1–A8)} collected information on the respondent's habitual jeepney travel behavior. A1 asked about riding frequency, providing options ranging from daily use to never. A2 captured the primary trip purpose using a multi-select format. A3 and A4 recorded the approximate origin and destination of the respondent's most common trip using open-ended free-text fields. A5 measured total door-to-door trip duration using a categorical scale. A6 and A7 measured usual walking time to and from the jeepney stop, respectively, using five-category ordinal scales. A8 measured usual waiting time at the stop. The variables A6, A7, and A8 were used in Section \ref{subsec:3.1.4 parameter extraction and derivation} to establish baseline walking and waiting behavior.
 
-\indent{\textbf{Walking Tolerance (Questions B1–B4)} measured the maximum walking distance a commuter will accept under different conditions. B1 and B2 presented respondents with a visual walking-time-ring map centered on Gaisano Main, Iligan City, and asked for maximum \ac{WTW} to a stop (access) and from a stop (egress), respectively. B3 posed a hypothetical scenario contrasting a nearer stop with a 15-minute headway against a more distant stop with a 5-minute headway, thereby eliciting a revealed-preference style walk-versus-wait trade-off. B4 was a conditional follow-up administered only to respondents who chose the farther stop in B3; it asked at what additional walking distance the respondent would switch back to the nearer stop. Together, B3 and B4 provided the empirical basis for deriving the walking cost multiplier.
-}
+\indent{\textbf{Walking Tolerance (Questions B1–B4)} measured the maximum walking distance a commuter will accept under different conditions. B1 and B2 presented respondents with a visual walking-time-ring map centered on Gaisano Main, Iligan City, and asked for maximum \ac{WTW} to a stop (access) and from a stop (egress), respectively. B3 posed a hypothetical scenario contrasting a nearer stop with a 15-minute headway against a more distant stop with a 5-minute headway, thereby eliciting a revealed-preference style walk-versus-wait trade-off. B4 was a conditional follow-up administered only to respondents who chose the farther stop in B3; it asked at what additional walking distance the respondent would switch back to the nearer stop. Together, B3 and B4 provided the empirical basis for deriving the walking cost multiplier.}
 
-\indent{\textbf{Waiting Tolerance (Questions C1–C3)} assessed commuter sensitivity to waiting time. C1 identified the threshold at which a respondent would abandon waiting for a jeepney and instead board a tricycle or habal-habal. C2 presented a stated-preference scenario contrasting a jeepney departing immediately with a 30-minute in-vehicle travel time against a faster jeepney requiring a short additional wait, reducing in-vehicle time to 20 minutes; this elicited the wait-versus-ride trade-off used to derive the waiting cost multiplier. C3 was an attitudinal item assessing the effect of ambient heat on boarding decisions.
-}
+\indent{\textbf{Waiting Tolerance (Questions C1–C3)} assessed commuter sensitivity to waiting time. C1 identified the threshold at which a respondent would abandon waiting for a jeepney and instead board a tricycle or habal-habal. C2 presented a stated-preference scenario contrasting a jeepney departing immediately with a 30-minute in-vehicle travel time against a faster jeepney requiring a short additional wait, reducing in-vehicle time to 20 minutes; this elicited the wait-versus-ride trade-off used to derive the waiting cost multiplier. C3 was an attitudinal item assessing the effect of ambient heat on boarding decisions.}
 
 \indent{\textbf{Transfer Behavior (Questions D1–D4)}  measured transfer frequency and transfer aversion. D1 established baseline transfer experience. D2 presented a stated-preference scenario comparing a direct 40-minute route against a transfer route with a 3-minute intermediate wait but only 30 minutes of total journey time, quantifying the choice between convenience and speed. D3 then asked, independently of the D2 scenario, how many minutes of time savings would be needed for the respondent to choose a transfer route over a direct alternative. The D3 response distribution, combined with a binary logistic regression model, provided the empirical basis for the transfer penalty derivation. D4 was a Likert-type matrix asking respondents to rate the effect of four contextual factors, namely covered waiting area, familiarity with the transfer location, rain, and being in a hurry, on their willingness to transfer.
 
-\indent{\textbf{Demographics (Questions E1–E6)} recorded age group, gender, current occupational status, personal vehicle ownership, average daily jeepney expenditure, and the presence of any physical condition limiting walking capacity. Demographic data were used to characterize the respondent sample and to assess the representativeness of responses.
-}
+\indent{\textbf{Demographics (Questions E1–E6)} recorded age group, gender, current occupational status, personal vehicle ownership, average daily jeepney expenditure, and the presence of any physical condition limiting walking capacity. Demographic data were used to characterize the respondent sample and to assess the representativeness of responses.}
 
-\indent{\textbf{Additional Comments (Questions F1–F3)} was an optional section inviting open-ended feedback on jeepney routes, stops, and services, as well as a contact field for participation in a raffle incentive to encourage response completion.
-}
+\indent{\textbf{Additional Comments (Questions F1–F3)} was an optional section inviting open-ended feedback on jeepney routes, stops, and services, as well as a contact field for participation in a raffle incentive to encourage response completion.}
 
 \subsection{Sampling Strategy and Sample Size}
 \label{subsec:3.1.3 sampling strategy and sample size}
@@ -860,7 +855,6 @@ By combining spatial headway balancing with demand-responsive fleet allocation, 
 
 It is important to distinguish this shortest-path sampling methodology from a simple linear summation of the \ac{DDM}. While directly summing the geographic demand probabilities of the nodes along a route is computationally trivial, it only measures \textit{local geographic density}---essentially, how busy the streets are that a route traverses. This static approach fails to account for topological connectivity, potentially overallocating vehicles to poorly designed routes that pass through dense areas but fail to connect logical origins to destinations. Within the formal \ac{TRNDP}, true network utility cannot be derived from isolated spatial coverage; it must be evaluated by how efficiently the route system satisfies many-to-many travel demand across continuous \ac{OD} paths \citep{kepaptsoglou2009transit}. By evaluating demand via simulated shortest-path journeys across the multi-layer \texttt{TravelGraph}, the framework captures true \textit{network-level utilization}. This dynamically accounts for \ac{OD} matching, transfer synergies, and multi-modal network flow, which are critical requirements for accurately modeling public transit passenger assignment \citep{farahani2013review}. Consequently, this ensures that fleet capacity is strictly allocated based on realized commuter utility rather than mere geographic proximity.
 
-
 \subsection{Simulation and Event Architecture}
 \noindent
 The simulation module serves as the master controller of the framework. It initializes the TravelGraph, activates the PassengerGenerator, manages the JeepSystem, and executes the main time loop. Each simulation run begins from a clean setup so that no state leaks from one candidate route system to another.
@@ -895,38 +889,16 @@ The second term is the \textbf{Underservice Penalty}, acting as an exterior pena
 
 The third term is the \textbf{Equity Regularizer}. Utilizing the population standard deviation ($\sigma$) of completed travel times scaled by a weight ($\alpha$), this term penalizes route systems that deliver highly unequal service distributions. This operationalizes horizontal transit equity, ensuring the optimizer does not sacrifice peripheral communities to marginally improve high-density trunk routes \citep{welch2013measure}.
 
-\subsection{Static Surrogate Cost Approximation}
-\noindent
-While the simulation fitness provides a high-fidelity evaluation, executing the temporal physics engine requires updating thousands of independent agent states across hundreds of simulation ticks. During the Lamarckian local search phase (detailed in Section 3.6.2), the algorithm must evaluate multiple candidate route perturbations per chromosome. Running the full simulation for each minor structural mutation would severely bottleneck the evolutionary search.
-
-To resolve this computational limitation, the framework utilizes a static surrogate cost approximation. It is critical to note that this surrogate is not a fitness function; it is a lightweight heuristic evaluated strictly to bypass expensive objective calculations during intra-generational local searches \citep{jin2005survey}. The surrogate bypasses the temporal simulation entirely, directly computing the static, multi-modal A* generalized cost for a representative sample of \ac{OD} pairs ($M$), combined with a penalty for excessive route length ($L_{\text{route}}$):
-
-\[
-C_{\text{sur}} = \sum_{p=1}^{M} c^{\text{A*}}_p + \eta L_{\text{route}}
-\]
-
-This surrogate cost is strictly confined to localized mutation operations. It functions exclusively as an $\mathcal{O}(1)$ acceptance gate: if a Lamarckian mutation structurally improves the surrogate cost, the route modification is provisionally kept. Once the local search phase concludes, the fully mutated chromosome is routed back through the microscopic temporal simulation to receive its authoritative $F_{\text{sim}}$ fitness score before the \ac{GA} advances to the next generation.
+\subsection{Static Surrogate Cost Approximation}\noindentWhile the simulation fitness provides a high-fidelity evaluation, executing the temporal physics engine requires updating thousands of independent agent states across hundreds of simulation ticks. During the Lamarckian local search phase (detailed in Section 3.6.2), the algorithm must evaluate multiple candidate route perturbations per chromosome. Running the full simulation for each minor structural mutation would severely bottleneck the evolutionary search.To resolve this computational limitation, the framework utilizes a static surrogate cost approximation. It is critical to note that this surrogate is not a fitness function; it is a lightweight heuristic evaluated strictly to bypass expensive objective calculations during intra-generational local searches \citep{jin2005survey}. The surrogate bypasses the temporal simulation entirely, directly computing the static, multi-modal A* generalized cost for a representative sample of \ac{OD} pairs ($M$), combined with a penalty for excessive route length ($L_{\text{route}}$):$$C_{\text{sur}} = \sum_{p=1}^{M} c^{\text{A*}}_p + \eta L_{\text{route}}$$To compensate for the absence of dynamic boarding delays and vehicle capacity constraints in the static approximation, the surrogate evaluation artificially inflates the topological transfer penalty by a factor of 2.5. This heuristic adjustment integrates empirical transfer aversion directly into the $\mathcal{O}(1)$ evaluation layer, heavily penalizing highly fragmented route configurations that may appear efficient statically but would fail under temporal simulation \citep{iseki2009transfers}.This surrogate cost is strictly confined to localized mutation operations. It functions exclusively as an $\mathcal{O}(1)$ acceptance gate: if a Lamarckian mutation structurally improves the surrogate cost, the route modification is provisionally kept. Once the local search phase concludes, the fully mutated chromosome is routed back through the microscopic temporal simulation to receive its authoritative $F_{\text{sim}}$ fitness score before the \ac{GA} advances to the next generation.
 
 \section{The Hybrid GA-ACO Memetic Algorithm}
 \noindent
 The optimization layer combines a \ac{GA} with an Ant Colony
-Optimization (ACO)-style memory structure to produce a memetic search procedure.
-In this framework, a chromosome represents an entire jeepney route system, while
-a gene represents one jeepney route inside that system. This distinction matters
-because the optimizer must preserve the integrity of closed transit loops, not
-merely rearrange isolated road segments. The \ac{GA} supplies global exploration
-through recombination and selection, while the ACO component supplies stigmergic
-memory through pheromone trails that record where passenger demand and route
-utility are strongest. The resulting procedure is memetic because candidate
-solutions are not only inherited, but also locally improved before they are
-passed to the next generation \citep{moscato1989evolution, moscato2003memetic}.
+Optimization (ACO)-style memory structure to produce a memetic search procedure. In this framework, a chromosome represents an entire jeepney route system, while a gene represents one jeepney route inside that system. This distinction matters because the optimizer must preserve the integrity of closed transit loops, not merely rearrange isolated road segments. The \ac{GA} supplies global exploration through recombination and selection, while the ACO component supplies stigmergic
+memory through pheromone trails that record where passenger demand and route utility are strongest. The resulting procedure is memetic because candidate solutions are not only inherited, but also locally improved before they are passed to the next generation \citep{moscato1989evolution, moscato2003memetic}.
 
 The memetic operators execute within each generation of the search loop.
-Specifically, after crossover produces a child chromosome and that child is
-evaluated for the first time, the Lamarckian local search operators are applied
-to the child before it enters selection for the next generation. This ordering
-is detailed in Section~\ref{sec:pipeline}, but the principle is worth
-establishing here: local improvement happens inside the generation, not between
+Specifically, after crossover produces a child chromosome and that child is evaluated for the first time, the Lamarckian local search operators are applied to the child before it enters selection for the next generation. This ordering is detailed in Section~\ref{sec:pipeline}, but the principle is worth establishing here: local improvement happens inside the generation, not between
 generations.
 
 % ────────────────────────────────────────────────────────────
@@ -937,47 +909,26 @@ generations.
 \subsubsection*{Stigmergy and environmental memory}
 Stigmergy is a form of indirect coordination in which agents communicate
 through modifications to a shared environment rather than through direct
-interaction \citep{Dorigo1996}. In classical ACO, individual ants deposit
-chemical pheromones on paths they have traversed; subsequent ants are attracted
-to stronger trails, reinforcing high-quality routes without any agent needing to
-communicate directly with another. This framework applies the same principle to
-transit optimization: the pheromone matrix functions as the algorithm's
-environmental memory, allowing geographically separated route evaluations
-conducted in different generations to influence one another through a shared
+interaction \citep{Dorigo1996}. In classical ACO, individual ants deposit chemical pheromones on paths they have traversed; subsequent ants are attracted to stronger trails, reinforcing high-quality routes without any agent needing to communicate directly with another. This framework applies the same principle to transit optimization: the pheromone matrix functions as the algorithm's environmental memory, allowing geographically separated route evaluations conducted in different generations to influence one another through a shared
 spatial record.
 
-Concretely, each road segment is mapped to a spatial key derived from its
-start and end coordinates. Route segments that occupy the same physical corridor
-therefore contribute to the same pheromone cell even if they belong to different
-candidate chromosomes. This coordinate-keyed pooling is what makes the memory
-genuinely stigmergic: it is the environment (the shared matrix) that aggregates
-experience, not any direct exchange between solutions.
+Concretely, each road segment is mapped to a spatial key derived from its start and end coordinates. Route segments that occupy the same physical corridor therefore contribute to the same pheromone cell even if they belong to different candidate chromosomes. This coordinate-keyed pooling is what makes the memory genuinely stigmergic: it is the environment (the shared matrix) that aggregates experience, not any direct exchange between solutions.
 
 \subsubsection*{Collection and update}
 The pheromone matrix is collected \emph{post-simulation}: after a full
-agent-based simulation run is completed for a candidate chromosome, the recorded
-journeys of simulated passengers are used to deposit pheromones along every edge
-those passengers traversed. Edges that supported efficient journeys receive
-reinforcement in proportion to the inverse of the total journey cost,
-following the standard ACO deposition rule \citep{Dorigo1996}:
+agent-based simulation run is completed for a candidate chromosome, the recorded journeys of simulated passengers are used to deposit pheromones along every edge those passengers traversed. Edges that supported efficient journeys receive reinforcement in proportion to the inverse of the total journey cost, following the standard ACO deposition rule \citep{Dorigo1996}:
 
 \[
 \Delta\tau_{ij} = \frac{Q}{C}
 \]
 
-where $Q$ is the deposition constant and $C$ is the total journey cost. All
-existing pheromones are then decayed by an evaporation factor $\rho$ before
-the new deposits are applied:
+where $Q$ is the deposition constant and $C$ is the total journey cost. All existing pheromones are then decayed by an evaporation factor $\rho$ before the new deposits are applied:
 
 \[
 \tau_{ij}(t+1) = (1 - \rho)\,\tau_{ij}(t) + \Delta\tau_{ij}
 \]
 
-Evaporation prevents the matrix from accumulating stale demand signals from
-routes that are no longer competitive. The evaporation-then-deposition cycle
-preserves the three mathematical invariants of ACO: path-cost proportional
-deposition, generational decay, and probabilistic biasing of subsequent
-operators \citep{Dorigo1996, dorigo2004}.
+Evaporation prevents the matrix from accumulating stale demand signals from routes that are no longer competitive. The evaporation-then-deposition cycle preserves the three mathematical invariants of ACO: path-cost proportional deposition, generational decay, and probabilistic biasing of subsequent operators \citep{Dorigo1996, dorigo2004}.
 
 \subsubsection{The Proportional Demand-Service Disparity Gap}
 \label{sec:demand_service_gap}
@@ -1037,7 +988,7 @@ The operator targets the corridor with the most negative Demand-Service Gap (ind
 
 \subsubsection{Demand-Aware Tortuosity Pruning (Sliding Window)}
 \label{sec:tortuosity_pruning}
-\noindent Directness is a foundational criterion for transit network quality. \cite{ceder1986bus} define circuity (or tortuosity) as the ratio of the actual path length to the straight-line distance, establishing its minimization as a primary design objective. Similarly, \cite{baaj1991ai} utilized explicit route-straightening subroutines to optimize transit layouts.
+\noindent Directness is a foundational criterion for transit network quality. \cite{ceder1986bus} define circuity (or tortuosity) as the ratio of the actual path length to the straight-line distance, establishing its minimization as a primary design objective. Similarly, \cite{baaj1991transit} utilized explicit route-straightening subroutines to optimize transit layouts.
 
 The operator utilizes a fixed-size sliding window, scanning the route in a single $O(N)$ pass. For each window, it computes the circuity ratio ($\kappa = \frac{L_{path}}{\text{utility}}$). 
 
@@ -1050,61 +1001,18 @@ To prevent this operator from aggressively unwinding the coverage extensions int
 % ────────────────────────────────────────────────────────────\subsection{Memetic Genetic Operators}
 \label{sec:genetic}
 \noindent
-The genetic operators work at the chromosome level, modifying whole jeepney
-route systems rather than isolated edges. The objective is to improve the entire
-network as a coordinated service system; crossover and inheritance therefore
-preserve the strongest structural features of parent networks while opening the
-search to new route combinations.
+The genetic operators work at the chromosome level, modifying whole jeepney route systems rather than isolated edges. The objective is to improve the entire network as a coordinated service system; crossover and inheritance therefore preserve the strongest structural features of parent networks while opening the search to new route combinations.
 
-Embedding genetic operators directly into an ACO-driven framework represents a deliberate 
-departure from standard ACO mechanics, but it is a scientifically validated methodology 
-for complex routing problems. As demonstrated by Zhao et al.\ \citeyearpar{zhao2026traversal}, 
-deeply integrating \ac{GA} crossover and mutation operators into the main iterative loop, rather 
-than utilizing them merely as disconnected post-processing tools, acts as a required 
-co-evolutionary mechanism. This hybrid integration dynamically sustains population diversity, 
-counteracts the positive feedback traps inherent to pure pheromone accumulation, and 
-significantly enhances the algorithm's capability to escape local optima without sacrificing 
-the spatial intelligence gathered by the ants.
+Embedding genetic operators directly into an ACO-driven framework represents a deliberate departure from standard ACO mechanics, but it is a scientifically validated methodology  for complex routing problems. As demonstrated by Zhao et al.\ \citeyearpar{zhao2026traversal}, deeply integrating \ac{GA} crossover and mutation operators into the main iterative loop, rather than utilizing them merely as disconnected post-processing tools, acts as a required co-evolutionary mechanism. This hybrid integration dynamically sustains population diversity, counteracts the positive feedback traps inherent to pure pheromone accumulation, and significantly enhances the algorithm's capability to escape local optima without sacrificing the spatial intelligence gathered by the ants.
 
-Two operators are applied in sequence during each reproductive event.
-Topological Hub Crossover (Section~\ref{sec:crossover}) produces the offspring's
-route geometry by merging the trunk of one parent with complementary feeders from
-the other. Epigenetic Inheritance (Section~\ref{sec:epigenetic}) then equips the
-offspring with a pheromone surface that is a fitness-weighted blend of both
-parents' accumulated demand maps, giving the offspring's subsequent local search
-an informed prior over which corridors are likely to yield efficient service.
-The academic rationale for each operator is detailed in the subsections below.
+Two operators are applied in sequence during each reproductive event. Topological Hub Crossover (Section~\ref{sec:crossover}) produces the offspring'sroute geometry by merging the trunk of one parent with complementary feeders from the other. Epigenetic Inheritance (Section~\ref{sec:epigenetic}) then equips the offspring with a pheromone surface that is a fitness-weighted blend of both parents' accumulated demand maps, giving the offspring's subsequent local search an informed prior over which corridors are likely to yield efficient service. The academic rationale for each operator is detailed in the subsections below.
 
 \subsubsection{Topological Hub Crossover (Trunk and Feeder Preservation)}
 \label{sec:crossover}
 
-Standard genetic crossover randomly splices route arrays, which can blindly
-destroy high-performing transit corridors. Gschwender, Jara-Díaz, and Bravo
-\citeyearpar{gschwender2016feeder} demonstrated mathematically that
-feeder-trunk network hierarchies outperform flat route systems in urban areas
-because trunk corridors exhibit economies of density: average operating costs
-decrease as passenger volumes along a fixed corridor increase. Risso,
-Nesmachnow, and Faller \citeyearpar{risso2023backbone} extended this by showing
-that evolutionary algorithms can be explicitly engineered to protect a
-``backbone'' trunk network while simultaneously optimizing a broader, peripheral
-feeder layer, achieving reductions in total system travel time that flat
-crossover operators cannot match. Topological Hub Crossover implements this
-principle directly: the crossover preserves the economies-of-density trunk
-identified through pheromone accumulation, then hybridizes the peripheral
-coverage layer from the second parent.
+Standard genetic crossover randomly splices route arrays, which can blindly destroy high-performing transit corridors. Gschwender, Jara-Díaz, and Bravo \citeyearpar{gschwender2016feeder} demonstrated mathematically that feeder-trunk network hierarchies outperform flat route systems in urban areas because trunk corridors exhibit economies of density: average operating costs decrease as passenger volumes along a fixed corridor increase. Risso, Nesmachnow, and Faller \citeyearpar{risso2023backbone} extended this by showing that evolutionary algorithms can be explicitly engineered to protect a ``backbone'' trunk network while simultaneously optimizing a broader, peripheral feeder layer, achieving reductions in total system travel time that flat crossover operators cannot match. Topological Hub Crossover implements this principle directly: the crossover preserves the economies-of-density trunk identified through pheromone accumulation, then hybridizes the peripheral coverage layer from the second parent.
 
-The algorithm first identifies the topological hub: the set of road segments
-with the strongest combined pheromone support and structural importance,
-representing the busiest corridors where economies of density are highest.
-Routes from the fitter parent that heavily intersect this hub become the trunk
-of the child network. Routes from the other parent that do not geometrically
-conflict with the established trunk are then selected as feeder routes and
-merged in. The result is a constrained recombination that respects
-closed-loop validity, route isolation, and corridor utility. The child inherits
-a coherent trunk-and-feeder structure rather than a fragmented set of edges,
-mirroring the hierarchical transit design principles established by Gschwender
-et al.\ \citeyearpar{gschwender2016feeder} and operationalized by Risso et al.\
-\citeyearpar{risso2023backbone}.
+The algorithm first identifies the topological hub: the set of road segments with the strongest combined pheromone support and structural importance, representing the busiest corridors where economies of density are highest. Routes from the fitter parent that heavily intersect this hub become the trunk of the child network. Routes from the other parent that do not geometrically conflict with the established trunk are then selected as feeder routes and merged in. The result is a constrained recombination that respects closed-loop validity, route isolation, and corridor utility. The child inherits a coherent trunk-and-feeder structure rather than a fragmented set of edges, mirroring the hierarchical transit design principles established by Gschwender et al.\ \citeyearpar{gschwender2016feeder} and operationalized by Risso et al.\ \citeyearpar{risso2023backbone}.
 
 \subsubsection{Epigenetic Inheritance (Fitness-Weighted Pheromones)}
 \label{sec:epigenetic}
@@ -1183,14 +1091,7 @@ State preservation is implemented through atomic checkpointing. The live optimiz
 \section{Post-Optimization Evaluation Metrics}
 \label{sec:metrics}
 \noindent
-After optimization, the final route systems are evaluated using several
-complementary metrics. No single score is sufficient because a network can be
-similar in structure, similar in geometry, similar in coverage distribution, or
-similar in ranking behavior without being identical in all four senses. The
-metrics documented here are implemented as pure, stateless functions in
-\texttt{evaluation\_metrics.py} and applied to domain objects through
-\texttt{post\_evaluation.py}. This two-layer separation ensures that each metric
-is independently testable and that its mathematical assumptions are transparent.
+After optimization, the final route systems are evaluated using several complementary metrics. No single score is sufficient because a network can be similar in structure, similar in geometry, similar in coverage distribution, or similar in ranking behavior without being identical in all four senses. The metrics documented here are implemented as pure, stateless functions in \texttt{evaluation\_metrics.py} and applied to domain objects through \texttt{post\_evaluation.py}. This two-layer separation ensures that each metric is independently testable and that its mathematical assumptions are transparent.
 
 % ────────────────────────────────────────────────────────────
 \subsection{Topological and Geometric Similarity (Jaccard, Discrete Fréchet, GED)}
@@ -1198,44 +1099,23 @@ is independently testable and that its mathematical assumptions are transparent.
 \noindent
 
 \paragraph{Jaccard similarity.}
-Topological similarity is measured with the Jaccard index over active route
-edges. For two edge sets $A$ and $B$:
+Topological similarity is measured with the Jaccard index over active route edges. For two edge sets $A$ and $B$:
 
 \[
 J(A,B) = \frac{|A \cap B|}{|A \cup B|}
 \]
 
-If system $A$ and system $B$ each use 100 street segments and 80 of those are
-identical, $J = 80/120 = 0.667$. The metric is symmetric, bounded in $[0,1]$,
-and requires no parameter tuning. It answers the question of how much corridor
-overlap exists between two route systems—whether two candidate networks share
-the same trunks and feeder branches. The Jaccard index appears in three
-distinct roles throughout this framework: inside the optimizer for convergence
-detection (Section~\ref{sec:convergence}), in Topological Hub Crossover for
-trunk identification (Section~\ref{sec:crossover}), and here in post-evaluation
-for system comparison. A single implementation in
-\texttt{evaluation\_metrics.py} serves all three use cases.
+If system $A$ and system $B$ each use 100 street segments and 80 of those are identical, $J = 80/120 = 0.667$. The metric is symmetric, bounded in $[0,1]$, and requires no parameter tuning. It answers the question of how much corridor overlap exists between two route systems—whether two candidate networks share the same trunks and feeder branches. The Jaccard index appears in three distinct roles throughout this framework: inside the optimizer for convergence detection (Section~\ref{sec:convergence}), in Topological Hub Crossover for trunk identification (Section~\ref{sec:crossover}), and here in post-evaluation for system comparison. A single implementation in \texttt{evaluation\_metrics.py} serves all three use cases.
 
 \paragraph{Discrete Fréchet distance.}
-Jaccard similarity does not capture the ordering of nodes along a route, so it
-is complemented by the discrete Fréchet distance \citep{eiter1994computing}.
-The Fréchet distance is often described as the ``dog-walker'' metric: a person
-walks along path $P$ and a dog along path $Q$, connected by a leash; neither
-may backtrack. The Fréchet distance is the minimum leash length that allows
-both to complete their traversals. The discrete variant restricts the comparison
-to the vertex sequences of each path and is computed via a standard $O(n \times m)$
-dynamic programming recurrence:
+Jaccard similarity does not capture the ordering of nodes along a route, so it is complemented by the discrete Fréchet distance \citep{eiter1994computing}. The Fréchet distance is often described as the ``dog-walker'' metric: a person walks along path $P$ and a dog along path $Q$, connected by a leash; neither may backtrack. The Fréchet distance is the minimum leash length that allows both to complete their traversals. The discrete variant restricts the comparison to the vertex sequences of each path and is computed via a standard $O(n \times m)$ dynamic programming recurrence:
 
 \[
 ca(i,j) = \max\!\bigl(\min(ca(i{-}1,j),\, ca(i,j{-}1),\, ca(i{-}1,j{-}1)),\,
              d(P_i, Q_j)\bigr)
 \]
 
-where $d(P_i, Q_j)$ is the distance between the $i$-th vertex of $P$ and the
-$j$-th vertex of $Q$. Critically, Fréchet distance respects traversal order:
-two routes sharing identical streets but traveling in opposite directions
-correctly register as dissimilar, making it strictly more informative than
-Hausdorff distance for evaluating route mutations.
+where $d(P_i, Q_j)$ is the distance between the $i$-th vertex of $P$ and the $j$-th vertex of $Q$. Critically, Fréchet distance respects traversal order: two routes sharing identical streets but traveling in opposite directions correctly register as dissimilar, making it strictly more informative than Hausdorff distance for evaluating route mutations.
 
 \paragraph{Graph Edit Distance (GED).}
 Graph Edit Distance (GED) provides a third, strictly topological perspective by calculating the minimum cost required to morph the structure of one route network into another \citep{sanfeliu1983distance}. Formally, given two graphs $G_1$ and $G_2$, the distance is defined as the minimum cost of an edit path $P$ consisting of a sequence of operations $o \in \{ \text{insertion, deletion, substitution} \}$ such that:
@@ -1248,10 +1128,7 @@ where $c(o)$ represents the cost associated with each transformation \citep{sanf
 \subsection{Distributional Distance and Spatial Coverage (1D/2D Wasserstein)}
 \label{sec:wasserstein}
 \noindent
-Wasserstein distance, also referred to as the Earth Mover's Distance, measures how much
-mass must be moved to transform one distribution into the shape of another, at a
-cost equal to mass times distance moved \citep{debacco2023optimaltransport}.
-Formally, for two probability distributions $\mu$ and $\nu$ over a metric space:
+Wasserstein distance, also referred to as the Earth Mover's Distance, measures how much mass must be moved to transform one distribution into the shape of another, at a cost equal to mass times distance moved \citep{debacco2023optimaltransport}. Formally, for two probability distributions $\mu$ and $\nu$ over a metric space:
 
 \[
 W_1(\mu,\nu) = \inf_{\gamma \in \Gamma(\mu,\nu)}
@@ -1262,61 +1139,29 @@ where $\Gamma(\mu,\nu)$ is the set of all joint distributions with marginals
 $\mu$ and $\nu$.
 
 Two variants are implemented. The one-dimensional form
-(\texttt{scipy.stats.wasserstein\_distance}) compares univariate empirical
-distributions—commute times, route lengths, or waiting times—and evaluates
-whether the final route system shifts travel outcomes toward lower costs. The
-two-dimensional form applies optimal transport to weighted spatial point
-distributions, comparing where service is concentrated on the map and evaluating
-whether coverage has migrated toward underserved spatial regions.
+(\texttt{scipy.stats.wasserstein\_distance}) compares univariate empirical distributions—commute times, route lengths, or waiting times—and evaluates whether the final route system shifts travel outcomes toward lower costs. The two-dimensional form applies optimal transport to weighted spatial point distributions, comparing where service is concentrated on the map and evaluating whether coverage has migrated toward underserved spatial regions.
 
-Unlike Jaccard, which is purely topological, and Fréchet, which is purely
-geometric, Wasserstein is demand-aware. Two systems covering different streets
-but serving the same demand surface produce a low Wasserstein distance; two
-systems covering the same streets but serving different demand concentrations
-produce a high one. De Bacco et al.\ \citeyearpar{debacco2023optimaltransport}
-applied optimal transport theory to compare multi-layer urban network structures
-in a formulation directly analogous to comparing the demand coverage
-distributions of two candidate jeepney route systems.
+Unlike Jaccard, which is purely topological, and Fréchet, which is purely geometric, Wasserstein is demand-aware. Two systems covering different streets but serving the same demand surface produce a low Wasserstein distance; two systems covering the same streets but serving different demand concentrations produce a high one. De Bacco et al.\ \citeyearpar{debacco2023optimaltransport} applied optimal transport theory to compare multi-layer urban network structures in a formulation directly analogous to comparing the demand coverage distributions of two candidate jeepney route systems.
 
 % ────────────────────────────────────────────────────────────
 \subsection{Network Diversity (Shannon Entropy)}
 \label{sec:entropy}
 \noindent
-Shannon entropy measures how evenly route usage is distributed across the
-network. If $p_i$ is the normalized share of usage assigned to route $i$:
+Shannon entropy measures how evenly route usage is distributed across the network. If $p_i$ is the normalized share of usage assigned to route $i$:
 
 \[
 H = -\sum_i p_i \log p_i
 \]
 
-High entropy indicates that traffic and service are spread across many routes,
-suggesting genuine multi-modal choice. Low entropy indicates concentration on a
-small number of routes, which may be acceptable in an intentionally hierarchical
-network but may also signal premature convergence or over-reliance on a narrow
-corridor set. Levinson \citeyearpar{levinson2012networkstructure} applied
-entropy measures specifically to urban transportation networks and demonstrated
-that structural diversity correlates with network resilience: systems with higher
-routing entropy are more robust to link failures and demand perturbations.
-Entropy therefore complements the similarity metrics by describing network
-breadth rather than overlap.
+High entropy indicates that traffic and service are spread across many routes, suggesting genuine multi-modal choice. Low entropy indicates concentration on a small number of routes, which may be acceptable in an intentionally hierarchical network but may also signal premature convergence or over-reliance on a narrow corridor set. Levinson \citeyearpar{levinson2012networkstructure} applied entropy measures specifically to urban transportation networks and demonstrated that structural diversity correlates with network resilience: systems with higher routing entropy are more robust to link failures and demand perturbations. Entropy therefore complements the similarity metrics by describing network breadth rather than overlap.
 
 % ────────────────────────────────────────────────────────────
 \subsection{Surrogate Fidelity Validation (Spearman and Kendall Rank Correlation)}
 \label{sec:surrogate_val}
 \noindent
-The surrogate evaluator is useful only insofar as it preserves the ordering of
-route systems produced by the full simulation. Evolutionary selection is
-ranking-based: tournament selection picks the fittest of $k$ chromosomes, and
-elitism preserves the top $n$. These operations depend on relative ordering,
-not absolute magnitude. Jin \citeyearpar{jin2005survey} explicitly established
-Spearman rank correlation as the primary validation metric for fitness
-approximation in evolutionary computation, noting that a surrogate's value lies
-in its ability to rank solutions correctly, not in reproducing their exact
-numerical scores.
+The surrogate evaluator is useful only insofar as it preserves the ordering of route systems produced by the full simulation. Evolutionary selection is ranking-based: tournament selection picks the fittest of $k$ chromosomes, and elitism preserves the top $n$. These operations depend on relative ordering, not absolute magnitude. Jin \citeyearpar{jin2005survey} explicitly established Spearman rank correlation as the primary validation metric for fitness approximation in evolutionary computation, noting that a surrogate's value lies in its ability to rank solutions correctly, not in reproducing their exact numerical scores.
 
-To test this, surrogate scores and full simulation scores are compared using two
-rank-based coefficients. If $d_i$ is the rank difference for chromosome $i$,
-Spearman correlation is:
+To test this, surrogate scores and full simulation scores are compared using two rank-based coefficients. If $d_i$ is the rank difference for chromosome $i$, Spearman correlation is:
 
 \[
 \rho = 1 - \frac{6 \sum d_i^2}{n(n^2 - 1)}
@@ -1329,9 +1174,4 @@ correlation—more robust for small sample sizes—is:
 \tau = \frac{C - D}{\binom{n}{2}}
 \]
 
-where $C$ is the number of concordant pairs and $D$ is the number of discordant
-pairs. A Spearman $\rho \geq 0.7$ indicates sufficient ranking fidelity to
-guide local search reliably; below $0.5$, the surrogate would actively mislead
-the selection pressure \citep{jin2005survey}. The framework additionally reports
-Kendall $\tau$, normalized \ac{RMSE}, and \ac{MAPE} as supporting diagnostics, but
-Spearman $\rho$ is the decision-making metric.
+where $C$ is the number of concordant pairs and $D$ is the number of discordant pairs. A Spearman $\rho \geq 0.7$ indicates sufficient ranking fidelity to guide local search reliably; below $0.5$, the surrogate would actively mislead the selection pressure \citep{jin2005survey}. The framework additionally reports Kendall $\tau$, normalized \ac{RMSE}, and \ac{MAPE} as supporting diagnostics, but Spearman $\rho$ is the decision-making metric.
