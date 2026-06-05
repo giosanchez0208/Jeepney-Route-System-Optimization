@@ -212,7 +212,8 @@ def _worker_run_override(arg) -> SimulationResult:
     del jeep_system
     del sim
     del jeeps
-    
+    gc.collect()  # 2000-jeep sims form reference cycles; reclaim them before the worker's next eval
+
     # Return the lightweight object
     return result
 

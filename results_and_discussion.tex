@@ -96,8 +96,16 @@ Prior to evolutionary optimization, the foundational mechanics of the multi-laye
 Prior to executing the framework on the full empirical data, hyperparameter calibration was conducted on a synthetic Manhattan grid topology to isolate algorithmic behavior from geographic anomalies \citep{kepaptsoglou2009transit}.
 
 \subsection{Mohring Fleet Allocation Stability}
-\textbf{Visual:} Coefficient of variation (CV) of the per-route Mohring fleet allocation as a function of the number of routes in the system, with a horizontal acceptance threshold drawn at $\mathrm{CV} = 0.5$. \\
-\textit{Discussion:} The square-root allocation must remain stable regardless of how many routes a candidate system contains. Sweeping the route count and measuring the CV of the allocation across independent demand samples, every tested system size remains below the $0.5$ acceptance threshold, confirming that fleet distribution is robust to system size at the production sample size and does not swing with the stochastic demand draw.
+The square-root Mohring allocation estimates each route's demand level by sampling passenger origin--destination journeys, so the allocation must be shown to be stable: repeated sampling on a fixed route system must not swing the per-route vehicle counts. Stability is quantified by the coefficient of variation (CV) of each route's allocation across seven independent demand samples, swept over sample sizes from $500$ to $3000$ for the production configuration of $38$ routes and a fleet of $2000$ vehicles.
+
+The mean per-route allocation CV falls from $0.21$ at $500$ samples to $0.11$ at $2000$ samples, demonstrating that the fleet split across the network is highly reproducible across independent stochastic demand draws. The maximum per-route CV---the single least-served route---declines more slowly and settles near $0.69$. This residual is a property of integer allocation on a marginally-served corridor: when a route is assigned only a handful of the $2000$ vehicles, a change of one or two vehicles between samples registers as a large \emph{relative} variation even though it is operationally immaterial. With $94\%$ of sampled journeys utilising a transit route, the low mean CV is not a false-stable artefact of walk-only demand. The production Mohring sample size is therefore fixed at $2000$, where both the mean and the worst-case CV reach their minima. For comparison, smaller systems satisfy the stricter worst-route criterion $\mathrm{CV}\le 0.5$ outright---$4$, $8$, $16$, and $32$ routes stabilise by $150$, $50$, $300$, and $450$ samples respectively---and only the dense $38$-route operating point retains a worst-route CV above the threshold while remaining systemically stable in the mean.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{chap4/figures/mohring_stability.png}
+    \caption{Mean and maximum per-route Mohring allocation CV versus demand-sampling size for the production $38$-route, $2000$-vehicle configuration. The mean CV collapses to $0.11$ by $2000$ samples; the maximum CV reflects integer rounding on the least-served route, not systemic instability.}
+    \label{fig:mohring_stability}
+\end{figure}
 
 \subsection{Temporal Discretization ($\Delta t$)}
 \textit{Discussion:} All production runs fix the simulation time step at $\Delta t = 10\text{s}$ (\texttt{seconds\_per\_tick}). The only discretization error arises from sub-tick rounding when a vehicle reaches a stop; this error is unbiased, so across the large stochastic passenger population and the extended simulation horizon, individual overshoot and undershoot are independent and average toward zero. The residual noise is therefore dominated by, and absorbed into, the stochastic demand variance the optimizer already tolerates, while a 10-second step keeps per-evaluation runtime tractable. A standalone discretization sweep is consequently unnecessary.
@@ -117,8 +125,20 @@ Figure~\ref{fig:horizon_volume_calibration}(b) isolates the demand-volume axis, 
 \end{figure}
 
 \subsection{Opportunistic Riding and Individual Travel-Delay Benefit}
-\textbf{Visual:} Distribution of the travel-time delta $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ for passengers who waited for their expected jeepney (Group~A) versus those who boarded an earlier alternative (Group~B), annotated with the Mann--Whitney $U$ test result. \\
-\textit{Discussion:} A positive boarding \texttt{weight\_tolerance} permits a passenger to board an acceptable earlier-arriving jeepney instead of strictly waiting for the single vehicle on their pre-computed least-cost journey. A simulation run with \texttt{weight\_tolerance} $> 0$ partitions completed passengers into Group~A (waited) and Group~B (rode opportunistically), and their travel-time deltas are compared with the non-parametric Mann--Whitney $U$ test. A statistically significant result with a lower median delay for Group~B proves that opportunistic riders experience a real reduction in travel delay, validating that the weight-tolerance mechanism confers an individual-level benefit rather than merely perturbing path choice. The underlying travel-graph cost weights were externally validated and are not re-tuned here.
+A positive boarding \texttt{weight\_tolerance} permits a passenger to board an acceptable earlier-arriving jeepney rather than strictly waiting for the single vehicle on their pre-computed least-cost journey. To test whether this opportunistic behaviour benefits the individual commuter, each completed passenger's realised door-to-door time $T_{\text{actual}}$ (measured directly from the simulation) is compared against an \emph{expected} free-flow time computed from their planned journey,
+\[
+T_{\text{expected}} = \frac{d_{\text{walk}}}{v_{\text{walk}}} + \frac{d_{\text{ride}}}{v_{\text{ride}}},
+\]
+where $d_{\text{walk}}$ and $d_{\text{ride}}$ are the planned walking and in-vehicle distances and $v_{\text{walk}}$, $v_{\text{ride}}$ the corresponding speeds. The travel-time delay $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ therefore isolates the waiting and congestion overhead incurred beyond the idealised ride. Completed passengers are partitioned into Group~A (waited for the planned jeepney) and Group~B (boarded an earlier alternative within tolerance), and their delays are compared with a one-sided Mann--Whitney $U$ test across boarding tolerances of $0$, $14.44$, and $100$~\ac{EIVM}.
+
+At zero tolerance no passenger ever takes an alternative, establishing the baseline (median delay $6.47$~min). Once rational transfers are permitted, opportunistic riders enjoy a significantly smaller delay: at the production tolerance of $14.44$, Group~B's median delay is $0.70$~min against Group~A's $6.71$~min ($U = 953$, $p = 0.0022$); at a tolerance of $100$, where opportunistic riding is far more common, Group~B's median delay is $4.36$~min against $6.28$~min ($U = 20{,}275$, $p = 0.037$). Both results reject the null hypothesis at $p < 0.05$, confirming that passengers who rationally board an alternative jeepney experience a statistically significant reduction in travel delay, rather than the weight-tolerance mechanism merely perturbing path choice. It should be noted that opportunistic boarding is rare at the production tolerance---roughly $0.7\%$ of completed passengers ($6$ of $895$) at $14.44$, rising to $\sim 6\%$ ($57$ passengers) at $100$---so the mechanism benefits a small but genuine minority for whom an alternative vehicle is materially faster. The underlying travel-graph cost weights were externally validated and are not re-tuned here.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/weight_tolerance_delta.png}
+    \caption{Distribution of the travel-time delay $\Delta T = T_{\text{actual}} - T_{\text{expected}}$ for passengers who waited (Group~A) versus those who boarded an earlier alternative (Group~B), at boarding tolerances $0$, $14.44$, and $100$. Opportunistic riders exhibit a significantly lower delay at both positive tolerances (one-sided Mann--Whitney $U$, $p<0.05$).}
+    \label{fig:weight_tolerance_delta}
+\end{figure}
 
 % (Surrogate Ranking Fidelity subsection removed: the static surrogate was dropped in
 % favor of gap-gated Lamarckian acceptance. See the methodology's "Gap-Gated Lamarckian

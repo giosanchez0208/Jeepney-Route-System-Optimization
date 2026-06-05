@@ -5,6 +5,7 @@ Main orchestrator. Controls execution flow, handles interrupts, and manages sub-
 """
 
 import os
+import gc
 from pathlib import Path
 import yaml
 import math
@@ -125,7 +126,12 @@ class Optimizer:
                     verbose=False
                 )
 
-        self.runner = ParallelSimulationRunner(config=self.raw_config)
+        # max_workers is configurable via optimization.n_workers (cap RAM on heavy 38-route /
+        # 2000-jeep runs); falls back to cpu_count-1 when unset.
+        self.runner = ParallelSimulationRunner(
+            config=self.raw_config,
+            max_workers=self.raw_config.get("optimization", {}).get("n_workers")
+        )
         self.engine = MemeticEngine(self.config, self.cg, self.sampler, runner=self.runner)
         
         # Instantiate the full fitness evaluator for GA scoring.
@@ -152,6 +158,11 @@ class Optimizer:
         self.jaccard_patience_counter = 0
 
         print(f"[OPTIMIZER] Launching optimization search loop. Max generations: {self.config.g_max}")
+        # Open ONE persistent worker pool for the whole run. Workers load the CityGraph/DDM (and
+        # cache the TravelGraph) ONCE here, instead of the one-shot path respawning the pool and
+        # rebuilding the 36k-node graph from the PBF on every evaluate_population call -- which would
+        # add hours of re-initialisation and constant spawn/destroy memory churn over a long run.
+        self.runner.open_pool()
         from tqdm import tqdm
         try:
             # Nested tqdm bar tracking generations with live telemetry updates
@@ -223,9 +234,15 @@ class Optimizer:
                         print(f"[OPTIMIZER] Saving checkpoint at generation {self.state.generation}...")
                         self.preservation.save_state(self.state)
 
+                    # Bound peak RAM over multi-hour runs: each generation's sim objects
+                    # (2000 jeeps, ~900 passenger journeys, pheromone deposits) form reference
+                    # cycles that plain refcounting cannot reclaim. Force one collection per gen.
+                    gc.collect()
+
         except KeyboardInterrupt:
             print("\n[OPTIMIZER] Execution interrupted by user. Saving final state...")
         finally:
+            self.runner.close_pool()
             self.preservation.save_state(self.state)
             print(f"[OPTIMIZER] State successfully saved to {self.run_dir}. Exiting.")
 

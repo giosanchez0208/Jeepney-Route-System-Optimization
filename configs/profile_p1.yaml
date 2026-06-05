@@ -1,6 +1,11 @@
 global:
   cache_dir: ".cache"
 
+# Workers (and the main process) load these caches instead of rebuilding the 36k-node CityGraph
+# from the PBF and recomputing the DDM on every worker spawn -- essential for the persistent pool.
+cg_pkl: rnd/pkl/profile_p1.pkl
+ddm_pkl: rnd/pkl/ddm_8am.pkl
+
 city_graph:
   name: "Iligan City"
   bbox: [8.1500, 8.3300, 124.1500, 124.4000]
@@ -23,13 +28,13 @@ travel_graph:
   alight_wt: 0.0
 
 simulation:
-  mohring_sample_size: 450 # Updated based on variance collapse empirical test
+  mohring_sample_size: 2000 # 38-route stability: mean allocation CV 0.11 at 2000 samples
   jeep_capacity: 16
   num_ticks: 540               # Uniform High-Fi ticks (540 @ 10s = 90 min)
   jeep_speed_kmh: 20.0
   passenger_speed_kmh: 4.5
-  num_routes: 5
-  total_allocatable_jeeps: 470 # P1: Standard True Fleet Size Anchor
+  num_routes: 38               # final Iligan network size
+  total_allocatable_jeeps: 2000 # real Iligan jeepney fleet (recent literature)
   weight_tolerance: 14.4
   spawn_rate_per_hour: 600.0   # raised from 200: CV<5% at 5 routes (variance-collapse calibration)
   spawn_stdev: 10.0
@@ -39,7 +44,8 @@ optimization:
   output_root: "outputs/iligan_runs"
   telemetry_interval: 1
   checkpoint_interval: 2
-  
+  # n_workers: 6              # cap parallel workers to fit RAM (each ~1-2GB at 38 routes/2000 jeeps); unset = cpu_count-1
+
   n_population: 10             # Production-grade population size
   g_max: 30                    # Full 30 generations
   n_stagnation: 30             # Stagnation ceiling aligned to generations
@@ -60,8 +66,3 @@ optimization:
   default_jeep_weight: 1.0
   alpha_std_penalty: 0.5       # P1: Standard equity variance
   beta_penalty: 2.0
-
-surrogate:
-  transfer_multiplier: 2.5
-  unreachable_penalty: 100000.0
-  num_samples: 450            

@@ -831,6 +831,24 @@ n_{\text{passengers}} < C_{\text{max}}
 
 where $n_{\text{passengers}}$ is the current occupancy and $C_{\text{max}}$ is the maximum vehicle capacity. The jeepney system groups all vehicles by route and updates them in batch. This keeps fleet management modular and prevents the simulation loop from handling each vehicle separately.
 
+\subsection{Opportunistic Boarding under Weight Tolerance}
+\noindent
+The capacity rule governs \emph{whether} a vehicle can accept a passenger, but not \emph{which} vehicle a waiting passenger accepts. Real commuters do not rigidly wait for a single pre-planned jeepney; when an alternative jeepney arrives sooner and still carries them acceptably close to their destination, a rational passenger boards it rather than continue waiting \citep{iseki2009transfers}. The framework encodes this behaviour through a single tolerance parameter.
+
+Each waiting passenger has a planned boarding route, taken from the least-cost journey computed on the multi-layer \texttt{TravelGraph}. When a jeepney reaches the passenger's stop, the boarding decision proceeds as follows. If the arriving vehicle belongs to the planned route, the passenger boards directly. Otherwise the passenger evaluates the alternative: let $c_{\text{alt}}$ be the generalized in-vehicle cost of riding the arriving (non-planned) vehicle from the current stop to the passenger's intended alighting node, and let $c_{\text{plan}}$ be the generalized cost of the planned ride. The passenger boards the alternative if and only if
+\[
+c_{\text{alt}} \;\le\; c_{\text{plan}} + \delta_{\text{tol}},
+\]
+where $\delta_{\text{tol}}$ (the \texttt{weight\_tolerance}, expressed in the same \ac{EIVM} units as the edge weights) is the maximum additional in-vehicle cost a passenger will accept in exchange for boarding immediately. Setting $\delta_{\text{tol}} = 0$ recovers strict adherence, in which a passenger only ever boards the planned route, while larger values permit progressively more opportunistic transfers. A non-planned vehicle is a viable alternative only if its route actually reaches the passenger's alighting node, so the mechanism never strands a passenger on a route that cannot serve their destination.
+
+To quantify the effect of this behaviour on the individual commuter, each completed passenger's realized travel time is compared against a friction-free baseline. The \emph{expected} travel time $T^{\text{exp}}$ is the time the journey would take in the absence of any waiting or transfer delay---purely the walking and riding legs traversed at their respective speeds:
+\[
+T^{\text{exp}} = \frac{d_{\text{walk}}}{v_{\text{walk}}} + \frac{d_{\text{ride}}}{v_{\text{ride}}},
+\]
+where $d_{\text{walk}}$ and $d_{\text{ride}}$ are the total walking and in-vehicle distances of the passenger's journey and $v_{\text{walk}}, v_{\text{ride}}$ are the pedestrian and jeepney speeds. The \emph{actual} travel time $T^{\text{act}}$ is measured directly from the simulation as the elapsed time between the passenger's spawn and arrival, and therefore embeds all realized waiting, boarding, and transfer friction. The realized delay is their difference, $\Delta T = T^{\text{act}} - T^{\text{exp}}$.
+
+The behavioural hypothesis---that permitting opportunistic transfers lowers an individual's realized delay---is tested by partitioning completed passengers into those who boarded their planned route (Group~A) and those who boarded an acceptable alternative (Group~B), and comparing their delay distributions with a one-sided Mann--Whitney $U$ test across a sweep of tolerance values. The non-parametric test is appropriate because the delay distributions are heavy-tailed rather than Gaussian.
+
 \subsection{Spatial Headway Distribution and Fleet Allocation via Mohring Effect}
 \noindent
 The framework avoids bus bunching by distributing jeepneys evenly along each route at initialization \citep{yang2020}. Bus bunching occurs when vehicles that initially operate with balanced spacing gradually cluster together because of unequal passenger loading and delay accumulation.
