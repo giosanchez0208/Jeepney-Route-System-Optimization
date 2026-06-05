@@ -8,40 +8,32 @@ Purpose
 Find the smallest Mohring passenger sample size that produces stable fleet
 allocations across repeated stochastic origin-destination sampling runs.
 
-This script does NOT run the microscopic simulation and does NOT evaluate the
-static surrogate cost. It only performs the Mohring fleet-allocation step:
+This script does NOT run the microscopic passenger/jeep simulation and does NOT
+score the static surrogate cost. It only performs the Mohring allocation step:
 
     sample OD pairs -> compute shortest TravelGraph journeys -> count route use
-    -> apply square-root Mohring allocation -> measure allocation variability.
+    -> apply square-root Mohring fleet allocation -> measure allocation CV
 
-Main modes
-----------
-1. generated: automatically generates route systems with RouteGenerator.
-2. custom: builds route systems from manually supplied coordinate sequences.
+Defense outputs
+---------------
+The script writes:
+    allocation_trials.csv
+    cv_by_route.csv
+    summary_by_sample_size.csv
+    recommended_sample_sizes.csv
+    frozen_route_manifest.json
+    defense_summary.md
+    plots/cv_route_count_*.png
+    plots/max_cv_all_cases.png
+    plots/recommended_sample_sizes.png
 
-Fleet budget modes
-------------------
-1. per_route: total fleet changes per case using route_count * fleet_per_route.
-   Example with fleet_per_route=10:
-       4 routes  -> 40 jeeps
-       8 routes  -> 80 jeeps
-       16 routes -> 160 jeeps
-       32 routes -> 320 jeeps
-   This does NOT force every route to receive 10 jeeps. It only sets the total
-   fleet budget. Mohring still redistributes the fleet according to demand.
-
-2. fixed: every route-count case uses the same total_fleet value.
-
-The route system is frozen during repeated trials for each route-count case.
-Only passenger OD samples change across trials. This keeps the CV result valid.
-
-How to use
-----------
+Run
+---
 Edit the DEFAULT SETTINGS below, then run:
 
     python mohring_stability_calibration.py
 
-You can still override defaults from the terminal.
+You can still override the defaults using command-line arguments.
 """
 
 from __future__ import annotations
@@ -68,14 +60,18 @@ except Exception as exc:
 # =============================================================================
 # DEFAULT SETTINGS YOU CAN EDIT
 # =============================================================================
-# Run only this after editing defaults:
-#     python mohring_stability_calibration.py
 
 CONFIG_PATH = Path("configs/profile_p1.yaml")
 
+# Explicit real Iligan precomputed assets.
+# These are preferred when they exist, so the script does not rebuild the
+# CityGraph from the PBF path in profile_p1.yaml.
+CITY_GRAPH_PKL = Path("rnd/pkl/profile_p1.pkl")
+DEMAND_SAMPLER_PKL = Path("rnd/pkl/ddm_8am.pkl")
+
 # False = auto-generate routes using RouteGenerator.
 # True  = use routes from CUSTOM_ROUTES_JSON.
-USE_CUSTOM_ROUTES = False
+USE_CUSTOM_ROUTES = True
 CUSTOM_ROUTES_JSON = Path("configs/custom_mohring_routes.json")
 
 ROUTE_COUNTS = [4, 8, 16, 32]
@@ -88,9 +84,10 @@ TARGET_CV = 0.50
 # False = all cases use TOTAL_FLEET.
 USE_FLEET_PER_ROUTE = True
 FLEET_PER_ROUTE = 10
+
 TOTAL_FLEET = 64
 
-# Generated-route settings.
+# Generated route settings.
 N_POINTS = 4
 ROUTE_MAX_RETRIES = 20
 GENERATION_ATTEMPTS = 1000
@@ -101,12 +98,11 @@ CELL_SIZE = 0.001
 DEMAND_COUNTING = "edge_hits"  # options: "edge_hits" or "unique_routes"
 SEED = 20260605
 
-# If most OD pairs never use any route, allocation can look stable only because
-# all routes stay close to the minimum allocation. This warning catches that.
+# Warn if too many OD pairs do not touch any ride edge.
 MIN_ROUTE_HIT_RATE = 0.05
 
 OUTPUT_DIR = Path("outputs/mohring_stability")
-MAKE_PLOTS = False
+MAKE_PLOTS = True
 VERBOSE = False
 
 
@@ -148,8 +144,9 @@ class CVSummaryRow:
 
 def _install_optional_dependency_stubs() -> None:
     """
-    Let toy-city diagnostics import project files even when real-map dependencies
-    are not installed. The stubs fail clearly if real OSM/PBF extraction is used.
+    Let toy-city / pickle-based runs import project files even when real-map
+    dependencies are not installed. If the real OSM/PBF path is actually used,
+    these stubs fail clearly.
     """
     import types
 
@@ -184,7 +181,6 @@ def _install_optional_dependency_stubs() -> None:
             pyrosm_stub.OSM = _MissingOSM
             sys.modules["pyrosm"] = pyrosm_stub
 
-    # direct_demand_sampler imports these. They are only needed for real API work.
     if "dotenv" not in sys.modules:
         try:
             __import__("dotenv")
@@ -203,7 +199,7 @@ def _install_optional_dependency_stubs() -> None:
 
 
 def import_project_modules() -> dict[str, Any]:
-    """Import project modules from a project root containing utils/."""
+    """Import project modules from the repository root containing utils/."""
     _install_optional_dependency_stubs()
     try:
         from utils.city_graph import CityGraph
@@ -213,13 +209,12 @@ def import_project_modules() -> dict[str, Any]:
         from utils.toy_city import toy_setup_from_yaml
         from utils.travel_graph import TravelGraph
     except ModuleNotFoundError as exc:
-        message = (
-            "Could not import the project `utils` package. Run this script from the "
-            "project root where utils/ contains city_graph.py, route.py, "
+        raise ModuleNotFoundError(
+            "Could not import the project `utils` package. Run this script from "
+            "the project root where utils/ contains city_graph.py, route.py, "
             "travel_graph.py, toy_city.py, etc.\n\n"
             f"Original import error: {exc}"
-        )
-        raise ModuleNotFoundError(message) from exc
+        ) from exc
 
     return {
         "CityGraph": CityGraph,
@@ -233,43 +228,139 @@ def import_project_modules() -> dict[str, Any]:
     }
 
 
+def resolve_existing_path(
+    path: Optional[Path],
+    *,
+    config_path: Optional[Path] = None,
+    label: str = "path",
+    required: bool = False,
+) -> Optional[Path]:
+    """
+    Resolve project-root, config-relative, script-relative, and flat-upload paths.
+
+    This lets the same script work when files are stored in the project layout:
+        configs/profile_p1.yaml
+        rnd/pkl/profile_p1.pkl
+        rnd/pkl/ddm_8am.pkl
+
+    or when the uploaded files are temporarily placed beside the script:
+        profile_p1.yaml
+        profile_p1.pkl
+        ddm_8am.pkl
+    """
+    if path is None:
+        if required:
+            raise FileNotFoundError(f"Missing required {label} path.")
+        return None
+
+    path = Path(path).expanduser()
+    candidates: list[Path] = []
+
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        candidates.append(Path.cwd() / path)
+
+        if config_path is not None:
+            config_path = Path(config_path).expanduser()
+            candidates.append(config_path.parent / path)
+            candidates.append(config_path.parent / path.name)
+
+        script_dir = Path(__file__).resolve().parent
+        candidates.append(script_dir / path)
+        candidates.append(script_dir / path.name)
+        candidates.append(Path.cwd() / path.name)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if candidate.exists():
+            return candidate.resolve()
+
+    if required:
+        checked = "\n  - ".join(str(c) for c in candidates)
+        raise FileNotFoundError(
+            f"Could not find {label}: {path}\n"
+            f"Checked:\n  - {checked}"
+        )
+
+    return path
+
+
 def load_yaml(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
+    resolved = resolve_existing_path(path, label="config", required=True)
+    with resolved.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+
     if not isinstance(data, dict):
-        raise ValueError(f"YAML file must contain a dictionary at the top level: {path}")
+        raise ValueError(f"YAML file must contain a dictionary at the top level: {resolved}")
+
     return data
 
 
 def load_environment(
     config_path: Path,
     modules: dict[str, Any],
+    city_graph_pkl: Optional[Path] = None,
+    demand_sampler_pkl: Optional[Path] = None,
     verbose: bool = False,
 ) -> tuple[Any, Any, dict[str, Any]]:
-    """Load CityGraph, demand sampler, and raw config without running Simulation."""
-    cfg = load_yaml(config_path)
+    """
+    Load CityGraph, demand sampler, and raw config without running Simulation.
 
-    if "toy_city" in cfg:
-        city, sampler, raw_config = modules["toy_setup_from_yaml"](str(config_path), verbose=verbose)
+    Important:
+    - If profile_p1.pkl exists, this function loads it directly.
+    - It will not rebuild the Iligan CityGraph from the PBF unless the pickle is missing.
+    - If ddm_8am.pkl exists, this function loads it directly and attaches the loaded city.
+    """
+    resolved_config_path = resolve_existing_path(config_path, label="config", required=True)
+    cfg = load_yaml(resolved_config_path)
+
+    cfg_cg_pkl = cfg.get("cg_pkl")
+    cfg_ddm_pkl = cfg.get("ddm_pkl")
+
+    resolved_cg_pkl = resolve_existing_path(
+        city_graph_pkl or (Path(cfg_cg_pkl) if cfg_cg_pkl else None),
+        config_path=resolved_config_path,
+        label="CityGraph pickle",
+        required=False,
+    )
+
+    resolved_ddm_pkl = resolve_existing_path(
+        demand_sampler_pkl or (Path(cfg_ddm_pkl) if cfg_ddm_pkl else None),
+        config_path=resolved_config_path,
+        label="DirectDemandSampler pickle",
+        required=False,
+    )
+
+    if "toy_city" in cfg and resolved_cg_pkl is None:
+        city, sampler, raw_config = modules["toy_setup_from_yaml"](
+            str(resolved_config_path),
+            verbose=verbose,
+        )
         return city, sampler, raw_config
 
     CityGraph = modules["CityGraph"]
     DirectDemandSampler = modules["DirectDemandSampler"]
     DDMConfig = modules["DDMConfig"]
 
-    cg_pkl = cfg.get("cg_pkl")
-    ddm_pkl = cfg.get("ddm_pkl")
-
-    if cg_pkl and Path(cg_pkl).exists():
+    if resolved_cg_pkl and resolved_cg_pkl.exists():
         import pickle
+
         if verbose:
-            print(f"[LOAD] CityGraph pickle: {cg_pkl}")
-        with open(cg_pkl, "rb") as f:
+            print(f"[LOAD] CityGraph pickle: {resolved_cg_pkl}")
+
+        with resolved_cg_pkl.open("rb") as f:
             city = pickle.load(f)
     else:
         cg_cfg = cfg.get("city_graph", {})
         if not cg_cfg:
-            raise ValueError("Config must contain toy_city, cg_pkl, or city_graph.")
+            raise ValueError("Config must contain toy_city, cg_pkl, city_graph, or a valid --city-graph-pkl.")
+
         city = CityGraph(
             bbox=tuple(cg_cfg.get("bbox")) if "bbox" in cg_cfg else None,
             name=cg_cfg.get("name", "UrbanNetwork"),
@@ -279,12 +370,15 @@ def load_environment(
             verbose=cg_cfg.get("verbose", False),
         )
 
-    if ddm_pkl and Path(ddm_pkl).exists():
+    if resolved_ddm_pkl and resolved_ddm_pkl.exists():
         import pickle
+
         if verbose:
-            print(f"[LOAD] DirectDemandSampler pickle: {ddm_pkl}")
-        with open(ddm_pkl, "rb") as f:
+            print(f"[LOAD] DirectDemandSampler pickle: {resolved_ddm_pkl}")
+
+        with resolved_ddm_pkl.open("rb") as f:
             sampler = pickle.load(f)
+
         sampler.city = city
     else:
         sampler = DirectDemandSampler(
@@ -368,9 +462,15 @@ def build_route_from_lonlat_coords(
     if len(coords_lonlat) < 2:
         raise ValueError("A custom route needs at least two coordinates.")
 
-    nodes = list(city.nodes)
+    drivable_nodes: set[Any] = set()
+    for city_edge in getattr(city, "graph", []):
+        if getattr(city_edge, "is_drivable", False):
+            drivable_nodes.add(city_edge.start)
+            drivable_nodes.add(city_edge.end)
+
+    nodes = list(drivable_nodes)
     if not nodes:
-        raise ValueError("CityGraph has no nodes.")
+        raise ValueError("CityGraph has no drivable nodes for custom-route snapping.")
 
     cg_coords = np.array([(n.lon, n.lat) for n in nodes], dtype=float)
     kdtree = cKDTree(cg_coords)
@@ -402,13 +502,19 @@ def build_route_from_lonlat_coords(
         raise ValueError("No closing path from final waypoint back to first waypoint.")
     base_path.extend(closing_segment)
 
-    if not base_path:
-        raise ValueError("Custom route produced an empty path.")
-
     l2_path = []
     for edge in base_path:
-        l2_edge = DirEdge(edge.start, edge.end, weight=getattr(edge, "weight", None))
+        l2_edge = DirEdge(
+            edge.start,
+            edge.end,
+            is_drivable=True,
+            weight=getattr(edge, "weight", None),
+        )
         setattr(l2_edge, "layer", 2)
+
+        if route_id is not None and hasattr(edge, "id"):
+            l2_edge.id = f"{route_id}_{edge.id}"
+
         l2_path.append(l2_edge)
 
     for i in range(len(l2_path)):
@@ -603,8 +709,8 @@ def allocate_by_mohring_exact(
     """
     Exact-N Mohring allocation for calibration.
 
-    This intentionally avoids adaptive early stopping so sample sizes are directly
-    comparable: 5 means exactly 5 OD pairs, 100 means exactly 100 OD pairs, etc.
+    This avoids adaptive early stopping so sample sizes are directly comparable:
+    5 means exactly 5 OD pairs, 100 means exactly 100 OD pairs, etc.
     """
     if sample_size <= 0:
         raise ValueError("sample_size must be positive.")
@@ -645,6 +751,14 @@ def cv_safe(mean_value: float, std_value: float) -> float:
     if mean_value == 0:
         return 0.0 if std_value == 0 else float("inf")
     return std_value / mean_value
+
+
+def get_case_total_fleet(route_count: int, fleet_mode: str, fleet_per_route: int, total_fleet: int) -> int:
+    if fleet_mode == "per_route":
+        return route_count * fleet_per_route
+    if fleet_mode == "fixed":
+        return total_fleet
+    raise ValueError("fleet_mode must be 'per_route' or 'fixed'.")
 
 
 def run_trials_for_sample_size(
@@ -801,12 +915,13 @@ def choose_recommendation(
     }
 
 
-def get_case_total_fleet(route_count: int, fleet_mode: str, fleet_per_route: int, total_fleet: int) -> int:
-    if fleet_mode == "per_route":
-        return route_count * fleet_per_route
-    if fleet_mode == "fixed":
-        return total_fleet
-    raise ValueError("fleet_mode must be 'per_route' or 'fixed'.")
+def _chosen_sample_from_recommendation(rec: dict[str, Any]) -> Optional[int]:
+    return (
+        rec.get("usable_recommended_stable_from_here")
+        or rec.get("recommended_stable_from_here")
+        or rec.get("usable_first_below_threshold")
+        or rec.get("first_below_threshold")
+    )
 
 
 # =============================================================================
@@ -934,7 +1049,67 @@ def write_route_manifest(path: Path, routes_by_count: dict[int, list[Any]]) -> N
         json.dump(payload, f, indent=2)
 
 
-def make_plots(out_dir: Path, system_rows: list[dict[str, Any]], target_cv: float) -> None:
+def _best_row_for_recommendation(
+    system_rows: list[dict[str, Any]],
+    route_count: int,
+    chosen_sample: Optional[int],
+) -> Optional[dict[str, Any]]:
+    if chosen_sample is None:
+        return None
+    for row in system_rows:
+        if int(row["route_count"]) == route_count and int(row["sample_size"]) == int(chosen_sample):
+            return row
+    return None
+
+
+def write_defense_summary(
+    path: Path,
+    recommendations: list[dict[str, Any]],
+    system_rows: list[dict[str, Any]],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Mohring Stability Calibration Defense Summary",
+        "",
+        "This experiment does not run the microscopic passenger-jeep simulation. It repeatedly samples OD pairs, computes TravelGraph journeys, counts route usage, applies square-root Mohring allocation, and selects the smallest sample size that stabilizes allocation variability.",
+        "",
+        "| Route count | Total fleet | Chosen sample size | Max allocation CV | Mean allocation CV | Route-hit rate |",
+        "|---:|---:|---:|---:|---:|---:|",
+    ]
+
+    for rec in recommendations:
+        route_count = int(rec["route_count"])
+        chosen = _chosen_sample_from_recommendation(rec)
+        row = _best_row_for_recommendation(system_rows, route_count, chosen)
+        if row is None:
+            lines.append(f"| {route_count} | - | Not reached | - | - | - |")
+        else:
+            lines.append(
+                f"| {route_count} | {int(row['total_fleet'])} | {chosen} | "
+                f"{row['max_allocation_cv']:.4f} | {row['mean_allocation_cv']:.4f} | "
+                f"{row['mean_route_hit_rate']:.4f} |"
+            )
+
+    lines.extend([
+        "",
+        "Recommended defense interpretation:",
+        "",
+        "> The selected Mohring sample size is the smallest tested value that keeps the worst route-level allocation coefficient of variation at or below the target threshold, while also checking that OD samples actually use the route network.",
+    ])
+
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# =============================================================================
+# PLOTTING
+# =============================================================================
+
+def make_plots(
+    out_dir: Path,
+    system_rows: list[dict[str, Any]],
+    recommendations: list[dict[str, Any]],
+    target_cv: float,
+) -> None:
     try:
         import matplotlib.pyplot as plt
     except Exception:
@@ -944,7 +1119,9 @@ def make_plots(out_dir: Path, system_rows: list[dict[str, Any]], target_cv: floa
     plots_dir = out_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    for route_count in sorted({int(row["route_count"]) for row in system_rows}):
+    route_counts = sorted({int(row["route_count"]) for row in system_rows})
+
+    for route_count in route_counts:
         rows = sorted(
             [row for row in system_rows if int(row["route_count"]) == route_count],
             key=lambda row: int(row["sample_size"]),
@@ -967,6 +1144,45 @@ def make_plots(out_dir: Path, system_rows: list[dict[str, Any]], target_cv: floa
         fig.savefig(plots_dir / f"cv_route_count_{route_count}.png", dpi=160)
         plt.close(fig)
 
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    for route_count in route_counts:
+        rows = sorted(
+            [row for row in system_rows if int(row["route_count"]) == route_count],
+            key=lambda row: int(row["sample_size"]),
+        )
+        xs = [int(row["sample_size"]) for row in rows]
+        max_cvs = [float(row["max_allocation_cv"]) for row in rows]
+        ax.plot(xs, max_cvs, marker="o", label=f"{route_count} routes")
+    ax.axhline(target_cv, linestyle="--", label=f"Target CV = {target_cv}")
+    ax.set_xscale("log")
+    ax.set_xlabel("Mohring sample size")
+    ax.set_ylabel("Max allocation CV")
+    ax.set_title("Worst-route Mohring allocation stability across route-count cases")
+    ax.grid(True, which="both", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(plots_dir / "max_cv_all_cases.png", dpi=160)
+    plt.close(fig)
+
+    rec_counts = []
+    rec_samples = []
+    for rec in recommendations:
+        chosen = _chosen_sample_from_recommendation(rec)
+        if chosen is not None:
+            rec_counts.append(str(rec["route_count"]))
+            rec_samples.append(int(chosen))
+
+    if rec_counts:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.bar(rec_counts, rec_samples)
+        ax.set_xlabel("Route-count case")
+        ax.set_ylabel("Chosen Mohring sample size")
+        ax.set_title("Recommended Mohring sample size per route-count case")
+        ax.grid(True, axis="y", alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(plots_dir / "recommended_sample_sizes.png", dpi=160)
+        plt.close(fig)
+
 
 # =============================================================================
 # MAIN ORCHESTRATION
@@ -981,6 +1197,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         description="Calibrate Mohring sample size using repeated exact-N fleet allocation trials."
     )
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
+    parser.add_argument("--city-graph-pkl", type=Path, default=CITY_GRAPH_PKL)
+    parser.add_argument("--demand-sampler-pkl", type=Path, default=DEMAND_SAMPLER_PKL)
     parser.add_argument("--route-mode", choices=["generated", "custom"], default=default_route_mode)
     parser.add_argument("--custom-routes-json", type=Path, default=default_custom_json)
     parser.add_argument("--route-counts", type=int, nargs="+", default=ROUTE_COUNTS)
@@ -1000,6 +1218,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--min-route-hit-rate", type=float, default=MIN_ROUTE_HIT_RATE)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--make-plots", action="store_true", default=MAKE_PLOTS)
+    parser.add_argument("--no-plots", action="store_false", dest="make_plots")
     parser.add_argument("--verbose", action="store_true", default=VERBOSE)
     return parser.parse_args(argv)
 
@@ -1040,7 +1259,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     random.seed(args.seed)
 
     modules = import_project_modules()
-    city, sampler, raw_config = load_environment(args.config, modules, verbose=args.verbose)
+    city, sampler, raw_config = load_environment(
+        args.config,
+        modules,
+        city_graph_pkl=args.city_graph_pkl,
+        demand_sampler_pkl=args.demand_sampler_pkl,
+        verbose=args.verbose,
+    )
     TravelGraph = modules["TravelGraph"]
 
     out_dir = args.output_dir
@@ -1059,7 +1284,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[CONFIG] fleet_mode=per_route, fleet_per_route={args.fleet_per_route}")
     else:
         print(f"[CONFIG] fleet_mode=fixed, total_fleet={args.total_fleet}")
+    print(
+        f"[CONFIG] city_graph_pkl="
+        f"{resolve_existing_path(args.city_graph_pkl, config_path=args.config, label='CityGraph pickle')}"
+    )
+    print(
+        f"[CONFIG] demand_sampler_pkl="
+        f"{resolve_existing_path(args.demand_sampler_pkl, config_path=args.config, label='DirectDemandSampler pickle')}"
+    )
     print(f"[CONFIG] route_mode={args.route_mode}, demand_counting={args.demand_counting}")
+    print(f"[CONFIG] make_plots={args.make_plots}")
 
     for route_count in args.route_counts:
         case_total_fleet = get_case_total_fleet(
@@ -1155,9 +1389,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     write_recommendations(out_dir / "recommended_sample_sizes.csv", recommendations)
     write_route_manifest(out_dir / "frozen_route_manifest.json", routes_by_count)
+    write_defense_summary(out_dir / "defense_summary.md", recommendations, system_rows)
 
     run_metadata = {
         "config": str(args.config),
+        "city_graph_pkl": str(
+            resolve_existing_path(
+                args.city_graph_pkl,
+                config_path=args.config,
+                label="CityGraph pickle",
+            )
+        ),
+        "demand_sampler_pkl": str(
+            resolve_existing_path(
+                args.demand_sampler_pkl,
+                config_path=args.config,
+                label="DirectDemandSampler pickle",
+            )
+        ),
         "route_mode": args.route_mode,
         "route_counts": args.route_counts,
         "sample_sizes": args.sample_sizes,
@@ -1170,23 +1419,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         "demand_counting": args.demand_counting,
         "min_route_hit_rate": args.min_route_hit_rate,
         "seed": args.seed,
+        "make_plots": args.make_plots,
         "note": "No microscopic simulation was run; this is exact-N Mohring allocation stability calibration.",
     }
     with (out_dir / "run_metadata.json").open("w", encoding="utf-8") as f:
         json.dump(run_metadata, f, indent=2)
 
     if args.make_plots:
-        make_plots(out_dir, system_rows, target_cv=args.target_cv)
+        make_plots(out_dir, system_rows, recommendations, target_cv=args.target_cv)
 
     print("\n[DONE] Outputs written to:", out_dir.resolve())
     print("[DONE] Recommendations:")
     for rec in recommendations:
+        chosen = _chosen_sample_from_recommendation(rec)
         print(
             f"  routes={rec['route_count']}: "
             f"first_below={rec['first_below_threshold']}, "
             f"stable_from_here={rec['recommended_stable_from_here']}, "
             f"usable_first_below={rec['usable_first_below_threshold']}, "
-            f"usable_stable_from_here={rec['usable_recommended_stable_from_here']}"
+            f"usable_stable_from_here={rec['usable_recommended_stable_from_here']}, "
+            f"chosen_for_defense={chosen}"
         )
 
     return 0

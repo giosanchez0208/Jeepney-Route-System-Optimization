@@ -1,0 +1,1695 @@
+{
+  "metadata": {
+    "name": "Iligan Mohring Custom Route Templates",
+    "coordinate_order": "[lon, lat]",
+    "source_note": "Coordinates are [longitude, latitude] barangay/location anchor points for Mohring custom route templates. They are not official LTFRB franchise geometries. The calibration script snaps these anchors to the CityGraph and uses CityGraph shortest paths to build valid closed Layer-2 routes.",
+    "route_set_counts": [
+      4,
+      8,
+      16,
+      32
+    ],
+    "recommended_use": "Use with mohring_stability_calibration.py in custom route mode."
+  },
+  "anchors": {
+    "Buru-un": [
+      124.1688,
+      8.1872
+    ],
+    "Maria Cristina": [
+      124.1936,
+      8.1989
+    ],
+    "Ditucalan": [
+      124.1927,
+      8.1751
+    ],
+    "Suarez": [
+      124.2173,
+      8.1914
+    ],
+    "Upper Tominobo": [
+      124.2251,
+      8.1688
+    ],
+    "Tominobo Proper": [
+      124.2221,
+      8.2104
+    ],
+    "Santa Elena": [
+      124.2273,
+      8.1948
+    ],
+    "Tubod": [
+      124.241,
+      8.2117
+    ],
+    "Mahayhay": [
+      124.2406,
+      8.2219
+    ],
+    "Tambacan": [
+      124.2347,
+      8.2236
+    ],
+    "Iligan City Center": [
+      124.241,
+      8.231
+    ],
+    "Villa Verde": [
+      124.2437,
+      8.2331
+    ],
+    "Pala-o": [
+      124.2532,
+      8.2286
+    ],
+    "Del Carmen": [
+      124.2578,
+      8.2322
+    ],
+    "San Miguel": [
+      124.2479,
+      8.2387
+    ],
+    "Tibanga": [
+      124.241,
+      8.2402
+    ],
+    "Bagong Silang": [
+      124.252,
+      8.2418
+    ],
+    "Hinaplanon": [
+      124.2592,
+      8.2467
+    ],
+    "Luinab": [
+      124.2681,
+      8.2472
+    ],
+    "Puga-an": [
+      124.2742,
+      8.2285
+    ],
+    "Tipanoy": [
+      124.2634,
+      8.1902
+    ],
+    "Abuno": [
+      124.2571,
+      8.1846
+    ],
+    "Santa Filomena": [
+      124.2593,
+      8.2681
+    ],
+    "Acmac": [
+      124.2649,
+      8.274
+    ],
+    "Kiwalan": [
+      124.2668,
+      8.2801
+    ],
+    "Bonbonon": [
+      124.2902,
+      8.2667
+    ],
+    "Kabacsanan": [
+      124.3088,
+      8.2815
+    ],
+    "Bunawan": [
+      124.3028,
+      8.3023
+    ],
+    "Dalipuga": [
+      124.255,
+      8.3074
+    ]
+  },
+  "route_sets": {
+    "4": {
+      "routes": [
+        {
+          "id": "R00_Tubod_Tibanga",
+          "name": "R00 Tubod Tibanga",
+          "anchors": [
+            "Tubod",
+            "Mahayhay",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R01_Tubod_Tominobo",
+          "name": "R01 Tubod Tominobo",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tominobo Proper"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2221,
+              8.2104
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R02_Palao_Kiwalan",
+          "name": "R02 Palao Kiwalan",
+          "anchors": [
+            "Pala-o",
+            "Hinaplanon",
+            "Santa Filomena",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R03_Buruun_Palao",
+          "name": "R03 Buruun Palao",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        }
+      ]
+    },
+    "8": {
+      "routes": [
+        {
+          "id": "R00_Tubod_Tibanga",
+          "name": "R00 Tubod Tibanga",
+          "anchors": [
+            "Tubod",
+            "Mahayhay",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R01_Tubod_Tominobo",
+          "name": "R01 Tubod Tominobo",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tominobo Proper"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2221,
+              8.2104
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R02_Palao_Kiwalan",
+          "name": "R02 Palao Kiwalan",
+          "anchors": [
+            "Pala-o",
+            "Hinaplanon",
+            "Santa Filomena",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R03_Buruun_Palao",
+          "name": "R03 Buruun Palao",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R04_Tambacan_Tibanga",
+          "name": "R04 Tambacan Tibanga",
+          "anchors": [
+            "Tambacan",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2347,
+              8.2236
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R05_Tubod_Tipanoy",
+          "name": "R05 Tubod Tipanoy",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tipanoy"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2634,
+              8.1902
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R06_MariaCristina_Tubod",
+          "name": "R06 MariaCristina Tubod",
+          "anchors": [
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R07_Palao_Luinab",
+          "name": "R07 Palao Luinab",
+          "anchors": [
+            "Pala-o",
+            "Del Carmen",
+            "Luinab"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2578,
+              8.2322
+            ],
+            [
+              124.2681,
+              8.2472
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        }
+      ]
+    },
+    "16": {
+      "routes": [
+        {
+          "id": "R00_Tubod_Tibanga",
+          "name": "R00 Tubod Tibanga",
+          "anchors": [
+            "Tubod",
+            "Mahayhay",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R01_Tubod_Tominobo",
+          "name": "R01 Tubod Tominobo",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tominobo Proper"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2221,
+              8.2104
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R02_Palao_Kiwalan",
+          "name": "R02 Palao Kiwalan",
+          "anchors": [
+            "Pala-o",
+            "Hinaplanon",
+            "Santa Filomena",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R03_Buruun_Palao",
+          "name": "R03 Buruun Palao",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R04_Tambacan_Tibanga",
+          "name": "R04 Tambacan Tibanga",
+          "anchors": [
+            "Tambacan",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2347,
+              8.2236
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R05_Tubod_Tipanoy",
+          "name": "R05 Tubod Tipanoy",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tipanoy"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2634,
+              8.1902
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R06_MariaCristina_Tubod",
+          "name": "R06 MariaCristina Tubod",
+          "anchors": [
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R07_Palao_Luinab",
+          "name": "R07 Palao Luinab",
+          "anchors": [
+            "Pala-o",
+            "Del Carmen",
+            "Luinab"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2578,
+              8.2322
+            ],
+            [
+              124.2681,
+              8.2472
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R08_Dalipuga_Palao",
+          "name": "R08 Dalipuga Palao",
+          "anchors": [
+            "Dalipuga",
+            "Kiwalan",
+            "Santa Filomena",
+            "Hinaplanon",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.255,
+              8.3074
+            ],
+            [
+              124.2668,
+              8.2801
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R09_Buruun_Tubod",
+          "name": "R09 Buruun Tubod",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Suarez",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2173,
+              8.1914
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R10_Tominobo_Tibanga",
+          "name": "R10 Tominobo Tibanga",
+          "anchors": [
+            "Tominobo Proper",
+            "Tubod",
+            "Mahayhay",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R11_Tipanoy_Palao",
+          "name": "R11 Tipanoy Palao",
+          "anchors": [
+            "Tipanoy",
+            "Abuno",
+            "Puga-an",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.2634,
+              8.1902
+            ],
+            [
+              124.2571,
+              8.1846
+            ],
+            [
+              124.2742,
+              8.2285
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R12_Luinab_Tibanga",
+          "name": "R12 Luinab Tibanga",
+          "anchors": [
+            "Luinab",
+            "Hinaplanon",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2681,
+              8.2472
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R13_Bonbonon_Kiwalan",
+          "name": "R13 Bonbonon Kiwalan",
+          "anchors": [
+            "Bonbonon",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2902,
+              8.2667
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R14_Ditucalan_Tubod",
+          "name": "R14 Ditucalan Tubod",
+          "anchors": [
+            "Ditucalan",
+            "Suarez",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1927,
+              8.1751
+            ],
+            [
+              124.2173,
+              8.1914
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R15_VillaVerde_Palao",
+          "name": "R15 VillaVerde Palao",
+          "anchors": [
+            "Villa Verde",
+            "Pala-o",
+            "Del Carmen"
+          ],
+          "coords_lonlat": [
+            [
+              124.2437,
+              8.2331
+            ],
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2578,
+              8.2322
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        }
+      ]
+    },
+    "32": {
+      "routes": [
+        {
+          "id": "R00_Tubod_Tibanga",
+          "name": "R00 Tubod Tibanga",
+          "anchors": [
+            "Tubod",
+            "Mahayhay",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R01_Tubod_Tominobo",
+          "name": "R01 Tubod Tominobo",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tominobo Proper"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2221,
+              8.2104
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R02_Palao_Kiwalan",
+          "name": "R02 Palao Kiwalan",
+          "anchors": [
+            "Pala-o",
+            "Hinaplanon",
+            "Santa Filomena",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R03_Buruun_Palao",
+          "name": "R03 Buruun Palao",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R04_Tambacan_Tibanga",
+          "name": "R04 Tambacan Tibanga",
+          "anchors": [
+            "Tambacan",
+            "Iligan City Center",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2347,
+              8.2236
+            ],
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R05_Tubod_Tipanoy",
+          "name": "R05 Tubod Tipanoy",
+          "anchors": [
+            "Tubod",
+            "Santa Elena",
+            "Tipanoy"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.2634,
+              8.1902
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R06_MariaCristina_Tubod",
+          "name": "R06 MariaCristina Tubod",
+          "anchors": [
+            "Maria Cristina",
+            "Tominobo Proper",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R07_Palao_Luinab",
+          "name": "R07 Palao Luinab",
+          "anchors": [
+            "Pala-o",
+            "Del Carmen",
+            "Luinab"
+          ],
+          "coords_lonlat": [
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2578,
+              8.2322
+            ],
+            [
+              124.2681,
+              8.2472
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R08_Dalipuga_Palao",
+          "name": "R08 Dalipuga Palao",
+          "anchors": [
+            "Dalipuga",
+            "Kiwalan",
+            "Santa Filomena",
+            "Hinaplanon",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.255,
+              8.3074
+            ],
+            [
+              124.2668,
+              8.2801
+            ],
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R09_Buruun_Tubod",
+          "name": "R09 Buruun Tubod",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Suarez",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2173,
+              8.1914
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R10_Tominobo_Tibanga",
+          "name": "R10 Tominobo Tibanga",
+          "anchors": [
+            "Tominobo Proper",
+            "Tubod",
+            "Mahayhay",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2221,
+              8.2104
+            ],
+            [
+              124.241,
+              8.2117
+            ],
+            [
+              124.2406,
+              8.2219
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R11_Tipanoy_Palao",
+          "name": "R11 Tipanoy Palao",
+          "anchors": [
+            "Tipanoy",
+            "Abuno",
+            "Puga-an",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.2634,
+              8.1902
+            ],
+            [
+              124.2571,
+              8.1846
+            ],
+            [
+              124.2742,
+              8.2285
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R12_Luinab_Tibanga",
+          "name": "R12 Luinab Tibanga",
+          "anchors": [
+            "Luinab",
+            "Hinaplanon",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2681,
+              8.2472
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R13_Bonbonon_Kiwalan",
+          "name": "R13 Bonbonon Kiwalan",
+          "anchors": [
+            "Bonbonon",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2902,
+              8.2667
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R14_Ditucalan_Tubod",
+          "name": "R14 Ditucalan Tubod",
+          "anchors": [
+            "Ditucalan",
+            "Suarez",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.1927,
+              8.1751
+            ],
+            [
+              124.2173,
+              8.1914
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R15_VillaVerde_Palao",
+          "name": "R15 VillaVerde Palao",
+          "anchors": [
+            "Villa Verde",
+            "Pala-o",
+            "Del Carmen"
+          ],
+          "coords_lonlat": [
+            [
+              124.2437,
+              8.2331
+            ],
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2578,
+              8.2322
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R16_UpperTominobo_Tubod",
+          "name": "R16 UpperTominobo Tubod",
+          "anchors": [
+            "Upper Tominobo",
+            "Santa Elena",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.2251,
+              8.1688
+            ],
+            [
+              124.2273,
+              8.1948
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R17_BagongSilang_Palao",
+          "name": "R17 BagongSilang Palao",
+          "anchors": [
+            "Bagong Silang",
+            "San Miguel",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.252,
+              8.2418
+            ],
+            [
+              124.2479,
+              8.2387
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R18_SanMiguel_Tibanga",
+          "name": "R18 SanMiguel Tibanga",
+          "anchors": [
+            "San Miguel",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2479,
+              8.2387
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R19_DelCarmen_Luinab",
+          "name": "R19 DelCarmen Luinab",
+          "anchors": [
+            "Del Carmen",
+            "Luinab"
+          ],
+          "coords_lonlat": [
+            [
+              124.2578,
+              8.2322
+            ],
+            [
+              124.2681,
+              8.2472
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R20_Pugaan_Tibanga",
+          "name": "R20 Pugaan Tibanga",
+          "anchors": [
+            "Puga-an",
+            "Pala-o",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2742,
+              8.2285
+            ],
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R21_Abuno_Tubod",
+          "name": "R21 Abuno Tubod",
+          "anchors": [
+            "Abuno",
+            "Tipanoy",
+            "Tubod"
+          ],
+          "coords_lonlat": [
+            [
+              124.2571,
+              8.1846
+            ],
+            [
+              124.2634,
+              8.1902
+            ],
+            [
+              124.241,
+              8.2117
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R22_SantaFilomena_Tibanga",
+          "name": "R22 SantaFilomena Tibanga",
+          "anchors": [
+            "Santa Filomena",
+            "Hinaplanon",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.2593,
+              8.2681
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R23_Acmac_Kiwalan",
+          "name": "R23 Acmac Kiwalan",
+          "anchors": [
+            "Acmac",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.2649,
+              8.274
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R24_Kabacsanan_Kiwalan",
+          "name": "R24 Kabacsanan Kiwalan",
+          "anchors": [
+            "Kabacsanan",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.3088,
+              8.2815
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R25_Bunawan_Dalipuga",
+          "name": "R25 Bunawan Dalipuga",
+          "anchors": [
+            "Bunawan",
+            "Dalipuga"
+          ],
+          "coords_lonlat": [
+            [
+              124.3028,
+              8.3023
+            ],
+            [
+              124.255,
+              8.3074
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R26_Dalipuga_Tibanga",
+          "name": "R26 Dalipuga Tibanga",
+          "anchors": [
+            "Dalipuga",
+            "Kiwalan",
+            "Tibanga"
+          ],
+          "coords_lonlat": [
+            [
+              124.255,
+              8.3074
+            ],
+            [
+              124.2668,
+              8.2801
+            ],
+            [
+              124.241,
+              8.2402
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R27_Bonbonon_Palao",
+          "name": "R27 Bonbonon Palao",
+          "anchors": [
+            "Bonbonon",
+            "Kiwalan",
+            "Hinaplanon",
+            "Pala-o"
+          ],
+          "coords_lonlat": [
+            [
+              124.2902,
+              8.2667
+            ],
+            [
+              124.2668,
+              8.2801
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2532,
+              8.2286
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R28_MariaCristina_Tipanoy",
+          "name": "R28 MariaCristina Tipanoy",
+          "anchors": [
+            "Maria Cristina",
+            "Suarez",
+            "Tipanoy"
+          ],
+          "coords_lonlat": [
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2173,
+              8.1914
+            ],
+            [
+              124.2634,
+              8.1902
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R29_Buruun_Tominobo",
+          "name": "R29 Buruun Tominobo",
+          "anchors": [
+            "Buru-un",
+            "Maria Cristina",
+            "Tominobo Proper"
+          ],
+          "coords_lonlat": [
+            [
+              124.1688,
+              8.1872
+            ],
+            [
+              124.1936,
+              8.1989
+            ],
+            [
+              124.2221,
+              8.2104
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R30_Tambacan_Luinab",
+          "name": "R30 Tambacan Luinab",
+          "anchors": [
+            "Tambacan",
+            "Pala-o",
+            "Luinab"
+          ],
+          "coords_lonlat": [
+            [
+              124.2347,
+              8.2236
+            ],
+            [
+              124.2532,
+              8.2286
+            ],
+            [
+              124.2681,
+              8.2472
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        },
+        {
+          "id": "R31_Center_Kiwalan",
+          "name": "R31 Center Kiwalan",
+          "anchors": [
+            "Iligan City Center",
+            "Tibanga",
+            "Hinaplanon",
+            "Kiwalan"
+          ],
+          "coords_lonlat": [
+            [
+              124.241,
+              8.231
+            ],
+            [
+              124.241,
+              8.2402
+            ],
+            [
+              124.2592,
+              8.2467
+            ],
+            [
+              124.2668,
+              8.2801
+            ]
+          ],
+          "note": "Template route anchors; actual graph route is snapped/stitched by the calibration code."
+        }
+      ]
+    }
+  }
+}
