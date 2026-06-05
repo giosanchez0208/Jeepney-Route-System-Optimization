@@ -49,6 +49,12 @@ def run_profile(tag: str, seed: int, ddm_pkl: str | None = None, start: bool = T
     cfg["optimization"]["output_root"] = f"{FINAL_ROOT}/{tag}"
     cfg["seed"] = seed  # recorded into the run's configs.yaml for traceability
 
+    # When several runs share one machine, the launcher caps workers per run via OPT_N_WORKERS
+    # so the pools don't oversubscribe cores / RAM. Env overrides the YAML.
+    env_workers = os.environ.get("OPT_N_WORKERS")
+    if env_workers:
+        cfg["optimization"]["n_workers"] = int(env_workers)
+
     out_root = Path(f"{FINAL_ROOT}/{tag}")
     out_root.mkdir(parents=True, exist_ok=True)
     cfg_path = out_root / "_run_config.yaml"
@@ -68,3 +74,55 @@ def run_profile(tag: str, seed: int, ddm_pkl: str | None = None, start: bool = T
     if start:
         opt.start()
     return opt
+
+
+def run_batch(tags, workers_per_run=None):
+    """
+    Launch several opt_<tag>.py runs IN PARALLEL on this machine, then wait for all to finish.
+    One command, then walk away. Each run is a separate process with its own worker pool; the
+    worker count is auto-sized (cores / runs - 1) so the pools share the machine without
+    oversubscribing -- override with the OPT_N_WORKERS env var or the workers_per_run argument.
+    """
+    import subprocess
+
+    n_cores = os.cpu_count() or 4
+    if workers_per_run is None:
+        env_w = os.environ.get("OPT_N_WORKERS")
+        workers_per_run = int(env_w) if env_w else max(1, n_cores // len(tags) - 1)
+    est_gb = len(tags) * (workers_per_run * 1.5 + 1.5)
+
+    print("=" * 70)
+    print(f"BATCH: {len(tags)} runs in parallel -> {tags}")
+    print(f"cores={n_cores} | workers/run={workers_per_run} | est. RAM ~{est_gb:.0f} GB")
+    print("If RAM is tight or it swaps, set  OPT_N_WORKERS=<smaller>  and re-launch.")
+    print("=" * 70)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    logs = Path(here) / "logs"
+    logs.mkdir(exist_ok=True)
+    env = dict(os.environ)
+    env["OPT_N_WORKERS"] = str(workers_per_run)
+
+    procs = []
+    for tag in tags:
+        logp = logs / f"opt_{tag}.log"
+        lf = open(logp, "w", encoding="utf-8")
+        p = subprocess.Popen([sys.executable, f"opt_{tag}.py"], stdout=lf, stderr=subprocess.STDOUT,
+                             env=env, cwd=here)
+        procs.append((tag, p, lf))
+        print(f"  started opt_{tag}.py (PID {p.pid}) -> logs/opt_{tag}.log")
+
+    print("\nAll launched. Keep this window open until it says BATCH COMPLETE.")
+    print("Watch progress with:  tail -f logs/opt_<tag>.log\n")
+
+    failed = []
+    for tag, p, lf in procs:
+        p.wait()
+        lf.close()
+        if p.returncode == 0:
+            print(f"  [OK]     opt_{tag}.py finished")
+        else:
+            print(f"  [FAILED] opt_{tag}.py exit {p.returncode} (see logs/opt_{tag}.log)")
+            failed.append(tag)
+
+    print("\nBATCH COMPLETE." + (f"  Failed: {failed}" if failed else "  All runs finished cleanly."))
