@@ -50,7 +50,7 @@ class Jeep:
             route._prefix_sums = [0.0] * (n + 1)
             for i, e in enumerate(path):
                 route._prefix_sums[i + 1] = route._prefix_sums[i] + e.weight
-                route._node_indices[id(e.start)].append(i)
+                route._node_indices[(e.start.lon, e.start.lat)].append(i)
             route._route_length = route._prefix_sums[-1] if n > 0 else 0.0
             route._min_weight_cache = {}
         
@@ -167,12 +167,18 @@ class Jeep:
         if not isinstance(start_node, Node) or not isinstance(end_node, Node):
             raise TypeError("[JEEP] Both start_node and end_node must be Node objects.")
             
-        cache_key = (id(start_node), id(end_node))
+        # Match by COORDINATE, not object identity. Layer-2 promotion gives every route its
+        # own Node copies, so a passenger's planned-alight node (built on a DIFFERENT route)
+        # could never match this route's nodes by id() -- which silently made opportunistic
+        # boarding impossible. Coordinate keys let an alternative jeep recognize a shared stop.
+        start_key = (start_node.lon, start_node.lat)
+        end_key = (end_node.lon, end_node.lat)
+        cache_key = (start_key, end_key)
         if cache_key in self.route._min_weight_cache:
             return self.route._min_weight_cache[cache_key]
-            
-        start_indices = self.route._node_indices.get(id(start_node))
-        end_indices = self.route._node_indices.get(id(end_node))
+
+        start_indices = self.route._node_indices.get(start_key)
+        end_indices = self.route._node_indices.get(end_key)
         
         if not start_indices or not end_indices:
             self.route._min_weight_cache[cache_key] = None
