@@ -74,18 +74,18 @@ DEMAND_SAMPLER_PKL = Path("rnd/pkl/ddm_8am.pkl")
 USE_CUSTOM_ROUTES = True
 CUSTOM_ROUTES_JSON = Path("configs/custom_mohring_routes.json")
 
-ROUTE_COUNTS = [4, 8, 16, 32]
-SAMPLE_SIZES = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
+ROUTE_COUNTS = [38]
+SAMPLE_SIZES = [500, 1000, 1500, 2000, 3000]
 TRIALS = 7
 TARGET_CV = 0.50
 
 # Fleet budget setting.
 # True  = total fleet per case is route_count * FLEET_PER_ROUTE.
 # False = all cases use TOTAL_FLEET.
-USE_FLEET_PER_ROUTE = True
+USE_FLEET_PER_ROUTE = False
 FLEET_PER_ROUTE = 10
 
-TOTAL_FLEET = 64
+TOTAL_FLEET = 2000
 
 # Generated route settings.
 N_POINTS = 4
@@ -101,7 +101,7 @@ SEED = 20260605
 # Warn if too many OD pairs do not touch any ride edge.
 MIN_ROUTE_HIT_RATE = 0.05
 
-OUTPUT_DIR = Path("outputs/mohring_stability")
+OUTPUT_DIR = Path("outputs/mohring_stability_2")
 MAKE_PLOTS = True
 VERBOSE = False
 

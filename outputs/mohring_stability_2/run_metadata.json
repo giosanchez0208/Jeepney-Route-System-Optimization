@@ -1,0 +1,27 @@
+{
+  "config": "configs/profile_p1.yaml",
+  "city_graph_pkl": "/Users/joshuaradzadlaon/Documents/vscode/Jeepney-Route-System-Optimization/rnd/pkl/profile_p1.pkl",
+  "demand_sampler_pkl": "/Users/joshuaradzadlaon/Documents/vscode/Jeepney-Route-System-Optimization/rnd/pkl/ddm_8am.pkl",
+  "route_mode": "custom",
+  "route_counts": [
+    38
+  ],
+  "sample_sizes": [
+    500,
+    1000,
+    1500,
+    2000,
+    3000
+  ],
+  "trials": 7,
+  "target_cv": 0.5,
+  "fleet_mode": "fixed",
+  "fleet_per_route": 10,
+  "fixed_total_fleet": 2000,
+  "cell_size": 0.001,
+  "demand_counting": "edge_hits",
+  "min_route_hit_rate": 0.05,
+  "seed": 20260605,
+  "make_plots": true,
+  "note": "No microscopic simulation was run; this is exact-N Mohring allocation stability calibration."
+}
