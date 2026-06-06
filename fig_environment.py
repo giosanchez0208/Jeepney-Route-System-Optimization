@@ -57,6 +57,7 @@ DEMAND_GAMMA = 0.5         # PowerNorm gamma < 1 spreads the heavy right-skew so
 FRICTION_CMAP = "plasma"   # TomTom friction weight (a different quantity than demand)
 CENTRALITY_CMAP = "Reds"   # betweenness centrality
 IDW_CMAP = "Blues"         # IDW traffic weights
+EXCESS_CMAP = "YlGnBu"     # time-of-day surplus over the all-day floor (distinct from warm demand)
 DEMAND_HIST_COLOR = "#e34a33"  # warm tone tying the OD histogram to the demand cmap
 
 BASE_SIZE = 800            # px of the PIL city render used as the faint base
@@ -127,22 +128,77 @@ def _demand_norm(*ddms) -> PowerNorm:
 # --------------------------------------------------------------------------------------
 # Figures -- 4.1 Direct Demand Model
 # --------------------------------------------------------------------------------------
+def _aligned_floor_excess(panels):
+    """Coordinate-align the per-time demand (the three pickles hold separate Node objects, so points
+    are matched by rounded (lon,lat)) and decompose it into:
+        baseline[node] = per-point minimum across the times  (the always-present 'floor')
+        excess[t][node] = demand_t[node] - baseline[node]     (>= 0, the time-specific surplus)
+    Returns (baseline_by_node, [excess_by_node per time], floor_fraction_of_demand).
+    """
+    maps, coord_node = [], {}
+    for _, d in panels:
+        m = {}
+        for n, p in d.node_probabilities.items():
+            k = (round(n.lon, 7), round(n.lat, 7))
+            m[k] = p
+            coord_node.setdefault(k, n)
+        maps.append(m)
+    common = set(maps[0]).intersection(*maps[1:]) if maps else set()
+    base_by_k = {k: min(m[k] for m in maps) for k in common}
+    baseline = {coord_node[k]: base_by_k[k] for k in common}
+    excess = [{coord_node[k]: m[k] - base_by_k[k] for k in common} for m in maps]
+
+    floor_mass = sum(base_by_k.values())
+    totals = [sum(m[k] for k in common) for m in maps] or [1.0]
+    denom = (sum(totals) / len(totals)) or 1.0
+    return baseline, excess, floor_mass / denom
+
+
 def fig_ddm_time_comparison(A, out):
-    """8 AM / 1 PM / 5 PM demand fields on a SHARED scale with one colorbar (now comparable)."""
+    """Top row: the all-day floor (per-point minimum) + the three absolute demand surfaces on a shared
+    scale. Bottom row: each time's EXCESS over that floor on its own amplified scale -- isolating the
+    time-of-day signal that the shared structural demand otherwise hides."""
     cg = A["cg"]
     panels = [(lbl, A["ddm"][lbl]) for lbl in DDM_PKLS]
     base = cg.draw(size=BASE_SIZE, only_drivable=False)
     extent = _extent(cg)
-    norm = _demand_norm(*(d for _, d in panels))
+    anorm = _demand_norm(*(d for _, d in panels))
+    baseline, excess, floor_frac = _aligned_floor_excess(panels)
+    emax = max((max(e.values(), default=0.0) for e in excess), default=0.0)
+    enorm = PowerNorm(DEMAND_GAMMA, vmin=0.0, vmax=(emax or 1.0))
 
-    fig, axes = plt.subplots(1, 3, figsize=(16.5, 6.4), constrained_layout=True)
-    sc = None
-    for ax, letter, (lbl, d) in zip(axes, "abc", panels):
-        sc = _scatter_field(ax, base, extent, d.node_probabilities, norm, DEMAND_CMAP)
-        ax.set_title(f"({letter}) {lbl} Direct Demand Model", fontsize=13)
-    cbar = fig.colorbar(sc, ax=axes.ravel().tolist(), shrink=0.82, aspect=32, pad=0.012)
-    cbar.set_label("OD demand probability  (shared scale)")
-    fig.suptitle("Direct Demand Model across the service day")
+    def _sq(ax):
+        ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3]); ax.set_aspect("equal")
+
+    fig = plt.figure(figsize=(20, 11), constrained_layout=True)
+    gs = fig.add_gridspec(2, 4)
+
+    # row 0 : all-day floor + the three absolute surfaces (shared absolute scale)
+    row0 = []
+    ax = fig.add_subplot(gs[0, 0])
+    sc_a = _scatter_field(ax, base, extent, baseline, anorm, DEMAND_CMAP); _sq(ax)
+    ax.set_title("All-day floor\n(per-point minimum)", fontsize=12); row0.append(ax)
+    for j, (lbl, d) in enumerate(panels):
+        ax = fig.add_subplot(gs[0, j + 1])
+        sc_a = _scatter_field(ax, base, extent, d.node_probabilities, anorm, DEMAND_CMAP); _sq(ax)
+        ax.set_title(f"{lbl} — total demand", fontsize=12); row0.append(ax)
+    fig.colorbar(sc_a, ax=row0, shrink=0.85, aspect=34, pad=0.01).set_label("OD demand probability (shared)")
+
+    # row 1 : each time's surplus over the floor (own amplified scale)
+    ax = fig.add_subplot(gs[1, 0]); ax.axis("off")
+    ax.text(0.5, 0.5, "Excess over floor\n= total − all-day minimum\n(own amplified scale →)",
+            ha="center", va="center", fontsize=11, transform=ax.transAxes)
+    row1 = []
+    sc_e = None
+    for j, (lbl, _d) in enumerate(panels):
+        ax = fig.add_subplot(gs[1, j + 1])
+        sc_e = _scatter_field(ax, base, extent, excess[j], enorm, EXCESS_CMAP); _sq(ax)
+        ax.set_title(f"{lbl} — excess over floor", fontsize=12); row1.append(ax)
+    fig.colorbar(sc_e, ax=row1, shrink=0.85, aspect=30, pad=0.01).set_label("demand above all-day floor (Δ share)")
+
+    fig.suptitle("Direct Demand Model across the service day — structural floor vs time-specific "
+                 f"surplus   (floor ≈ {floor_frac:.0%} of demand; {1 - floor_frac:.0%} shifts with time of day)",
+                 fontsize=15)
     fig.savefig(out)
     plt.close(fig)
     return out
@@ -185,6 +241,38 @@ def fig_ddm_pre_imputed(A, out):
     ax.set_title("Pre-Imputed Points (TomTom Empirical Data)")
     cbar = fig.colorbar(sc, ax=ax, shrink=0.82, aspect=30, pad=0.02)
     cbar.set_label("Friction Weight (Travel Time / Free Flow)")
+    fig.savefig(out)
+    plt.close(fig)
+    return out
+
+
+def fig_ddm_query_vs_imputed(A, out):
+    """The IDW-imputed traffic surface (all nodes) with the ORIGINAL TomTom-queried centroids marked.
+
+    The distinction is recoverable from the sampler itself -- queried nodes are
+    ddm.empirical_traffic.keys() (== ddm.target_centroids), imputed nodes are the remaining
+    traffic_weights -- so this is honest, not a guess from the diffused surface.
+    """
+    cg, d = A["cg"], A["ddm"]["1:00 PM"]
+    base = cg.draw(size=BASE_SIZE, only_drivable=False)
+    extent = _extent(cg)
+    weights = d.traffic_weights
+    queried = list(d.empirical_traffic.keys())  # the originally queried centroids
+    n_q = len(queried)
+    n_i = max(0, len(weights) - n_q)
+    vmin = min(weights.values(), default=1.0)
+    vmax = max(weights.values(), default=1.0)
+    norm = Normalize(vmin=vmin, vmax=(vmax if vmax > vmin else vmin + 1e-6))
+
+    fig, ax = plt.subplots(figsize=(9, 9), constrained_layout=True)
+    sc = _scatter_field(ax, base, extent, weights, norm, IDW_CMAP, s_lo=9, s_hi=9, alpha=0.55)
+    ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3]); ax.set_aspect("equal")
+    ax.scatter([n.lon for n in queried], [n.lat for n in queried], s=46, facecolors="none",
+               edgecolors="#d62728", linewidths=1.3, zorder=5, label=f"queried (TomTom, N={n_q})")
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.82, aspect=30, pad=0.02)
+    cbar.set_label("IDW traffic weight (imputed surface)")
+    ax.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=10)
+    ax.set_title(f"Empirical query vs IDW imputation\n{n_q} queried centroids diffused across {n_i} imputed nodes")
     fig.savefig(out)
     plt.close(fig)
     return out
@@ -293,6 +381,7 @@ def fig_citygraph_comparison(A, out):
 FIGS = {
     "citygraph_comparison": fig_citygraph_comparison,
     "ddm_pre_imputed": fig_ddm_pre_imputed,
+    "ddm_query_vs_imputed": fig_ddm_query_vs_imputed,
     "ddm_3maps_comparison": fig_ddm_3maps_comparison,
     "ddm_time_comparison": fig_ddm_time_comparison,
     "ddm_whole_vs_arterials": fig_ddm_whole_vs_arterials,
