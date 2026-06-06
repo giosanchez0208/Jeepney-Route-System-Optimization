@@ -21,7 +21,7 @@ from datetime import datetime
 
 import yaml
 
-BASE_CONFIG = "configs/toy_city_configs.yaml"
+BASE_CONFIG = "configs/toy_city_memetic.yaml"  # Gaussian 'real city' demand (CBD + Port)
 
 # Production-calibrated stable simulation values (Sec 4.3.1 / 4.3.3).
 STABLE = {

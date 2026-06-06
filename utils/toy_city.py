@@ -64,8 +64,12 @@ class ToyCityConfig:
 
 @dataclass
 class ToyDDMConfig:
-    """Demand surface config: IDW power and hotspot list."""
+    """Demand surface config: kernel choice, its parameters, and the hotspot list."""
     idw_power: float = 2.0
+    kernel: str = "idw"        # "idw" = weighted-average interpolation (smooth, fills the grid);
+                               # "gaussian" = additive distance-decay (concentrated cores, quiet periphery)
+    sigma_deg: float = 0.005   # gaussian core radius in degrees (~0.005 deg ≈ 550 m)
+    floor: float = 0.4         # gaussian: small additive base so the periphery stays quiet, not dead
     hotspots: list[ToyHotspot] = field(default_factory=lambda: [
         ToyHotspot("Market District",   124.202, 8.207, 12.0),
         ToyHotspot("Jeepney Terminal",  124.208, 8.201,  9.0),
@@ -213,6 +217,29 @@ class ToyDDM:
         return drivable
 
     def _compute_raw_probs(self) -> list[float]:
+        """Raw (un-normalized) demand score per node, dispatched by the configured kernel."""
+        if self.config.kernel == "gaussian":
+            return self._compute_raw_probs_gaussian()
+        return self._compute_raw_probs_idw()
+
+    def _compute_raw_probs_gaussian(self) -> list[float]:
+        """Additive Gaussian-decay demand: each hotspot ADDS w·exp(−d²/2σ²) over a small uniform
+        floor, so demand concentrates at the cores and fades to a quiet (but non-zero) periphery —
+        a polycentric 'real city' surface rather than an interpolated weighted-average field.
+        Unlike the IDW average, this can fall well below the lowest hotspot weight away from cores."""
+        sigma = max(self.config.sigma_deg, 1e-9)
+        floor = max(self.config.floor, 0.0)
+        two_sig2 = 2.0 * sigma * sigma
+        raw: list[float] = []
+        for node in self.node_list:
+            v = floor
+            for hs in self.config.hotspots:
+                d2 = (node.lon - hs.lon) ** 2 + (node.lat - hs.lat) ** 2
+                v += hs.weight * math.exp(-d2 / two_sig2)
+            raw.append(v)
+        return raw
+
+    def _compute_raw_probs_idw(self) -> list[float]:
         """
         Compute raw IDW probability for every node in node_list.
 
@@ -396,6 +423,9 @@ def toy_setup_from_yaml(
 
     ddm_config = ToyDDMConfig(
         idw_power=float(td_raw.get("idw_power", 2.0)),
+        kernel=str(td_raw.get("kernel", "idw")),
+        sigma_deg=float(td_raw.get("sigma_deg", 0.005)),
+        floor=float(td_raw.get("floor", 0.4)),
         hotspots=hotspots,
     )
 

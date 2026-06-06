@@ -53,6 +53,9 @@ STABLE_SECONDS_PER_TICK = 10
 STABLE_SPAWN_RATE = 600.0
 PROD_WEIGHT_TOLERANCE = 14.44
 
+# Toy config with the additive-Gaussian 'real city' demand (CBD + Port), not the flat IDW default.
+TOY_CONFIG = "configs/toy_city_memetic.yaml"
+
 PHEROMONE_CMAP = "viridis"   # realized-demand memory tau (distinct from the YlOrRd demand prior)
 PHEROMONE_GAMMA = 0.5        # power-norm: tau deposits are heavily skewed
 GAP_CMAP = "RdBu_r"          # diverging: red = underserved (gap>0), blue = oversupplied (gap<0)
@@ -328,7 +331,7 @@ def fig_gap_change(scene, out):
 # --------------------------------------------------------------------------------------
 # Scene construction (lazy heavy imports; 3 toy sims)
 # --------------------------------------------------------------------------------------
-def build_scene(num_routes=6, seed_a=1, seed_b=2, fleet=None):
+def build_scene(num_routes=6, seed_a=1, seed_b=2, fleet=None, config_path=TOY_CONFIG):
     """Run parent A, parent B, and the hub-crossover child on the Manhattan toy; assemble a scene."""
     import copy
     import random
@@ -344,7 +347,7 @@ def build_scene(num_routes=6, seed_a=1, seed_b=2, fleet=None):
     from utils.genetic import Chromosome, MemeticAlgorithm
     from utils.local_search import ACOLocalSearch
 
-    toy_city, toy_sampler, toy_config = toy_setup_from_yaml("configs/toy_city_configs.yaml", verbose=False)
+    toy_city, toy_sampler, toy_config = toy_setup_from_yaml(config_path, verbose=False)
     ctx = toy_city.get_bounds()
     SIM = toy_config["simulation"]
     spt = STABLE_SECONDS_PER_TICK   # forced stable values, not the toy config's sweep values
