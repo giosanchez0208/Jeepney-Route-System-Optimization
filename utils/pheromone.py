@@ -239,6 +239,71 @@ class PheromoneMatrix:
 
         return img
 
+    def draw_gaps(
+        self,
+        context: tuple[tuple[float, float], tuple[float, float]],
+        image: Image.Image,
+        gaps: Optional[dict] = None,
+        threshold: float = 0.0,
+    ) -> Image.Image:
+        """
+        Renders the SIGNED proportional demand-service gap field that the
+        Lamarckian operators actually read (gap_e = tau_share_e - supply_share_e,
+        see calculate_demand_service_gaps).
+
+        This is deliberately distinct from draw(): draw() shows raw demand
+        pheromone (tau) only and nets out no supply, whereas the operators key
+        off the signed gap. Diverging scale:
+            red  = underserved  (gap > 0, demand share exceeds supply share) → attraction targets it
+            blue = oversupplied (gap < 0, supply share exceeds demand share)  → repulsion targets it
+        Opacity and width scale with |gap| (normalized by the network max), so
+        the extreme corridors the operators select visually dominate while
+        near-balanced edges stay faint.
+
+        `gaps` defaults to self.gaps; `threshold` (0..1, on normalized |gap|)
+        optionally suppresses near-balanced edges to declutter.
+        """
+        if image.width != image.height:
+            raise ValueError("[PHEROMONE] Visualization requires a square image.")
+
+        gaps = self.gaps if gaps is None else gaps
+        img = image.copy()
+        if not gaps:
+            return img
+
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        tl_lon, tl_lat = context[0]
+        br_lon, br_lat = context[1]
+        lon_range = br_lon - tl_lon
+        lat_range = tl_lat - br_lat
+        if lon_range == 0 or lat_range == 0:
+            return img
+
+        max_abs = max(abs(g) for g in gaps.values()) or 1.0
+
+        # Weak gaps first so strong corridors render on top of them.
+        for edge, gap in sorted(gaps.items(), key=lambda kv: abs(kv[1])):
+            if edge is None:
+                continue
+            mag = abs(gap) / max_abs
+            if mag < threshold:
+                continue
+            if gap >= 0:  # underserved → red
+                r_ch, g_ch, b_ch = 200 + int(55 * mag), int(70 * (1 - mag)), int(70 * (1 - mag))
+            else:          # oversupplied → blue
+                r_ch, g_ch, b_ch = int(70 * (1 - mag)), int(70 * (1 - mag)), 200 + int(55 * mag)
+            alpha = 50 + int(205 * mag)
+            width = 2 + int(8 * (mag ** 2))
+
+            x1 = (edge.start.lon - tl_lon) / lon_range * img.width
+            y1 = (tl_lat - edge.start.lat) / lat_range * img.height
+            x2 = (edge.end.lon - tl_lon) / lon_range * img.width
+            y2 = (tl_lat - edge.end.lat) / lat_range * img.height
+            draw.line([(x1, y1), (x2, y2)], fill=(r_ch, g_ch, b_ch, alpha), width=width)
+
+        return img
+
     def draw_pheromone_difference(
             self, 
             other: 'PheromoneMatrix', 
