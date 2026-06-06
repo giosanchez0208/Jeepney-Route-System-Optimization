@@ -17,9 +17,11 @@ and produces:
     three rows -- the best route system, its pheromone memory tau, and its underserved chokepoints --
     so the reader watches topology, demand memory, and service gaps co-evolve from gen 1 to gen N.
 
-Produce the run with run_toy_optimization.py, then:
-    python fig_optimization.py --run-dir outputs/<...>/opt_<ts>
-    python fig_optimization.py --run-dir <...> --only fig_opt_convergence
+This is a TWO-STEP module (it renders a *finished* run, it does not run the optimizer itself):
+    python run_toy_optimization.py          # step 1: runs the optimizer (~minutes), writes telemetry
+    python fig_optimization.py              # step 2: renders the NEWEST run under outputs/ (fast)
+    python fig_optimization.py --run-dir outputs/<...> --only fig_opt_convergence   # explicit / subset
+The split means you can re-render / restyle the figures any number of times without re-optimizing.
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ from matplotlib.colors import PowerNorm
 from fig_environment import set_pub_style, IMG_DIR
 
 PHEROMONE_CMAP = "viridis"
+GAP_CMAP = "Reds"          # underserved demand-service gap (matches the red side of the Sec 4.3.6 field)
 CHOKE_COLOR = "#d62728"
 HUB_COLOR = "#000000"
 BEST_COLOR = "#CC3311"
@@ -82,6 +85,18 @@ def load_run(run_dir):
         except (ValueError, KeyError, OSError):
             continue
     return {"history": history, "snaps": snaps, "run_dir": run_dir}
+
+
+def find_latest_run(root="outputs"):
+    """The most recently written run directory (has history.csv + snapshots/) under `root`.
+    Lets you skip --run-dir: the toy run you just finished is the newest one."""
+    best = None
+    for dirpath, _dirs, files in os.walk(root):
+        if "history.csv" in files and os.path.isdir(os.path.join(dirpath, "snapshots")):
+            mtime = os.path.getmtime(os.path.join(dirpath, "history.csv"))
+            if best is None or mtime > best[0]:
+                best = (mtime, dirpath)
+    return best[1] if best else None
 
 
 def improvement_generations(history, eps=1e-9):
@@ -214,6 +229,15 @@ def fig_opt_evolution(run, out):
                 pmax = max(pmax, float(v.max()))
     pnorm = PowerNorm(0.5, vmin=1.1, vmax=pmax)
 
+    # shared demand-service gap scale across shown gens, so the gap visibly shrinks generation to generation
+    gmax = 0.0
+    for g in cols:
+        snap = _nearest_snapshot(snaps, g)
+        if snap:
+            for c in snap["layers"].get("chokepoints", []):
+                gmax = max(gmax, float(c.get("gap_value", 0.0)))
+    gnorm = PowerNorm(0.6, vmin=0.0, vmax=(gmax or 1.0))
+
     set_pub_style()
     nrows, ncols = 3, len(cols)
     fig, axes = plt.subplots(nrows, ncols, figsize=(3.5 * ncols, 10.5), constrained_layout=True)
@@ -221,7 +245,7 @@ def fig_opt_evolution(run, out):
     if ncols == 1:
         axes = axes.reshape(nrows, 1)
 
-    lc_last = None
+    lc_last = gc_last = None
     for j, g in enumerate(cols):
         snap = _nearest_snapshot(snaps, g)
         routes = snap["layers"]["routes"]
@@ -245,24 +269,26 @@ def fig_opt_evolution(run, out):
             lc.set_array(vals[order])
             ax.add_collection(lc); lc_last = lc
 
-        # row 2: underserved chokepoints over faint routes
+        # row 2: demand-service gap (underserved corridors) on a shared scale across generations
         ax = axes[2, j]; _frame(ax, ext)
         for route in routes:
             xs, ys = _route_lonlat(route)
-            ax.plot(xs, ys, color="#CCCCCC", lw=1.2, zorder=1)
+            ax.plot(xs, ys, color="#CCCCCC", lw=1.0, zorder=1)
         chokes = snap["layers"].get("chokepoints", [])
         if chokes:
             cx = [c["lon"] for c in chokes]; cy = [c["lat"] for c in chokes]
-            cs = np.array([c["gap_value"] for c in chokes], dtype=float)
-            ax.scatter(cx, cy, s=20 + 60 * (cs / (cs.max() or 1)), c=CHOKE_COLOR,
-                       alpha=0.75, edgecolor="white", linewidth=0.4, zorder=3)
+            cs = np.array([float(c["gap_value"]) for c in chokes], dtype=float)
+            gc_last = ax.scatter(cx, cy, c=cs, cmap=GAP_CMAP, norm=gnorm,
+                                 s=22 + 80 * np.clip(cs / (gmax or 1), 0, 1),
+                                 alpha=0.9, edgecolor="white", linewidth=0.4, zorder=3)
         hub = snap.get("metadata", {}).get("topological_hub")
         if hub:
-            ax.scatter([hub["lon"]], [hub["lat"]], marker="*", s=180, c=HUB_COLOR, zorder=4)
+            ax.scatter([hub["lon"]], [hub["lat"]], marker="*", s=170, facecolor="none",
+                       edgecolor=HUB_COLOR, linewidth=1.4, zorder=4)
 
     axes[0, 0].set_ylabel("best route system", fontsize=12)
     axes[1, 0].set_ylabel(r"pheromone memory $\tau$", fontsize=12)
-    axes[2, 0].set_ylabel("underserved chokepoints", fontsize=12)
+    axes[2, 0].set_ylabel("demand-service gap", fontsize=12)
     for r in range(3):  # set_ylabel needs the axis visible
         axes[r, 0].axis("on"); axes[r, 0].set_xticks([]); axes[r, 0].set_yticks([])
         for sp in axes[r, 0].spines.values():
@@ -271,6 +297,9 @@ def fig_opt_evolution(run, out):
     if lc_last is not None:
         cb = fig.colorbar(lc_last, ax=axes[1, :].tolist(), shrink=0.7, aspect=30, pad=0.01)
         cb.set_label(r"pheromone $\tau$ (shared)")
+    if gc_last is not None:
+        cbg = fig.colorbar(gc_last, ax=axes[2, :].tolist(), shrink=0.7, aspect=30, pad=0.01)
+        cbg.set_label(r"demand$-$service gap $\Delta$ (underserved, shared)")
 
     fig.suptitle("Best-network evolution at each improvement — topology, demand memory, and "
                  "service gaps co-evolving", fontsize=14, fontweight="bold")
@@ -290,7 +319,9 @@ FIGS = {
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run-dir", required=True, help="optimizer run directory (contains history.csv + snapshots/)")
+    ap.add_argument("--run-dir", default=None,
+                    help="optimizer run directory (history.csv + snapshots/). "
+                         "If omitted, the most recent run under outputs/ is used.")
     ap.add_argument("--only", nargs="*", metavar="NAME", help="subset of figure names")
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
@@ -305,10 +336,17 @@ def main():
     if unknown:
         raise SystemExit(f"Unknown figure(s): {unknown}\nKnown: {list(FIGS)}")
 
+    run_dir = args.run_dir or find_latest_run()
+    if not run_dir:
+        raise SystemExit("No --run-dir given and no run found under outputs/.\n"
+                         "Run 'python run_toy_optimization.py' first to produce one.")
+    if not args.run_dir:
+        print(f"[auto] newest run under outputs/: {run_dir}")
+
     set_pub_style()
     os.makedirs(IMG_DIR, exist_ok=True)
-    run = load_run(args.run_dir)
-    print(f"[load] {len(run['history'])} generations, {len(run['snaps'])} snapshots from {args.run_dir}")
+    run = load_run(run_dir)
+    print(f"[load] {len(run['history'])} generations, {len(run['snaps'])} snapshots from {run_dir}")
     print(f"[load] best improved at generations: {improvement_generations(run['history'])}")
     for n in names:
         out = os.path.join(IMG_DIR, f"{n}.png")

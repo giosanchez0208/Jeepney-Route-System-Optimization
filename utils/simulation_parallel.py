@@ -34,9 +34,20 @@ def _worker_init(config: dict):
     """
     global _WORKER_CONFIG, _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER
     _WORKER_CONFIG = config
-    
+
     print(f"[Worker {os.getpid()}] Initializing static CityGraph and Sampler...")
-    
+
+    # Toy city: rebuild the synthetic grid + ToyDDM locally from the config dict. It is deterministic
+    # (grid_size/origin/step), so the worker's node coordinates match the main process exactly and the
+    # coordinate-keyed IPC route restoration in _restore_route works. The real-city pickle / PBF path
+    # below does not apply (a toy config has no cg_pkl/ddm_pkl/pbf, which is what produced the
+    # "No valid nodes available for sampling" error).
+    if "toy_city" in config:
+        from .toy_city import toy_setup_from_dict
+        _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER, _ = toy_setup_from_dict(config, verbose=False)
+        print(f"[Worker {os.getpid()}] Toy city + ToyDDM initialized.")
+        return
+
     # Check if pre-computed pickle files are provided to bypass slow initialization
     cg_pkl = config.get("cg_pkl")
     ddm_pkl = config.get("ddm_pkl")

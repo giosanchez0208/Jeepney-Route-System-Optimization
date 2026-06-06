@@ -89,11 +89,17 @@ class TelemetryEngine:
         node_gaps = {}
         for edge, gap in gaps.items():
             if gap > 0:
-                node_gaps[edge.start] = node_gaps.get(edge.start, 0) + gap
-                node_gaps[edge.end] = node_gaps.get(edge.end, 0) + gap
+                node_gaps[edge.start] = node_gaps.get(edge.start, 0.0) + gap
+                node_gaps[edge.end] = node_gaps.get(edge.end, 0.0) + gap
 
-        chokepoints_data = [{"lat": node.lat, "lon": node.lon, "gap_value": round(gap, 2)} 
-                            for node, gap in node_gaps.items() if gap > 5.0]
+        # Keep the most-underserved nodes via a RELATIVE cut (a quarter of the busiest chokepoint) so
+        # the layer populates at any demand scale. The gap is a normalized share (~1e-3 on any
+        # network), so the old absolute >5.0 cut only ever fired on the large Iligan magnitudes and
+        # left toy / synthetic runs with an empty chokepoint layer.
+        peak_gap = max(node_gaps.values(), default=0.0)
+        cut = 0.25 * peak_gap
+        chokepoints_data = [{"lat": node.lat, "lon": node.lon, "gap_value": round(g, 6)}
+                            for node, g in node_gaps.items() if g >= cut and g > 0.0]
 
         node_demand = {}
         for edge, tau in best_chrom.pheromones.tau.items():

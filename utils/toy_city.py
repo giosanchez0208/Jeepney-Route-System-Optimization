@@ -375,26 +375,18 @@ class ToyDDM:
 # One-shot YAML loader
 # ──────────────────────────────────────────────────────────────────────────────
 
-def toy_setup_from_yaml(
-    yaml_path: str = "configs/toy_city_configs.yaml",
+def toy_setup_from_dict(
+    cfg: dict,
     verbose: bool = True,
 ) -> tuple[CityGraph, ToyDDM, dict]:
     """
-    Load the toy city config from YAML and return:
-        city    — fully stitched CityGraph (NxN grid)
-        sampler — ToyDDM with IDW demand surface
-        cfg     — raw config dict (pass cfg['travel_graph'] to TravelGraph,
-                  cfg['simulation'] for sim params, etc.)
+    Build the toy city + demand sampler from an already-loaded config dict.
 
-    Example
-    -------
-    city, sampler, cfg = toy_setup_from_yaml()
-    sim_cfg = cfg['simulation']
-    tg_cfg  = cfg['travel_graph']
+    Used both by toy_setup_from_yaml (from a file path) and by the parallel simulation workers,
+    which receive the config dict over IPC and must rebuild an IDENTICAL toy city + sampler locally.
+    Because the grid is deterministic from config (grid_size/origin/step), the worker's node
+    coordinates match the main process exactly, so coordinate-keyed IPC route restoration works.
     """
-    with open(yaml_path, "r") as f:
-        cfg = yaml.safe_load(f)
-
     # --- Build ToyCityConfig -------------------------------------------------
     tc_raw = cfg.get("toy_city", {})
     city_config = ToyCityConfig(
@@ -441,3 +433,21 @@ def toy_setup_from_yaml(
     sampler = ToyDDM(city, ddm_config, verbose=verbose)
 
     return city, sampler, cfg
+
+
+def toy_setup_from_yaml(
+    yaml_path: str = "configs/toy_city_configs.yaml",
+    verbose: bool = True,
+) -> tuple[CityGraph, ToyDDM, dict]:
+    """
+    Load the toy city config from YAML and return (city, sampler, cfg).
+    Thin wrapper over toy_setup_from_dict.
+
+    Example
+    -------
+    city, sampler, cfg = toy_setup_from_yaml()
+    sim_cfg = cfg['simulation']; tg_cfg = cfg['travel_graph']
+    """
+    with open(yaml_path, "r") as f:
+        cfg = yaml.safe_load(f)
+    return toy_setup_from_dict(cfg, verbose=verbose)

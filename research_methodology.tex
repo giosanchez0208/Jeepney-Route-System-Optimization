@@ -1,5 +1,12 @@
 \chapter{Research Methodology}
-\noindent{This study employed a multi-phase methodology to develop, calibrate, and validate a parallel hybrid agent-based metaheuristic optimization model for multi-route jeepney networks in Iligan City. The overall methodological framework integrates primary data collection through a structured behavioral survey, empirical derivation of travel cost parameters, construction of a multi-layered travel graph, simulation of passenger behavior through agent-based modeling, and optimization of route configurations using a metaheuristic algorithm. The present chapter describes each of these phases in detail, beginning with the design and execution of the commuter survey, which served as the principal source of behavioral data for the entire modeling pipeline.}
+\noindent{This study employed a multi-phase methodology to develop, calibrate, and validate a parallel hybrid agent-based metaheuristic optimization model for multi-route jeepney networks in Iligan City. The overall methodological framework integrates primary data collection through a structured behavioral survey, empirical derivation of travel cost parameters, construction of a multi-layered travel graph, simulation of passenger behavior through agent-based modeling, and optimization of route configurations using a metaheuristic algorithm. The present chapter describes each of these phases in detail, beginning with the design and execution of the commuter survey, which served as the principal source of behavioral data for the entire modeling pipeline. Figure~\ref{fig:system_pipeline} provides a high-level overview of how these phases connect.}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap3/figures/fig_system_pipeline.png}
+    \caption{High-level methodology pipeline (illustrative schematic). Empirical inputs---the commuter survey and the \ac{OSM} road network---feed the environment objects (\texttt{CityGraph}, the \texttt{DirectDemandModel}, and the multi-layer \texttt{TravelGraph}), which the agent-based simulation evaluates as a Total User Cost $F_{\text{sim}}$. The memetic \ac{GA}--\ac{ACO} optimizer iteratively proposes candidate route systems that are scored by that simulation, ultimately producing the optimized jeepney network.}
+    \label{fig:system_pipeline}
+\end{figure}
 
 % 3.1. Survey Design and Data Collection
 
@@ -780,7 +787,7 @@ where $\sigma_{st}$ is the total number of shortest paths between nodes $s$ and 
 
 The resolved probabilities are stored in Walker's Alias Table so that spatial sampling can run in constant time during simulation \citep{Walker1977}. This makes repeated demand generation efficient even when the optimization module evaluates many candidate route systems.
 
-Once spatial passenger demand is calculated via the \ac{DDM}, the programmatic distribution of these generated passenger journeys is handled deterministically via the schedule generation routine of the passenger generator module. To avoid structural spawning bottlenecks on the first simulation tick, the schedule smoothly distributes the sampled \ac{OD} pairs across a discrete 100-tick window using a Gaussian standard deviation. Manual testing across discrete passenger volume levels demonstrated high consistency and framework stability. This consistency justifies the omission of highly complex, time-varying arrival rates or temporally inhomogeneous Poisson processes, allowing the model to remain structurally streamlined while strictly retaining its essential spatial heterogeneity.
+Once spatial passenger demand is calculated via the \ac{DDM}, the programmatic distribution of these generated passenger journeys is handled deterministically via the schedule generation routine of the passenger generator module. Rather than spawning a fixed cohort all at once, the generator produces a continuous stochastic arrival stream governed by a target rate \texttt{spawn\_rate\_per\_hour}. Arrivals are scheduled in repeating 100-tick windows: for each window an expected count $\lambda = (\texttt{rate\_per\_hour}/3600)\cdot(100\,\Delta t)$ is perturbed by a Gaussian draw of standard deviation \texttt{stdev}, and the resulting passengers are scattered uniformly across that window's 100 ticks. The window regenerates every 100 ticks, so demand arrives continuously across the entire simulation horizon rather than in a single burst, which also avoids a structural spawning bottleneck on the first tick. Manual testing across discrete passenger volume levels demonstrated high consistency and framework stability, justifying the omission of more complex time-varying or temporally inhomogeneous Poisson arrival processes while preserving the essential spatial heterogeneity of demand.
 
 After the origin and destination are sampled, the framework computes the passenger journey on the TravelGraph using the A* shortest-path algorithm proven admissible in Section \ref{subsec:3.4.5 astar_proof}.
 
@@ -889,7 +896,14 @@ At each tick, the simulation follows this order:
   \item Record the current metrics.
 \end{enumerate}
 
-This order matters because vehicle movement must be updated before passenger interaction. A passenger boards only after the jeepney has reached the relevant node for that tick. The simulation does not allow direct interaction between passengers and vehicles. Instead, jeepneys emit events, and the main controller handles boarding, capacity checking, and alighting through the TravelGraph. This event-driven structure keeps the model modular and computationally efficient.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap3/figures/fig_simulation_loop.png}
+    \caption{Agent-based simulation (illustrative schematic). \emph{Left:} the deterministic per-tick event loop, ordered so that vehicles advance before passenger interaction is resolved; the run terminates at the fixed horizon and emits the fitness $F_{\text{sim}}$. \emph{Right:} the passenger finite-state machine over its four valid states, showing the transitions that carry an agent between walking, waiting, riding, and the terminal done state.}
+    \label{fig:simulation_loop}
+\end{figure}
+
+This ordering, summarized in Figure~\ref{fig:simulation_loop}, matters because vehicle movement must be updated before passenger interaction. A passenger boards only after the jeepney has reached the relevant node for that tick. The simulation does not allow direct interaction between passengers and vehicles. Instead, jeepneys emit events, and the main controller handles boarding, capacity checking, and alighting through the TravelGraph. This event-driven structure keeps the model modular and computationally efficient.
 
 \subsection{Simulation Fitness Evaluation}
 \noindent
@@ -1075,11 +1089,18 @@ The pipeline executes the following sequence:
     \item \textbf{Parent Evaluation:} The pipeline begins by evaluating the current population via the full agent-based temporal simulation. This yields authoritative simulation fitness scores and generates accurate, highly localized pheromone maps for each parent chromosome based on the demand-service gaps experienced by the simulated passenger agents.
     \item \textbf{Selection:} Elitism is applied to copy the best chromosomes forward unchanged. Tournament selection \citep{goldberg1991} then identifies parent pairs for recombination.
     \item \textbf{Crossover and Inheritance:} Topological Hub Crossover produces the child's route geometry. Simultaneously, through Epigenetic Inheritance, the child instantly receives a fitness-weighted blend of the parents' pheromone maps. This warm-start mechanism bypasses the need to run an expensive pre-simulation on the child just to discover where the topological weaknesses lie.
-    \item \textbf{Lamarckian Local Search:} The mutation gate decides whether local search should intervene, utilizing the current mutation rate as the trigger probability. Guided by the inherited pheromone map, the mutator attempts structural tweaks. These tweaks are evaluated rapidly using the static Surrogate Cost as a lightweight acceptance baseline. The mutation is kept only if the surrogate cost improves; otherwise, the original geometry is restored.
+    \item \textbf{Lamarckian Local Search:} The mutation gate decides whether local search should intervene, utilizing the current mutation rate as the trigger probability. Guided by the inherited pheromone map, the mutator attempts structural tweaks. Each tweak is accepted only if it strictly reduces the Proportional Demand-Service Disparity $D(\mathbf{R})$ already maintained in the pheromone matrix (Section~\ref{sec:demand_service_gap})---the same stigmergic gap signal that steers the operators---so acceptance never invokes the temporal engine. Otherwise the original geometry is restored.
     \item \textbf{Final Evaluation:} Once the local search is resolved, the fully optimized child undergoes the full agent-based temporal simulation for the first and only time. This single simulation pass calculates the child's official fitness and generates a brand-new pheromone map based on its mutated routes, which it will pass down to future generations.
 \end{enumerate}
 
-This sequencing is computationally critical. By evaluating the lightweight surrogate cost during Lamarckian mutation and reserving the temporal simulation strictly for post-mutation evaluation, the framework limits the most expensive operation—the agent-based physics engine—to exactly one pass per child. If local search required full simulations to test every minor structural tweak, or if epigenetic inheritance did not exist to map demand proactively, the evolutionary algorithm would bottleneck immediately. The pipeline therefore preserves optimization correctness, temporal efficiency, and scientific traceability.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{chap3/figures/fig_optimization_pipeline.png}
+    \caption{The memetic \ac{GA}--\ac{ACO} generational loop (illustrative schematic). Each generation evaluates its parents (one agent simulation per chromosome, yielding a pheromone map), applies elitism and tournament selection, recombines through Topological Hub Crossover with epigenetic pheromone inheritance, refines each offspring with gap-gated Lamarckian local search, and evaluates the child exactly once before testing the dual convergence criteria. The adaptive controller scales the mutation rate and local-search intensity with the stagnation counter, resetting them when a new best solution is found.}
+    \label{fig:optimization_pipeline}
+\end{figure}
+
+This sequencing, illustrated in Figure~\ref{fig:optimization_pipeline}, is computationally critical. By gating Lamarckian mutations on the lightweight demand-service disparity and reserving the temporal simulation strictly for post-mutation evaluation, the framework limits the most expensive operation—the agent-based physics engine—to exactly one pass per child. If local search required full simulations to test every minor structural tweak, or if epigenetic inheritance did not exist to map demand proactively, the evolutionary algorithm would bottleneck immediately. The pipeline therefore preserves optimization correctness, temporal efficiency, and scientific traceability.
 
 % ────────────────────────────────────────────────────────────
 \subsection{Adaptive Mutation Scaling via Stagnation Feedback}\label{sec:adaptive}\noindent A static mutation rate creates a fundamental trade-off that cannot be resolved at compile time. Set high, the algorithm explores aggressively but wastes cycles on random perturbations even after a promising region has been found. Set low, the algorithm exploits efficiently but becomes permanently trapped at the first local optimum it encounters. Eiben, Hinterding, and Michalewicz \citeyearpar{eiben1999} formally identified this trade-off and classified stagnation-driven mutation scaling as one of the most effective adaptive mechanisms for escaping local optima in combinatorial optimization. Rather than utilizing a single monolithic mutation rate, the framework deploys three distinct structural mutation operators. To preserve their proportional disruptiveness, each operator is assigned its own independent base probability and maximum cap. The adaptive controller monitors the stagnation counter $s$---the number of consecutive generations without improvement---and scales the activation probability for each specific operator $k$ quadratically toward its respective hard cap:$$ P_{\text{mut}, k} = P_{\text{base}, k} + (P_{\text{max}, k} - P_{\text{base}, k}) \left(\frac{s}{S_{\text{limit}}}\right)^2 $$This explicit decoupling ensures that while all three operators follow the same quadratic escalation schedule during stagnation, their individual activation thresholds remain structurally balanced. The quadratic curve delibrerately provides patience early in stagnation, when natural escape is still probable, and applies force sharply as the plateau persists \citep{abulail2025, farda2024}. A linear schedule would apply uniform pressure regardless of how severe the stagnation is, penalizing early generations unnecessarily and responding too slowly near the limit. The moment a new best solution is found, the stagnation counter resets to zero and all three mutation rates return to their respective baselines, preventing the controller from continuing to force exploration after the algorithm has already broken free. The same controller also governs the Lamarckian local search probability and its spatial intensity. Unlike the stagnation-driven mutation rates, these local search parameters decay linearly across generations:$$ P_{\text{local}}(g) = P_{\min} + (P_{\max} - P_{\min}) \left(1 - \frac{g}{G_{\max}}\right) $$Early generations apply broad route edits to rapidly shape candidate topologies; later generations make conservative, surgical refinements. This coupling prevents the search from being too disruptive near convergence \citep{eiben1999}.
@@ -1116,7 +1137,7 @@ State preservation is implemented through atomic checkpointing. The live optimiz
 \section{Post-Optimization Evaluation Metrics}
 \label{sec:metrics}
 \noindent
-After optimization, the final route systems are evaluated using several complementary metrics. No single score is sufficient because a network can be similar in structure, similar in geometry, similar in coverage distribution, or similar in ranking behavior without being identical in all four senses. The metrics documented here are implemented as pure, stateless functions in \texttt{evaluation\_metrics.py} and applied to domain objects through \texttt{post\_evaluation.py}. This two-layer separation ensures that each metric is independently testable and that its mathematical assumptions are transparent.
+After optimization, the final route systems are evaluated using several complementary metrics. No single score is sufficient because a network can be similar in structure, similar in geometry, or similar in coverage distribution without being identical in all three senses. The metrics documented here are implemented as pure, stateless functions in \texttt{evaluation\_metrics.py} and applied to domain objects through \texttt{post\_evaluation.py}. This two-layer separation ensures that each metric is independently testable and that its mathematical assumptions are transparent.
 
 % ────────────────────────────────────────────────────────────
 \subsection{Topological and Geometric Similarity (Jaccard, Discrete Fréchet, GED)}
@@ -1181,22 +1202,8 @@ H = -\sum_i p_i \log p_i
 High entropy indicates that traffic and service are spread across many routes, suggesting genuine multi-modal choice. Low entropy indicates concentration on a small number of routes, which may be acceptable in an intentionally hierarchical network but may also signal premature convergence or over-reliance on a narrow corridor set. Levinson \citeyearpar{levinson2012networkstructure} applied entropy measures specifically to urban transportation networks and demonstrated that structural diversity correlates with network resilience: systems with higher routing entropy are more robust to link failures and demand perturbations. Entropy therefore complements the similarity metrics by describing network breadth rather than overlap.
 
 % ────────────────────────────────────────────────────────────
-\subsection{Surrogate Fidelity Validation (Spearman and Kendall Rank Correlation)}
-\label{sec:surrogate_val}
-\noindent
-The surrogate evaluator is useful only insofar as it preserves the ordering of route systems produced by the full simulation. Evolutionary selection is ranking-based: tournament selection picks the fittest of $k$ chromosomes, and elitism preserves the top $n$. These operations depend on relative ordering, not absolute magnitude. Jin \citeyearpar{jin2005survey} explicitly established Spearman rank correlation as the primary validation metric for fitness approximation in evolutionary computation, noting that a surrogate's value lies in its ability to rank solutions correctly, not in reproducing their exact numerical scores.
-
-To test this, surrogate scores and full simulation scores are compared using two rank-based coefficients. If $d_i$ is the rank difference for chromosome $i$, Spearman correlation is:
-
-\[
-\rho = 1 - \frac{6 \sum d_i^2}{n(n^2 - 1)}
-\]
-
-where $n$ is the number of chromosomes in the validation set. Kendall
-correlation—more robust for small sample sizes—is:
-
-\[
-\tau = \frac{C - D}{\binom{n}{2}}
-\]
-
-where $C$ is the number of concordant pairs and $D$ is the number of discordant pairs. A Spearman $\rho \geq 0.7$ indicates sufficient ranking fidelity to guide local search reliably; below $0.5$, the surrogate would actively mislead the selection pressure \citep{jin2005survey}. The framework additionally reports Kendall $\tau$, normalized \ac{RMSE}, and \ac{MAPE} as supporting diagnostics, but Spearman $\rho$ is the decision-making metric.
+% [Removed] "Surrogate Fidelity Validation (Spearman and Kendall Rank Correlation)" subsection.
+% The static surrogate evaluator was deprecated in favor of gap-gated Lamarckian acceptance
+% (Section~\ref{sec:demand_service_gap}); a surrogate-vs-simulation rank-fidelity validation is
+% therefore no longer applicable. The remaining post-optimization metrics (Jaccard / Frechet / GED,
+% Wasserstein, Shannon entropy) are unaffected by the removal.
