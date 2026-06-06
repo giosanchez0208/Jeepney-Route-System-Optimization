@@ -16,6 +16,9 @@ base and highlights the changed segment -- **red = edges removed, green = edges 
 - **Visual 1b (Iligan):** the same operators on the real arterial map.
 - **Visual 2 (toy):** scatter -- lower demand-service disparity -> better fitness (why disparity
   is the Lamarckian gate).
+- **Visual 3 (toy + Iligan):** the signed demand-service **gap field** itself -- the actual signal
+  the operators read (`gap = demand_share - supply_share`; red = underserved, blue = oversupplied).
+  Drawn standalone so the reader sees the landscape the operators act on, independent of any edit.
 
 How firing works: repulsion/pruning fire on almost any system; **attraction only fires when a
 system has an underserved corridor (~1 in 6)**, so the loop searches seeds and captures, per
@@ -23,7 +26,7 @@ operator, a system where it actually changed the network.
 
 Runtime: toy ~3-4 min, Iligan ~4-8 min (real sims). Figures use the project's native PIL draws.
 Outputs: `results_and_discussion/images/lamarckian_operators_toy.png`,
-`..._iligan.png`, `gap_vs_fitness.png`.
+`..._iligan.png`, `gap_vs_fitness.png`, `demand_service_gap_field.png`.
 ''')
 
 code('''
@@ -111,16 +114,21 @@ def draw_route_highlight(city, ctx, route, highlight_keys, base_color, hi_color,
 
 def capture_operators(city, sampler, config, ctx, rate, ticks, max_seeds, label, do_scatter=False, scatter_n=20):
     """One sim loop: capture a firing system per operator (isolated changed route + removed/added keys),
-    and optionally collect (disparity, fitness) scatter points."""
+    and optionally collect (disparity, fitness) scatter points. Also returns the richest-gap system's
+    pheromone matrix (exemplar_ph) so the signed demand-service gap field can be drawn standalone."""
     captured, xs, ys, seed = {}, [], [], 0
+    exemplar_ph, best_disp = None, -1.0
     t0 = time.time()
     while (len(captured) < len(OPERATORS) or (do_scatter and len(xs) < scatter_n)) and seed < max_seeds:
         random.seed(seed); np.random.seed(seed)
         rts = generate_route_system(NUM_ROUTES, city, sampler)
         res = build_and_run(city, sampler, config, ctx, rts, rate, ticks)
         ph = build_pheromone_matrix(city, res)
+        disp = total_disparity(ph.gaps)
         if do_scatter and len(xs) < scatter_n:
-            xs.append(total_disparity(ph.gaps)); ys.append(res.score)
+            xs.append(disp); ys.append(res.score)
+        if np.isfinite(disp) and disp > best_disp:
+            best_disp, exemplar_ph = disp, ph  # keep the richest-gap system for the standalone gap figure
         for name, fn in OPERATORS:
             if name not in captured:
                 mut = fn(ph, rts, city, intensity=1.0)
@@ -136,13 +144,15 @@ def capture_operators(city, sampler, config, ctx, rate, ticks, max_seeds, label,
     missing = [n for n, _ in OPERATORS if n not in captured]
     if missing:
         print(f"  [{label}] did NOT fire within {max_seeds} seeds: {missing} (raise max_seeds / rate)")
-    return captured, xs, ys
+    return captured, xs, ys, exemplar_ph
 
 def capture_operators_retry(city, sampler, config, ctx, rate, ticks, max_sims, retries, label, fleet=None):
     """For EXPENSIVE environments (Iligan): run few sims, but retry each operator's RNG on the SAME
     system+pheromone until it fires (operators sample randomly from the gaps, so re-seeding finds a
-    firing move without paying for another costly simulation)."""
+    firing move without paying for another costly simulation). Also returns the richest-gap system's
+    pheromone matrix (exemplar_ph) for the standalone gap field."""
     captured = {}
+    exemplar_ph, best_disp = None, -1.0
     t0 = time.time()
     for s in range(max_sims):
         if len(captured) == len(OPERATORS):
@@ -151,8 +161,11 @@ def capture_operators_retry(city, sampler, config, ctx, rate, ticks, max_sims, r
         rts = generate_route_system(NUM_ROUTES, city, sampler)
         res = build_and_run(city, sampler, config, ctx, rts, rate, ticks, fleet)
         ph = build_pheromone_matrix(city, res)
+        disp = total_disparity(ph.gaps)
+        if np.isfinite(disp) and disp > best_disp:
+            best_disp, exemplar_ph = disp, ph
         print(f"  [{label} sim {s}] completed={res.metrics.get('completed_count')}, "
-              f"disparity={total_disparity(ph.gaps):.3f} ({time.time()-t0:.0f}s elapsed)")
+              f"disparity={disp:.3f} ({time.time()-t0:.0f}s elapsed)")
         for name, fn in OPERATORS:
             if name in captured:
                 continue
@@ -171,7 +184,7 @@ def capture_operators_retry(city, sampler, config, ctx, rate, ticks, max_sims, r
     missing = [n for n, _ in OPERATORS if n not in captured]
     if missing:
         print(f"  [{label}] did NOT fire: {missing} (raise max_sims / retries / rate)")
-    return captured
+    return captured, exemplar_ph
 
 def draw_panels(city, ctx, captured, label, only_drivable=True, size=900):
     fired = [(n, *captured[n]) for n, _ in OPERATORS if n in captured]
@@ -195,9 +208,9 @@ def draw_panels(city, ctx, captured, label, only_drivable=True, size=900):
 
 code('''
 # ============ Visual 1a + Visual 2 : TOY (fast; also collects the disparity-vs-fitness scatter) ============
-toy_captured, xs, ys = capture_operators(toy_city, toy_sampler, toy_config, toy_ctx,
-                                         rate=600.0, ticks=1500, max_seeds=45,
-                                         label="Toy", do_scatter=True, scatter_n=20)
+toy_captured, xs, ys, toy_ph = capture_operators(toy_city, toy_sampler, toy_config, toy_ctx,
+                                                 rate=600.0, ticks=1500, max_seeds=45,
+                                                 label="Toy", do_scatter=True, scatter_n=20)
 draw_panels(toy_city, toy_ctx, toy_captured, label="Toy", only_drivable=True, size=900)
 ''')
 
@@ -219,12 +232,58 @@ code('''
 # ============ Visual 1b : ILIGAN (real map; each sim is ~80-120s, so few sims + operator retries) ============
 # We only need demand pheromones for the operators (not high completion), then retry each operator's
 # RNG on the same system until it fires -- far cheaper than a fresh sim per attempt.
-ilg_captured = capture_operators_retry(ilg_city, ilg_ddm, ilg_config, ilg_ctx,
-                                       rate=600.0, ticks=200, max_sims=2, retries=15, label="Iligan", fleet=50)
+ilg_captured, ilg_ph = capture_operators_retry(ilg_city, ilg_ddm, ilg_config, ilg_ctx,
+                                               rate=600.0, ticks=200, max_sims=2, retries=15, label="Iligan", fleet=50)
 draw_panels(ilg_city, ilg_ctx, ilg_captured, label="Iligan", only_drivable=True, size=1100)
 # Note: repulsion (redundancy removal) may not fire on the LIGHT demo fleet -- a sparse fleet
 # under-serves the whole network, so no corridor is oversupplied. Attraction and pruning fire.
 # To exercise repulsion on Iligan too, raise fleet (e.g. 200+), at the cost of slower sims.
+''')
+
+code('''
+# ============ Visual 3 : the SIGNED demand-service gap field the operators consume (standalone) ============
+# This is the ACTUAL signal the Lamarckian operators read -- gap_e = demand_share - supply_share -- NOT
+# raw pheromone/tau (which nets out no supply). It gates attraction (fires only where a positive /
+# underserved gap exists) and steers repulsion (toward the most negative / oversupplied corridor).
+# Drawn standalone so the reader sees the landscape the operators act on, independent of any single edit.
+#   red  = underserved   (demand share > supply share)
+#   blue = oversupplied  (supply share > demand share)
+#   width / opacity  proportional to |gap|  (normalized by the network max)
+from matplotlib.patches import Patch
+
+# Gaps cluster near zero with a few strong corridors; colour only |gap| >= GAP_THRESHOLD * network-max
+# so the signal pops over the faint city base. Lower it to show more of the field; raise to declutter.
+GAP_THRESHOLD = 0.1
+
+def draw_gap_panel(ax, city, ctx, ph, label, size, only_drivable=True, threshold=GAP_THRESHOLD):
+    if ph is None or not getattr(ph, "gaps", None):
+        ax.set_title(f"{label}: no gap data available"); ax.axis("off"); return
+    base = city.draw(size=size, only_drivable=only_drivable).copy()
+    ax.imshow(ph.draw_gaps(ctx, base, threshold=threshold))
+    ax.set_title(f"Demand-service gap field - {label}   (D = {total_disparity(ph.gaps):.3f})", fontsize=11)
+    ax.axis("off")
+
+panels = [("Toy", toy_city, toy_ctx, toy_ph, 900)]
+try:
+    if ilg_ph is not None:
+        panels.append(("Iligan", ilg_city, ilg_ctx, ilg_ph, 1100))
+except NameError:
+    pass  # Iligan cell not run -- toy-only gap figure
+
+fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 6.5))
+if len(panels) == 1:
+    axes = [axes]
+for ax, (label, c, ctx, ph, sz) in zip(axes, panels):
+    draw_gap_panel(ax, c, ctx, ph, label, sz)
+fig.legend(handles=[Patch(facecolor="#ff0000", label="underserved  (demand share > supply)  -> attraction"),
+                    Patch(facecolor="#0000ff", label="oversupplied  (supply share > demand)  -> repulsion")],
+           loc="lower center", ncol=2, frameon=False, fontsize=10, bbox_to_anchor=(0.5, -0.01))
+fig.suptitle("Signed demand-service gap - the pheromone signal that gates / steers the Lamarckian operators",
+             fontweight="bold", fontsize=13)
+plt.tight_layout(rect=(0, 0.03, 1, 1))
+out = "results_and_discussion/images/demand_service_gap_field.png"
+plt.savefig(out, bbox_inches="tight"); plt.show()
+print(f"saved {out}")
 ''')
 
 nb = {"cells": cells,
