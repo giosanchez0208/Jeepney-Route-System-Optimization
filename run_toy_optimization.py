@@ -70,8 +70,9 @@ def main():
     opt_run = Optimizer.create(cfg_path)
     print(f"[toy-opt] run_dir = {opt_run.run_dir}")
     opt_run.start()
-    print("\n[toy-opt] DONE. Render the showcase figures with:")
-    print(f'    python fig_optimization.py --run-dir "{opt_run.run_dir}"')
+    print("\n[toy-opt] DONE. Render the showcase figures with either:")
+    print("    python fig_optimization.py                       # auto-finds this (newest) run")
+    print(f'    python fig_optimization.py --run-dir "{opt_run.run_dir}"   # or point at it explicitly')
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+Generation,Global_Best_Cost,Population_Mean_Cost,Active_Mutation_Rate,Stagnation_Counter
+2,677246.11,691252.2475,0.6125,0
+3,670080.5723,700850.4159,0.425,0
+4,670080.5723,688678.1964,0.2375,1
+5,670080.5723,689388.6172,0.056,2
