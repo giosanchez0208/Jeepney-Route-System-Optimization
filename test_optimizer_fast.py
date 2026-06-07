@@ -10,8 +10,10 @@ def main():
         **{
             "simulation.num_ticks": 50,
             "simulation.total_allocatable_jeeps": 5,
+            "simulation.mohring_sample_size": 10,
             "optimization.n_population": 4, # 4 chromosomes so they can evaluate in parallel
             "optimization.n_elite": 1,
+            "optimization.p_mutation": 1.0, # Force mutation to test local search
             "optimization.g_max": 2, # Just 2 generations
             "cg_pkl": "results_and_discussion/pkl/profile_p1.pkl",
             "ddm_pkl": "results_and_discussion/pkl/ddm_8am.pkl"

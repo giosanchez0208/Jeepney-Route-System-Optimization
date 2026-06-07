@@ -38,26 +38,22 @@ optimization:
   p_ls_attraction: 0.4
   p_ls_pruning: 0.6
   p_ls_repulsion: 0.4
-  p_mutation: 0.25
+  p_mutation: 1.0
   q: 1000.0
   rho: 0.1
   telemetry_interval: 1
 simulation:
   jeep_capacity: 16
   jeep_speed_kmh: 20.0
-  mohring_sample_size: 450
-  num_routes: 5
+  mohring_sample_size: 10
+  num_routes: 38
   num_ticks: 50
   passenger_speed_kmh: 4.5
   seconds_per_tick: 10
-  spawn_rate_per_hour: 200.0
+  spawn_rate_per_hour: 600.0
   spawn_stdev: 10.0
   total_allocatable_jeeps: 5
   weight_tolerance: 14.4
-surrogate:
-  num_samples: 450
-  transfer_multiplier: 2.5
-  unreachable_penalty: 100000.0
 travel_graph:
   alight_wt: 0.0
   direct_wt: 0.0

@@ -106,20 +106,9 @@ spawn 600 · weight_tol 14.44 · telemetry every generation.
 
 ---
 
-## Known issues / caveats (verified 2026-06-06)
-1. **Demand-service gap is supply-less in the optimizer.** Chromosome `allocation` is never populated
-   (`allocate_by_mohring` is dead code in the GA path), so `calculate_demand_service_gaps(routes)`
-   subtracts zero supply → the stored "gap" is just demand share `P_ij` and `Σ|g| ≡ 1.000`. The
-   snapshots, chokepoints, and `fig_opt_evolution` row 3 therefore show demand *concentration*, not
-   a demand–service disparity. The corrected `D(R)` values in §4.4 above are recomputed *with* real
-   fleet supply (`scratch/_compute_dr.py`) and are the ones to cite.
-2. **Lamarckian local search is currently inert.** Acceptance (`genetic.py:269`) keeps a mutation only
-   if `mutated_disparity < baseline_disparity`, but with the supply-less gap that disparity is
-   route-independent and constant (1.000), so every local-search move is reverted. The `F_sim` gains
-   above come from **crossover + selection only**, not the memetic local improvement. (Fix to the
-   supply wiring deferred by author decision; to be revisited separately.)
-3. **Mohring vs even-split.** The simulation allocates fleet by an even split (`simulation.py:63`),
-   not the Mohring √-demand rule the methodology (§3.5.5) describes; `FleetAllocator.allocate_by_mohring`
-   exists but is unused in the sim/optimizer path.
-4. **Toy run, not Iligan.** All §4.4 numbers above are from the toy showcase. The final Iligan
-   optimization runs (38 routes, fleet 2000, 9 profiles) have not been recorded here yet.
+## Issues & Verification Status (Updated 2026-06-07)
+1. **Demand-service gap is supply-less in the optimizer (RESOLVED):** Chromosome `allocation` is now populated by executing `allocate_by_mohring` during population evaluation, propagating the dynamic fleet count to the gap calculator. Pheromone updates and Lamarckian mutation acceptance now operate on the correct proportional demand-service gap.
+2. **Lamarckian local search is inert (RESOLVED):** With the supply-less gap bug fixed, the disparity metric $D(R)$ is route-dependent and dynamic. The Lamarckian local-search moves are successfully accepted or reverted based on a real improvement signal.
+3. **Mohring vs even-split (RESOLVED):** Verified that `simulation.py` allocates the active fleet using `FleetAllocator.allocate_by_mohring` across the routes rather than an even split.
+4. **Toy run, not Iligan:** Note that §4.4 numbers are from the toy showcase. The production runs on Iligan City (38 routes, fleet 2000, 9 profiles) will be evaluated using `opt_eval.py` once the final runs complete.
+

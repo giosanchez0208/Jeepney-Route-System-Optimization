@@ -150,7 +150,8 @@ class Optimizer:
 
     def start(self):
         # Initialize optimization state if not resuming from an existing run
-        if self.state is None:
+        is_fresh_run = self.state is None
+        if is_fresh_run:
             print("[OPTIMIZER] Initializing fresh state...")
             self.state = self.engine.initialize_state()
             self.telemetry.log_lineage(self.state.population)
@@ -163,6 +164,21 @@ class Optimizer:
         # rebuilding the 36k-node graph from the PBF on every evaluate_population call -- which would
         # add hours of re-initialisation and constant spawn/destroy memory churn over a long run.
         self.runner.open_pool()
+        
+        # Save initial best simulation result on a fresh run
+        if is_fresh_run and self.state and self.state.population:
+            try:
+                best_init_chrom = min(self.state.population, key=lambda c: c.cost)
+                print(f"[OPTIMIZER] Evaluating and saving initial best simulation result to {self.run_dir}...")
+                init_res = self.fitness.evaluate(best_init_chrom.routes)
+                from pathlib import Path
+                import pickle
+                with open(Path(self.run_dir) / "initial_best_sim_result.pkl", "wb") as f:
+                    pickle.dump(init_res, f)
+                print(f"[OPTIMIZER] Saved initial_best_sim_result.pkl successfully.")
+            except Exception as e:
+                print(f"[OPTIMIZER] Warning: Failed to save initial_best_sim_result.pkl: {e}")
+
         from tqdm import tqdm
         try:
             # Nested tqdm bar tracking generations with live telemetry updates
@@ -242,6 +258,18 @@ class Optimizer:
         except KeyboardInterrupt:
             print("\n[OPTIMIZER] Execution interrupted by user. Saving final state...")
         finally:
+            if self.state and self.state.population:
+                try:
+                    best_chrom = min(self.state.population, key=lambda c: c.cost)
+                    print(f"[OPTIMIZER] Evaluating and saving final best simulation result to {self.run_dir}...")
+                    best_res = self.fitness.evaluate(best_chrom.routes)
+                    from pathlib import Path
+                    import pickle
+                    with open(Path(self.run_dir) / "best_sim_result.pkl", "wb") as f:
+                        pickle.dump(best_res, f)
+                    print(f"[OPTIMIZER] Saved best_sim_result.pkl successfully.")
+                except Exception as e:
+                    print(f"[OPTIMIZER] Warning: Failed to save best_sim_result.pkl: {e}")
             self.runner.close_pool()
             self.preservation.save_state(self.state)
             print(f"[OPTIMIZER] State successfully saved to {self.run_dir}. Exiting.")
