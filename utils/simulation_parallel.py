@@ -215,6 +215,18 @@ def _worker_run_override(arg) -> SimulationResult:
     # Detach the complex jeep_system (which holds graph nodes) from the result
     # to prevent ProcessPoolExecutor from pickling it.
     result.jeep_system = None
+
+    # Attach per-passenger door-to-door commute times (minutes) BEFORE the passenger generator is
+    # dropped, so post-hoc analyses (the commute-time comparison in opt_eval.py) survive the IPC
+    # boundary. The GA ignores extra metrics, so this is harmless to optimization.
+    try:
+        result.metrics["commute_times_min"] = [
+            (p.despawn_tick - p.spawn_tick) / 60.0
+            for p in passenger_generator.archived_passengers
+            if getattr(p, "despawn_tick", None) is not None
+        ]
+    except Exception:
+        pass
     
     # Delete only the local simulation objects.
     # Do NOT delete tg / restored_routes — they are aliased to the global
