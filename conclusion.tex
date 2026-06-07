@@ -1,0 +1,57 @@
+% Chapter 6: Conclusions
+
+\chapter{Conclusions}
+\noindent{This study presents a complete, data-driven optimization and evaluation framework for paratransit route network design and fleet allocation, using Iligan City, Philippines as a computational testbed. Grounded in empirical survey data, spatial demographic profiling, and a multi-layered travel graph representation, the proposed system is designed to transition paratransit planning from idealized grid assumptions into realistic urban topologies. The core optimization engine utilizes a parallelized hybrid Lamarckian Memetic Algorithm, combining global population-based evolutionary search with specialized local search heuristics. The following sections summarize the project, evaluate the research objectives, critique the limitations of the proposed solutions, outline concrete avenues for future work, and offer final remarks.}
+
+\section{Summary of the Project}
+\noindent{The project successfully implemented a multi-stage paratransit route optimization pipeline. To ensure behavioral realism, the model was calibrated using a commuter travel survey, determining willingness-to-walk (WTW) thresholds and transfer aversion coefficients. These parameters were embedded in a multi-layered travel graph ($\mathcal{G}_{travel}$) that prevents unrealistic transfer pathways by routing passengers through physical, spatially bounded walk and ride transitions. 
+
+To overcome the lack of official origin-destination matrices, a Direct Demand Model (DDM) was formulated. The DDM generates passenger demand at the micro-scale by linking stochastic Poisson-distributed arrivals to macro-scale demographic density, betweenness centrality, and historical speed data from the TomTom API. 
+
+The optimization search space is traversed using a hybrid Lamarckian Memetic Algorithm (LMA) running in parallel across multi-core processors. Global exploration is guided by a genetic algorithm using topological crossovers, while local exploitation is driven by Ant Colony Optimization (ACO)-inspired operators: Spatial Attraction, Redundancy Repulsion, and circuity Pruning. The search is accelerated using a static surrogate evaluator calibrated via Mohring’s square-root rule, while a tick-by-tick microscopic agent-based simulator performs final operational validations on the converged route systems.}
+
+\section{Evaluation of Research Objectives}
+\noindent{The primary aims and specific objectives of this research have been successfully met:
+\begin{enumerate}
+    \item \textbf{Objective 1: Gather empirical behavioral data from local paratransit users.} Met by conducting a survey ($N=214$) in Iligan City, which calibrated the 85th-percentile WTW threshold to 864 meters and modeled transfer aversion using a logistic threshold of 15.78 minutes.
+    \item \textbf{Objective 2: Develop a microscopic agent-based passenger simulation.} Met by writing a tick-by-tick ($\Delta t = 10\text{s}$) simulator that models passenger routing, boarding capacity limits, wait time decay, and transit transfers on OpenStreetMap networks.
+    \item \textbf{Objective 3: Design a memetic optimization engine with local search learning.} Met by implementing the LMA. The engine incorporates a population-level pheromone matrix as an epigenetic memory structure, allowing the local search operators to restructure candidate routes along underserved transit corridors and write these improvements back to the chromosome.
+    \item \textbf{Objective 4: Implement parallel evaluation for candidate systems.} Met by building a parallel execution pool that evaluates multiple route systems concurrently, reducing computation times for large-scale production runs.
+    \item \textbf{Objective 5: Validate and benchmark the optimized network against baseline models.} Met by proving that the optimized systems consistently reduce passenger travel times by 15--20\%, compress the travel-time distribution tail (ensuring spatial equity), and maintain robust path diversity (Shannon entropy of 3.2 bits).
+\end{enumerate}
+}
+
+\section{Critique and Limitations of the Proposed Solution}
+\noindent{A critical evaluation of the developed framework reveals several key limitations:
+\begin{itemize}
+    \item \textbf{Demographic Calibration Skew:} The behavioral calibrations (e.g., WTW and transfer aversion) are derived from a survey sample dominated by students and young adults (93\% aged 18--24). The parameters do not capture the behavioral heterogeneity of other key groups, such as senior citizens, low-income daily laborers, or passengers carrying heavy cargo.
+    \item \textbf{Static Congestion Modeling:} Although historical speed ratios from the TomTom API were used, the simulation assumes static road speeds during each hourly demand profile. It does not simulate dynamic vehicle-to-vehicle queueing, intersection bottlenecks, or the feedback effects where optimized jeepney routing influences private car congestion.
+    \item \textbf{Hail-and-Ride Operational Assumption:} The simulation assumes jeepneys can board and alight passengers at any node along their route. In reality, the lack of designated physical stops contributes to traffic friction, which is not fully captured in the spatial density model.
+    \item \textbf{Exclusion of Operator Economics:} The current objective function focus is passenger-centric (Total User Cost and Fleet Equity). It does not model operator-side constraints, such as fuel consumption, fleet procurement costs, driver shifts, or fare collection revenues, which are vital for operator compliance.
+\end{itemize}
+}
+
+\section{Evolution from Sanchez (2025)}
+\noindent{This study represents a direct upgrade of the baseline framework established by \citet{sanchez2025}. The baseline model was restricted to a proof-of-concept grid-based network with uniform demand distributions and relied on a Greedy Randomized Adaptive Search Procedure (GRASP) to discover routes. 
+
+This research improves upon the baseline in three critical ways:
+\begin{itemize}
+    \item \textbf{Transition from GRASP to Lamarckian Memetic Search:} GRASP is a single-start constructive heuristic that builds solutions greedily with localized random variations but lacks global population-based recombination. By replacing GRASP with the LMA, this study enables global exploration via topological crossovers. It combines this with ACO-inspired local search operators that utilize a shared pheromone matrix as an epigenetic memory. Improvements found by local search are directly committed to the chromosome via Lamarckian selection, leading to faster convergence and higher-quality routing solutions.
+    \item \textbf{Demographic and Centrality Grounding:} Instead of the uniform demand layout of \citet{sanchez2025}, we implement a DDM that links micro-scale stochastic Poisson-distributed arrivals to macro-scale demographic density and centrality. The sensitivity analysis varying passenger volumes confirms that the optimized route configurations remain stable and top-performing across different demand scales. This robustness indicates that strategic routing decisions are driven by the spatial distribution of demographic hubs rather than micro-temporal volume shifts, validating the assumption that time-inhomogeneity averages out for fixed-route design.
+    \item \textbf{Realistic Network Topologies:} The framework moves from a simplified grid map to the real-world road graph of Iligan City, incorporating vehicle capacity limits, boarding delays, and survey-calibrated walk and transfer parameters.
+\end{itemize}
+}
+
+\section{Recommendations and Future Work}
+\noindent{Based on the outcomes and limitations of this research, several areas are recommended for future work:
+\begin{enumerate}
+    \item \textbf{Real-Time Congestion Feedback:} Integrating the framework with microscopic traffic simulators (e.g., SUMO or MATSim) would enable the modeling of dynamic vehicle-to-vehicle queueing and capture the interaction between jeepney boarding and private vehicle flows.
+    \item \textbf{Diverse Sociodemographic Parameters:} Calibrating distinct WTW and transfer aversion parameters for different demographic cohorts (e.g., senior citizens, low-income earners) would capture demand heterogeneity more accurately and enhance social equity evaluations.
+    \item \textbf{Multi-Modal Transit Integration:} The multi-layered travel graph should be expanded to include other informal modes, such as motorized tricycles and pedicabs, modeling their role as localized feeders to the primary jeepney trunk lines.
+    \item \textbf{Operator Cost Optimization:} The fitness function could be modified to include operator-side operational costs, such as fuel consumption, maintenance, driver wages, and carbon emissions, allowing planners to evaluate the trade-offs between commuter travel utility and private operator viability.
+    \item \textbf{Scaling the Multi-Layer Graph Model:} Further research should expand the three-layer travel graph architecture. This formal representation has significant potential for modeling complex routing rules, transfer fare structures, and time-dependent scheduling constraints in paratransit networks.
+\end{enumerate}
+It is important to note that dynamic, real-time fleet dispatching is excluded from these recommendations. In paratransit environments characterized by decentralized owner-operator franchises, drivers follow pre-assigned routes rather than centralized real-time dispatch commands. Therefore, strategic static fleet allocation (e.g., using Mohring's rule) remains the appropriate standard for paratransit planning.}
+
+\section{Final Remarks}
+\noindent{Informal transportation systems are often seen as sources of urban congestion. However, this study demonstrates that paratransit networks possess an inherent spatial self-organization that can be analyzed and optimized. By using data-driven demand modeling and memetic optimization, we can reshape these networks into efficient, equitable, and resilient public assets. Modernizing transport in developing cities does not require replacing informal systems; rather, it requires providing them with the computational tools to evolve.}
