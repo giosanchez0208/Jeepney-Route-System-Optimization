@@ -22,7 +22,6 @@ from scipy import stats
 from scipy.spatial.distance import cdist
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. TOPOLOGICAL SIMILARITY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -237,21 +236,7 @@ def wasserstein_2d(
 ) -> float:
     """
     Computes the 2-dimensional Wasserstein distance between two weighted
-    spatial point distributions using an exact optimal transport solution.
-
-    This is the full spatial version: given two sets of geographic coordinates
-    with associated demand weights, it computes the minimum cost of
-    redistributing demand mass from configuration A to configuration B,
-    where cost is proportional to Euclidean distance between points.
-
-    Parameters:
-        coords_a: Coordinates [(lat, lon), ...] for distribution A.
-        weights_a: Demand weights for each point in A (must sum > 0).
-        coords_b: Coordinates [(lat, lon), ...] for distribution B.
-        weights_b: Demand weights for each point in B (must sum > 0).
-
-    Returns:
-        float ≥ 0.0. The optimal transport cost.
+    spatial point distributions using a memory-efficient sparse exact optimal transport.
     """
     a = np.array(coords_a, dtype=float)
     b = np.array(coords_b, dtype=float)
@@ -268,31 +253,32 @@ def wasserstein_2d(
     # Build pairwise Euclidean cost matrix
     cost_matrix = cdist(a, b, metric='euclidean')
 
-    # Solve via the linear sum assignment (Hungarian algorithm) on discretized transport
-    # For exact OT: use the POT library or scipy linprog. Here we use the
-    # closed-form 1D-sliced approximation for computational tractability.
-    # Exact LP formulation for small problems:
     from scipy.optimize import linprog
+    from scipy.sparse import coo_matrix
 
     n, m = len(wa), len(wb)
     c = cost_matrix.flatten()
 
-    # Equality constraints: row sums = wa, col sums = wb
-    A_eq_rows = np.zeros((n, n * m))
-    for i in range(n):
-        A_eq_rows[i, i * m:(i + 1) * m] = 1.0
+    # --- THE MEMORY FIX: Vectorized Sparse Matrix Construction ---
+    # We construct the exact same constraint matrices but only store the 1.0 values.
+    var_indices = np.arange(n * m)
 
-    A_eq_cols = np.zeros((m, n * m))
-    for j in range(m):
-        for i in range(n):
-            A_eq_cols[j, i * m + j] = 1.0
+    # Row constraints: sum over j for each i
+    row_eq1 = np.repeat(np.arange(n), m)
+    
+    # Col constraints: sum over i for each j
+    row_eq2 = n + np.tile(np.arange(m), n)
 
-    A_eq = np.vstack([A_eq_rows, A_eq_cols])
+    # Combine into a Coordinate Format (COO) sparse matrix
+    rows = np.concatenate([row_eq1, row_eq2])
+    cols = np.concatenate([var_indices, var_indices])
+    data = np.ones(2 * n * m)
+
+    A_eq_sparse = coo_matrix((data, (rows, cols)), shape=(n + m, n * m))
     b_eq = np.concatenate([wa, wb])
 
-    bounds = [(0.0, None)] * (n * m)
-
-    result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+    # Using bounds=(0, None) natively instead of making a massive list
+    result = linprog(c, A_eq=A_eq_sparse, b_eq=b_eq, bounds=(0, None), method='highs')
 
     if result.success:
         return float(result.fun)
@@ -302,7 +288,6 @@ def wasserstein_2d(
             np.repeat(np.arange(n), (wa * 1000).astype(int)),
             np.repeat(np.arange(m), (wb * 1000).astype(int))
         )
-
 
 def ks_test(dist_a: Iterable[float], dist_b: Iterable[float]) -> Tuple[float, float]:
     """
