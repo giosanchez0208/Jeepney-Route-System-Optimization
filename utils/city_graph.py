@@ -26,6 +26,7 @@ import urllib.request
 from collections import defaultdict
 from heapq import heappop, heappush
 from itertools import count
+from functools import lru_cache
 from typing import Optional, Union
 
 import networkx as nx
@@ -112,6 +113,7 @@ class CityGraph:
         _stitch(self.graph, self.graph)
         self._build_outgoing_edges()
 
+    @lru_cache(maxsize=30000)
     def find_shortest_path(self, start: Node, end: Node) -> list[DirEdge]:
         if start not in self.nodes or end not in self.nodes:
             raise ValueError("[CITY GRAPH] Start and end nodes must belong to this CityGraph instance.")

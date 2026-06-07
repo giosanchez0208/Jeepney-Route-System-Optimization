@@ -196,7 +196,7 @@ class MemeticAlgorithm:
 
         return child_phero
 
-    def _allocate_fleet_mohring(self, routes: list[Route], total_fleet: int) -> dict[Route, int]:
+    def _allocate_fleet_mohring(self, routes: list[Route], total_fleet: int, sample_size: Optional[int] = None) -> dict[Route, int]:
         """Runs the Mohring fleet allocation algorithm for the given routes."""
         if not self.fitness_evaluator:
             # Fallback to even split if evaluator is not configured yet
@@ -216,9 +216,10 @@ class MemeticAlgorithm:
             routes=routes,
             sampler=self.fitness_evaluator.demand_sampler,
             tg=tg,
-            mohring_sample_size=self.fitness_evaluator.sim_cfg.get("mohring_sample_size", 2000)
+            mohring_sample_size=sample_size if sample_size is not None else self.fitness_evaluator.sim_cfg.get("mohring_sample_size", 2000)
         )
         return allocation
+
 
     def evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float:
         """
@@ -287,19 +288,17 @@ class MemeticAlgorithm:
 
         original_routes_backup = [Route(path=r.path[:], city_graph=self.cg) for r in child.routes]
 
-        # Acceptance is gated on the Proportional Demand-Service Disparity -- the same
-        # pheromone-derived signal that STEERS the local-search operators -- so the
-        # direction and the acceptance of each move are unified under one signal, and no
-        # full re-simulation is needed per mutation. The authoritative F_sim is still
-        # computed afterward (evaluate_chromosome), keeping GA selection high-fidelity.
-        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
+        # Use a smaller sample size (150) for fast inline fleet allocation during mutation gating
+        MUTATION_SAMPLE_SIZE = 150
+
+        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet, sample_size=MUTATION_SAMPLE_SIZE)
         child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
         baseline_disparity = self._total_disparity(child.pheromones.gaps)
         print(f"  [Lamarckian Mutation] baseline disparity: {baseline_disparity:.6f}")
 
         self.local_search.optimize_system(child.routes, child.pheromones, intensity=intensity)
 
-        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
+        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet, sample_size=MUTATION_SAMPLE_SIZE)
         child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
         mutated_disparity = self._total_disparity(child.pheromones.gaps)
         print(f"  [Lamarckian Mutation] mutated disparity: {mutated_disparity:.6f}")
@@ -312,6 +311,6 @@ class MemeticAlgorithm:
 
         print(f"  [Lamarckian Mutation] REJECTED (no improvement)")
         child.routes = original_routes_backup
-        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
-        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
+        # Optimization: skip running the 3rd redundant allocation since this child's allocation
+        # and gaps will be overwritten when evaluated in the main generation loop anyway.
         return False
