@@ -196,6 +196,30 @@ class MemeticAlgorithm:
 
         return child_phero
 
+    def _allocate_fleet_mohring(self, routes: list[Route], total_fleet: int) -> dict[Route, int]:
+        """Runs the Mohring fleet allocation algorithm for the given routes."""
+        if not self.fitness_evaluator:
+            # Fallback to even split if evaluator is not configured yet
+            jeeps_per_route = max(1, total_fleet // len(routes)) if routes else 0
+            return {r: jeeps_per_route for r in routes}
+        
+        from .jeep_system import FleetAllocator
+        from .travel_graph import TravelGraph
+        
+        tg = TravelGraph(
+            cg=self.cg,
+            config=self.fitness_evaluator.travel_graph_config.copy(),
+            routes=routes
+        )
+        allocation = FleetAllocator.allocate_by_mohring(
+            total_fleet=total_fleet,
+            routes=routes,
+            sampler=self.fitness_evaluator.demand_sampler,
+            tg=tg,
+            mohring_sample_size=self.fitness_evaluator.sim_cfg.get("mohring_sample_size", 2000)
+        )
+        return allocation
+
     def evaluate_chromosome(self, chrom: Chromosome, total_fleet: int) -> float:
         """
         Evaluates the chromosome with the microscopic fitness objective.
@@ -218,7 +242,12 @@ class MemeticAlgorithm:
 
         chrom.cost = sim_result.fitness_score
         chrom.pheromones.update_pheromones(sim_result)
-        chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
+        
+        # Populate chrom.allocation from sim_result.metrics["allocation"]
+        alloc_map = sim_result.metrics.get("allocation", {})
+        chrom.allocation = {r: alloc_map.get(r.id, 0) for r in chrom.routes}
+        
+        chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes, chrom.allocation)
         return chrom.cost
 
     def evaluate_population(self, population: list[Chromosome], runner: Any) -> None:
@@ -236,7 +265,12 @@ class MemeticAlgorithm:
                 raise ValueError(f"[MEMETIC ALGO] Parallel evaluator did not return a fitness score for sim_id {sim_result.sim_id}.")
             chrom.cost = sim_result.fitness_score
             chrom.pheromones.update_pheromones(sim_result)
-            chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes)
+            
+            # Populate chrom.allocation from sim_result.metrics["allocation"]
+            alloc_map = sim_result.metrics.get("allocation", {})
+            chrom.allocation = {r: alloc_map.get(r.id, 0) for r in chrom.routes}
+            
+            chrom.pheromones.gaps = chrom.pheromones.calculate_demand_service_gaps(chrom.routes, chrom.allocation)
 
     @staticmethod
     def _total_disparity(gaps: dict) -> float:
@@ -258,19 +292,26 @@ class MemeticAlgorithm:
         # direction and the acceptance of each move are unified under one signal, and no
         # full re-simulation is needed per mutation. The authoritative F_sim is still
         # computed afterward (evaluate_chromosome), keeping GA selection high-fidelity.
-        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
         baseline_disparity = self._total_disparity(child.pheromones.gaps)
+        print(f"  [Lamarckian Mutation] baseline disparity: {baseline_disparity:.6f}")
 
         self.local_search.optimize_system(child.routes, child.pheromones, intensity=intensity)
 
-        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
         mutated_disparity = self._total_disparity(child.pheromones.gaps)
+        print(f"  [Lamarckian Mutation] mutated disparity: {mutated_disparity:.6f}")
 
         if mutated_disparity < baseline_disparity:
+            print(f"  [Lamarckian Mutation] ACCEPTED: {baseline_disparity:.6f} -> {mutated_disparity:.6f}")
             if evaluate_inline:
                 self.evaluate_chromosome(child, total_fleet)
             return True
 
+        print(f"  [Lamarckian Mutation] REJECTED (no improvement)")
         child.routes = original_routes_backup
-        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes)
+        child.allocation = self._allocate_fleet_mohring(child.routes, total_fleet)
+        child.pheromones.gaps = child.pheromones.calculate_demand_service_gaps(child.routes, child.allocation)
         return False

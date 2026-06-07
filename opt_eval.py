@@ -286,42 +286,122 @@ def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7):
     total = config["simulation"].get("total_allocatable_jeeps")
     elook = {((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)): e for e in city.graph}
 
-    # Build every route system to simulate: the exact optimized 8am networks (final-best from each
-    # run's last checkpoint) + random baselines.
-    labels, systems = [], []
+    # Check if pre-evaluated simulation result pickles exist for all optimization runs
+    has_pickles = True
+    import pickle
     for tag in opt_tags:
-        routes = final_routes_from_checkpoint(runs[tag], city, elook)
-        if not routes:
-            continue
-        labels.append(("opt", tag)); systems.append(routes)
-    for k in range(baseline_k):
-        random.seed(9000 + k); np.random.seed(9000 + k)
-        labels.append(("base", f"baseline_{k}")); systems.append(generate_route_system(nrt, city, ddm))
+        best_p = runs[tag] / "best_sim_result.pkl"
+        init_p = runs[tag] / "initial_best_sim_result.pkl"
+        if not (best_p.exists() and init_p.exists()):
+            has_pickles = False
+            break
 
-    n_opt = sum(1 for kind, _ in labels if kind == "opt")
-    print(f"[PART 2] re-simulating {len(systems)} networks in parallel "
-          f"({n_opt} optimized + {baseline_k} baselines, each a full {nrt}-route / {total}-jeep sim)...")
-    runner = ParallelSimulationRunner(config=config,
-                                      max_workers=config.get("optimization", {}).get("n_workers"))
-    runner.open_pool()
-    try:
-        results = runner.run_parallel(systems)
-    finally:
-        runner.close_pool()
+    labels, results, systems = [], [], []
+    if has_pickles:
+        print("[PART 2] Pre-evaluated simulation results found. Loading from pickle files to skip simulation...")
+        for tag in opt_tags:
+            # Load optimized simulation result
+            best_p = runs[tag] / "best_sim_result.pkl"
+            with open(best_p, "rb") as f:
+                res_opt = pickle.load(f)
+            # Ensure edge references are reconstructed correctly
+            if res_opt.jeep_system:
+                for r in res_opt.jeep_system.routes:
+                    r.cg = city
+                    r.path = [elook[k] for k in r.path_keys if k in elook]
+            
+            labels.append(("opt", tag))
+            results.append(res_opt)
+            systems.append(res_opt.jeep_system.routes if res_opt.jeep_system else [])
+
+            # Load initial baseline simulation result
+            init_p = runs[tag] / "initial_best_sim_result.pkl"
+            with open(init_p, "rb") as f:
+                res_base = pickle.load(f)
+            # Ensure edge references are reconstructed correctly
+            if res_base.jeep_system:
+                for r in res_base.jeep_system.routes:
+                    r.cg = city
+                    r.path = [elook[k] for k in r.path_keys if k in elook]
+            
+            labels.append(("base", f"baseline_{tag}"))
+            results.append(res_base)
+            systems.append(res_base.jeep_system.routes if res_base.jeep_system else [])
+    else:
+        # Fallback to parallel simulation of optimized networks + random baselines
+        # Build every route system to simulate
+        for tag in opt_tags:
+            routes = final_routes_from_checkpoint(runs[tag], city, elook)
+            if not routes:
+                continue
+            labels.append(("opt", tag)); systems.append(routes)
+        for k in range(baseline_k):
+            random.seed(9000 + k); np.random.seed(9000 + k)
+            labels.append(("base", f"baseline_{k}")); systems.append(generate_route_system(nrt, city, ddm))
+
+        n_opt = sum(1 for kind, _ in labels if kind == "opt")
+        print(f"[PART 2] re-simulating {len(systems)} networks in parallel "
+              f"({n_opt} optimized + {baseline_k} baselines, each a full {nrt}-route / {total}-jeep sim)...")
+        runner = ParallelSimulationRunner(config=config,
+                                          max_workers=config.get("optimization", {}).get("n_workers"))
+        runner.open_pool()
+        try:
+            results = runner.run_parallel(systems)
+        finally:
+            runner.close_pool()
+
+    def get_allocation_stats(alloc_map, routes_list):
+        counts = [alloc_map.get(r.id, 0) for r in routes_list]
+        if not counts:
+            return 0.0, 0.0, 0.0, 0.0
+        mean_val = float(np.mean(counts))
+        std_val = float(np.std(counts))
+        cv_val = std_val / mean_val if mean_val else 0.0
+        
+        n = len(counts)
+        counts_sorted = np.sort(counts)
+        index = np.arange(1, n + 1)
+        gini_val = float((np.sum((2 * index - n - 1) * counts_sorted)) / (n * np.sum(counts_sorted))) if np.sum(counts_sorted) > 0 else 0.0
+        return mean_val, std_val, cv_val, gini_val
 
     opt_fit, base_fit = [], []
     opt_times_all, base_times_all = [], []
     opt_net_mean, base_net_mean = [], []
     opt_entropy = []
-    for (kind, tag), res in zip(labels, results):
+    opt_dr, base_dr = [], []
+    opt_gini, base_gini = [], []
+    opt_cv, base_cv = [], []
+
+    from utils.pheromone import PheromoneMatrix
+
+    for idx, ((kind, tag), res) in enumerate(zip(labels, results)):
         if res is None:
             continue
         times = list(res.metrics.get("commute_times_min", []) or [])
         score = float(res.score)
+        
+        routes_list = systems[idx]
+        alloc_map = res.metrics.get("allocation", {})
+        allocation = {r: alloc_map.get(r.id, 0) for r in routes_list}
+        
+        mean_alloc, std_alloc, cv_alloc, gini_alloc = get_allocation_stats(alloc_map, routes_list)
+        
+        try:
+            phero = PheromoneMatrix(all_edges=city.graph, config=config, sim_result=res)
+            gaps = phero.calculate_demand_service_gaps(routes_list, allocation)
+            d_r = sum(abs(v) for v in gaps.values())
+        except Exception as exc:
+            print(f"  [warn] D(R) computation failed for {tag}: {exc}")
+            d_r = float("nan")
+
         if kind == "opt":
             opt_fit.append(score); opt_times_all.extend(times)
             if times:
                 opt_net_mean.append(float(np.mean(times)))
+            if np.isfinite(d_r):
+                opt_dr.append(d_r)
+            opt_gini.append(gini_alloc)
+            opt_cv.append(cv_alloc)
             freq = {}
             for journey, _c in (getattr(res, "recorded_paths", []) or []):
                 for e in journey:
@@ -331,14 +411,29 @@ def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7):
             base_fit.append(score); base_times_all.extend(times)
             if times:
                 base_net_mean.append(float(np.mean(times)))
+            if np.isfinite(d_r):
+                base_dr.append(d_r)
+            base_gini.append(gini_alloc)
+            base_cv.append(cv_alloc)
+            
         mc = np.mean(times) if times else float("nan")
-        print(f"  [{tag:11s}] F_sim={score:10.0f}  completed={len(times):4d}  mean_commute={mc:6.2f} min")
+        print(f"  [{tag:11s}] F_sim={score:10.0f}  D(R)={d_r:.4f}  Gini_fleet={gini_alloc:.3f}  completed={len(times):4d}  mean_commute={mc:6.2f} min")
 
     # ===== STATISTICS (printed first so they survive any later plotting error) =====
     imp = float("nan")
     if base_fit and opt_fit:
         imp = 100.0 * (np.mean(base_fit) - np.mean(opt_fit)) / np.mean(base_fit)
         print(f"[4.5.1] fitness: baseline mean F={np.mean(base_fit):.0f} | optimized mean F={np.mean(opt_fit):.0f} | {imp:.1f}% lower")
+
+    if base_dr and opt_dr:
+        dr_imp = 100.0 * (np.mean(base_dr) - np.mean(opt_dr)) / np.mean(base_dr)
+        print(f"[D(R)] demand-service disparity D(R): baseline mean {np.mean(base_dr):.4f} ± {np.std(base_dr):.4f} -> optimized mean {np.mean(opt_dr):.4f} ± {np.std(opt_dr):.4f} ({dr_imp:.1f}% lower)")
+        
+    if base_gini and opt_gini:
+        print(f"[Gini] fleet allocation Gini: baseline mean {np.mean(base_gini):.3f} ± {np.std(base_gini):.3f} -> optimized mean {np.mean(opt_gini):.3f} ± {np.std(opt_gini):.3f}")
+        
+    if base_cv and opt_cv:
+        print(f"[CV] fleet allocation CV: baseline mean {np.mean(base_cv):.3f} ± {np.std(base_cv):.3f} -> optimized mean {np.mean(opt_cv):.3f} ± {np.std(opt_cv):.3f}")
 
     mw = None
     if opt_times_all and base_times_all:

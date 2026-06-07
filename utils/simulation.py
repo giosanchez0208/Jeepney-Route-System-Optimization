@@ -60,10 +60,17 @@ class SimulationSetup:
         weight_tol = sim_cfg.get("weight_tolerance", 50.0)
         seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
 
-        jeeps_per_route = max(1, total_jeeps // len(self.routes))
+        from .jeep_system import FleetAllocator
+        allocation = FleetAllocator.allocate_by_mohring(
+            total_fleet=total_jeeps,
+            routes=self.routes,
+            sampler=sampler,
+            tg=tg,
+            mohring_sample_size=sim_cfg.get("mohring_sample_size", 2000)
+        )
 
-        for route in self.routes:
-            for _ in range(jeeps_per_route):
+        for route, count in allocation.items():
+            for _ in range(count):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
                 jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity, seconds_per_tick=seconds_per_tick))
                 
@@ -294,6 +301,13 @@ class Simulation:
         
         all_recorded_paths = [(p.journey, p.total_path_cost) for p in (completed + incomplete)]
 
+        # Count fleet allocation per route
+        allocation_map = {}
+        if self.jeep_system:
+            for j in self.jeep_system.jeeps:
+                if j.route:
+                    allocation_map[j.route.id] = allocation_map.get(j.route.id, 0) + 1
+
         return SimulationResult(
             fitness_score=total_fitness,
             metrics={
@@ -306,7 +320,8 @@ class Simulation:
                 "sum_incomplete_remaining_time": sum_incomplete_remaining,
                 "sum_penalty_time": sum_incomplete, 
                 "equity_penalty": equity_penalty,
-                "ticks_simulated": self.current_tick
+                "ticks_simulated": self.current_tick,
+                "allocation": allocation_map
             },
             recorded_paths=all_recorded_paths,
             jeep_system=self.jeep_system
@@ -383,8 +398,6 @@ class SimulationEvaluator:
 
     def evaluate(self, routes: list['Route'], verbose: bool = False) -> SimulationResult:
         jeeps = []
-        jeeps_per_route = max(1, self.total_jeeps // len(routes)) if routes else 0
-
         tg = TravelGraph(
             cg=self.city_graph,
             config=self.travel_graph_config.copy(),
@@ -393,8 +406,17 @@ class SimulationEvaluator:
         
         seconds_per_tick = self.sim_cfg.get("seconds_per_tick", 1)
 
-        for route in routes:
-            for _ in range(jeeps_per_route):
+        from .jeep_system import FleetAllocator
+        allocation = FleetAllocator.allocate_by_mohring(
+            total_fleet=self.total_jeeps,
+            routes=routes,
+            sampler=self.demand_sampler,
+            tg=tg,
+            mohring_sample_size=self.sim_cfg.get("mohring_sample_size", 2000)
+        )
+
+        for route, count in allocation.items():
+            for _ in range(count):
                 start_coord = (route.path[0].start.lon, route.path[0].start.lat)
                 jeeps.append(Jeep(route, curr_pos=start_coord, speed=self.jeep_speed, max_capacity=self.jeep_capacity, seconds_per_tick=seconds_per_tick))
                 

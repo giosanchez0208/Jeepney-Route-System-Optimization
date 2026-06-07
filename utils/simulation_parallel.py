@@ -170,11 +170,18 @@ def _worker_run_override(arg) -> SimulationResult:
     jeep_capacity = sim_cfg.get("jeep_capacity", 16)
     weight_tol = sim_cfg.get("weight_tolerance", 50.0)
     seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
-    jeeps_per_route = max(1, total_jeeps // len(restored_routes)) if restored_routes else 0
+    from .jeep_system import FleetAllocator
+    allocation = FleetAllocator.allocate_by_mohring(
+        total_fleet=total_jeeps,
+        routes=restored_routes,
+        sampler=_WORKER_DEMAND_SAMPLER,
+        tg=tg,
+        mohring_sample_size=sim_cfg.get("mohring_sample_size", 2000)
+    )
     
     jeeps = []
-    for route in restored_routes:
-        for _ in range(jeeps_per_route):
+    for route, count in allocation.items():
+        for _ in range(count):
             start_coord = (route.path[0].start.lon, route.path[0].start.lat)
             jeeps.append(Jeep(route, curr_pos=start_coord, speed=jeep_speed_kmh, max_capacity=jeep_capacity, seconds_per_tick=seconds_per_tick))
             

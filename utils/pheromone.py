@@ -119,7 +119,7 @@ class PheromoneMatrix:
                 # we only track physical road segments.
 
     # ------------------------------------------------------------------
-    def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route']) -> dict['DirEdge', float]:
+    def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route'], allocation: Optional[dict['Route', int]] = None) -> dict['DirEdge', float]:
         """
         Computes the Proportional Demand-Service Gap for all tracked corridors.
 
@@ -147,10 +147,13 @@ class PheromoneMatrix:
             jeeps = []
 
         # Count fleet allocation per route
-        fleet_counts: dict = {r: 0 for r in routes}
-        for j in jeeps:
-            if j.route in fleet_counts:
-                fleet_counts[j.route] += 1
+        if allocation is not None:
+            fleet_counts = {r: allocation.get(r, 0) for r in routes}
+        else:
+            fleet_counts = {r: 0 for r in routes}
+            for j in jeeps:
+                if j.route in fleet_counts:
+                    fleet_counts[j.route] += 1
 
         # Accumulate edge supply
         for route, fleet_size in fleet_counts.items():

@@ -31,7 +31,6 @@ from typing import Optional, Union
 import networkx as nx
 import osmnx as ox
 from PIL import Image, ImageDraw
-from pyrosm import OSM
 from tqdm import tqdm
 
 from .directed_edge import DirEdge, _getDistance, _stitch
@@ -167,6 +166,7 @@ class CityGraph:
                 return self._extract_from_pbf()
 
     def _extract_from_pbf(self) -> nx.MultiDiGraph:
+        from pyrosm import OSM
         if self.verbose:
             print(f"[CITY GRAPH] Extracting graph from PBF: {self.pbf_path}")
             
