@@ -18,24 +18,29 @@ DEST = Path("chap4/figures")
 
 # dest filename  ->  list of candidate source paths (first existing wins)
 FIGURES = {
-    # ---- 4.1 Environment & Demand (already produced) ----
-    "citygraph_comparison.png":    ["rnd/documentation/citygraph_comparison.png"],
-    "ddm_pre_imputed.png":         ["rnd/documentation/ddm_pre_imputed.png"],
-    "ddm_3maps_comparison.png":    ["rnd/documentation/ddm_3maps_comparison.png"],
-    "ddm_time_comparison.png":     ["rnd/documentation/ddm_time_comparison.png"],
-    "ddm_distributions.png":       ["rnd/documentation/ddm_distributions.png"],
-    "ddm_whole_vs_arterials.png":  ["rnd/documentation/ddm_whole_vs_arterials.png"],
+    # ---- 4.1 Environment & Demand ---- (live fig_environment.py outputs only)
+    "citygraph_comparison.png":    ["results_and_discussion/images/citygraph_comparison.png"],
+    "ddm_pre_imputed.png":         ["results_and_discussion/images/ddm_pre_imputed.png"],
+    "ddm_query_vs_imputed.png":    ["results_and_discussion/images/ddm_query_vs_imputed.png"],
+    "ddm_3maps_comparison.png":    ["results_and_discussion/images/ddm_3maps_comparison.png"],
+    "ddm_time_comparison.png":     ["results_and_discussion/images/ddm_time_comparison.png"],
+    "ddm_distributions.png":       ["results_and_discussion/images/ddm_distributions.png"],
+    "ddm_whole_vs_arterials.png":  ["results_and_discussion/images/ddm_whole_vs_arterials.png"],
 
-    # ---- 4.2 Architectural validation ----
-    "constructed_travelgraph.png":     ["rnd/documentation/constructed travelgraph.png",
-                                        "rnd/documentation/constructed_travelgraph.png"],
-    "passenger_journey_snapshots.png": ["rnd/documentation/passenger_journey_snapshots.png"],
+    # ---- 4.2 Architectural validation ---- (live outputs only)
+    "passenger_journey_snapshots.png": ["results_and_discussion/images/passenger_journey_snapshots.png"],
+    "sample_journey_transfer.png":     ["results_and_discussion/images/sample_journey_transfer.png"],
+    "simulation_temporal_snapshots.png": ["results_and_discussion/images/simulation_temporal_snapshots.png"],
+    "layer_transition_SW.png": ["results_and_discussion/images/layer_transition_SW.png"],
+    "layer_transition_WA.png": ["results_and_discussion/images/layer_transition_WA.png"],
+    "layer_transition_RI.png": ["results_and_discussion/images/layer_transition_RI.png"],
+    "layer_transition_AL.png": ["results_and_discussion/images/layer_transition_AL.png"],
+    "layer_transition_EW.png": ["results_and_discussion/images/layer_transition_EW.png"],
+    "layer_transition_TR.png": ["results_and_discussion/images/layer_transition_TR.png"],
 
     # ---- 4.3 Calibration & verification ----
     # 4.3.1 Mohring (friend)
-    "mohring_stability.png":       ["results_and_discussion/images/mohring_variance_collapse.png",
-                                    "outputs/mohring_stability/plots/cv_route_count_38.png",
-                                    ".cache/analysis/mohring_convergence.png"],
+    "mohring_stability.png":       ["outputs/mohring_stability_2/plots/cv_route_count_38.png"],
     # 4.3.3 Horizon + volume (done)
     "horizon_volume_calibration.png": ["rnd/images/rnd1_horizon_and_volume.png",
                                        "results_and_discussion/images/rnd1_horizon_and_volume.png"],
@@ -44,6 +49,7 @@ FIGURES = {
     "weight_tolerance_t14.png":    ["outputs/rnd_weight_tolerance/weight_tolerance_delta_box_t14p44.png"],
     "weight_tolerance_t100.png":   ["outputs/rnd_weight_tolerance/weight_tolerance_delta_box_t100p0.png"],
     "weight_tolerance_box.png":    ["outputs/rnd_weight_tolerance/weight_tolerance_delta_box.png"],
+    "weight_tolerance_delta.png":  ["outputs/rnd_weight_tolerance/weight_tolerance_delta_box.png"],
     # 4.3.6 Lamarckian operators (nb_4_3_6_lamarckian.ipynb)
     "lamarckian_operators_toy.png":    ["results_and_discussion/images/lamarckian_operators_toy.png"],
     "lamarckian_operators_iligan.png": ["results_and_discussion/images/lamarckian_operators_iligan.png"],
@@ -55,7 +61,11 @@ FIGURES = {
     "memetic_pheromone_blend.png":    ["results_and_discussion/images/memetic_pheromone_blend.png"],
     "memetic_gap_change.png":         ["results_and_discussion/images/memetic_gap_change.png"],
 
-    # ---- 4.4 / 4.5 Evolution + optimized network (opt_eval.py, after the 8h runs) ----
+    # ---- 4.4 Evolutionary dynamics (toy showcase: fig_optimization.py) ----
+    "opt_convergence.png":             ["results_and_discussion/images/fig_opt_convergence.png"],
+    "opt_evolution.png":               ["results_and_discussion/images/fig_opt_evolution.png"],
+
+    # ---- 4.5 Optimized Iligan network (opt_eval.py, after the 8h runs) ----
     "convergence_curves.png":          ["results_and_discussion/images/convergence_curves.png"],
     "robustness_reproducibility.png":  ["results_and_discussion/images/robustness_reproducibility.png"],
     "robustness_temporal.png":         ["results_and_discussion/images/robustness_temporal.png"],

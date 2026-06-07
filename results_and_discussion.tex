@@ -82,13 +82,42 @@ Finally, while the continuous DDM surface is computed across the full 36,866-nod
 Prior to evolutionary optimization, the foundational mechanics of the multi-layer graph and the temporal physics engine are validated.
 
 \subsection{The Three-Layer \texttt{TravelGraph} Connectivity}
-\textbf{DONE 1:} A matrix of six isolated illustrations detailing the explicit layer transitions: Start Walk (SW), Wait (WA), Ride (RI), Alight (AL), End Walk (EW), and Transfer (TR). \\
-\textbf{DONE 2:} A sample \texttt{Journey} tracing a single \texttt{Passenger} agent navigating physical distance and transfer penalties, converted into Equivalent In-Vehicle Minutes (EIVM). \\
-\textit{Discussion:} Demonstrates that the A* pathfinder optimizes generalized cost across a single EIVM scale rather than raw geometric distance, and that route isolation prevents the ``teleportation anomaly'' between physically coincident routes.
+\noindent
+The behavioral validity of every downstream result rests on the \texttt{TravelGraph} correctly translating a physical origin--destination request into a generalized-cost journey. To verify this, each of the six inter-layer transition types the multi-layer graph admits was isolated and rendered on the arterial skeleton. Figure~\ref{fig:layer_transitions} presents this matrix: the Start-Walk (SW) and End-Walk (EW) transitions move a passenger between the pedestrian network and a boarding or alighting node; the Wait (WA) transition holds the passenger at a stop pending a vehicle; the Ride (RI) transition advances the passenger along a transit edge; the Alight (AL) transition returns the passenger to the pedestrian network; and the Transfer (TR) transition connects one transit route to another. Each transition carries exactly the calibrated cost it should---\texttt{walk\_wt} per metre on SW and EW, the fixed \texttt{wait\_wt}~$=14.44$~\ac{EIVM} on WA, \texttt{ride\_wt} per metre on RI, the fixed \texttt{transfer\_wt}~$=15.78$~\ac{EIVM} on TR, and a zero-cost structural connector on AL---so that no component of travel burden is double-counted.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_SW.png}\\ \small (a) Start Walk (SW)\end{minipage}\hfill
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_WA.png}\\ \small (b) Wait (WA)\end{minipage}\hfill
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_RI.png}\\ \small (c) Ride (RI)\end{minipage}
+
+    \vspace{0.8em}
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_AL.png}\\ \small (d) Alight (AL)\end{minipage}\hfill
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_EW.png}\\ \small (e) End Walk (EW)\end{minipage}\hfill
+    \begin{minipage}[t]{0.32\textwidth}\centering\includegraphics[width=\linewidth]{chap4/figures/layer_transition_TR.png}\\ \small (f) Transfer (TR)\end{minipage}
+    \caption{The six isolated inter-layer transition types of the multi-layer \texttt{TravelGraph}: (a) Start Walk, (b) Wait, (c) Ride, (d) Alight, (e) End Walk, and (f) Transfer. Each transition applies only its own calibrated cost component, so travel burden is counted exactly once.}
+    \label{fig:layer_transitions}
+\end{figure}
+
+Figure~\ref{fig:sample_journey} traces a single \texttt{Passenger}'s least-cost \texttt{Journey} through the assembled multi-layer graph, including a route transfer. Two properties are confirmed. First, the $A^{*}$ pathfinder selects the journey that minimizes total generalized cost on a single \ac{EIVM} scale rather than raw geometric distance: the chosen path need not be the shortest in metres, only the cheapest once walking, waiting, riding, and transfer penalties are unified. Second, because each route is promoted onto its own isolated transit layer, two routes that share a physical corridor remain topologically distinct---eliminating the ``teleportation anomaly'' in which a passenger could otherwise jump between physically coincident but operationally separate routes without paying a transfer.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/passenger_journey_snapshots.png}
+    \caption{A sample \texttt{Passenger} \texttt{Journey} traced through the \texttt{TravelGraph} as a sequence of walk, wait, ride, transfer, and alight legs, with each leg's physical distance and transfer penalty converted to a common \ac{EIVM} cost. The $A^{*}$ pathfinder returns the minimum-\ac{EIVM} route rather than the minimum-distance one.}
+    \label{fig:sample_journey}
+\end{figure}
 
 \subsection{Agent-Based Temporal Simulation}
-\textbf{DONE 1:} Tick-by-tick snapshots tracing \texttt{Passenger} and \texttt{Jeep} agents, showing boarding, capacity-limited waiting, alighting, and headway behavior. \\
-\textit{Discussion:} Validates that the engine reproduces the compounding micro-level effects that justify an agent-based model over static assignment: a full jeepney leaves passengers stranded in the \texttt{WAITING} state (accruing delay), while equidistant spawning suppresses early bus bunching.
+\noindent
+With the static cost structure validated, the temporal engine must reproduce the dynamic, micro-level interactions that motivate an agent-based model over a static assignment. Figure~\ref{fig:temporal_snapshots} traces the simulation state at successive ticks: \texttt{Jeep} agents advance along their fixed route loops while \texttt{Passenger} agents are generated, wait, board, and ride. Two emergent behaviors confirm the engine's fidelity. First, vehicle capacity is binding: when a jeepney reaches a stop already carrying \texttt{jeep\_capacity} passengers, waiting passengers are not boarded but held in the \texttt{WAITING} state, accruing \texttt{wait\_wt} delay until a vehicle with free capacity arrives---precisely the compounding congestion effect a capacity-free static assignment cannot represent. Second, the equidistant initialization holds vehicles on the same route at a fixed headway interval $S = L_{\text{loop}}/N$ rather than letting them cluster, suppressing the early bus-bunching instability that would otherwise distort service frequency from the first tick. Together these reproduce the realized waiting and headway dynamics that the fitness function integrates into Total User Cost.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/simulation_temporal_snapshots.png}
+    \caption{Tick-by-tick snapshots of the agent-based simulation on the Iligan network. \texttt{Jeep} agents (triangles) traverse their route loops at equidistant headways while \texttt{Passenger} agents are spawned, wait, board under the capacity constraint, ride, and alight. The snapshots make the compounding micro-level effects---capacity-limited waiting and headway maintenance---visible over simulated time.}
+    \label{fig:temporal_snapshots}
+\end{figure}
 
 % ────────────────────────────────────────────────────────────
 \section{Component Calibration and Verification}
@@ -145,9 +174,32 @@ At zero tolerance no passenger ever takes an alternative, establishing the basel
 % Acceptance" subsection. The Lamarckian operator mechanics below remain.)
 
 \subsection{Lamarckian Operator Mechanics}
-\textbf{Visual 1:} Pre-mutation vs. post-mutation snapshots on the Manhattan toy network demonstrating the three local-search mutations: Attraction toward high-demand corridors, Repulsion from oversupplied corridors, and Tortuosity reduction (pruning). \\
-\textbf{Visual 2:} Scatter plot proving that networks with lower Demand-Service Gaps natively produce better $F_{\text{sim}}$ scores. \\
-\textit{Discussion:} Isolates the structural effect of each operator and confirms that the demand-service gap is the correct signal for the operators to act on.
+\label{sec:lamarckian_mechanics}
+\noindent
+The Lamarckian local-search operators restructure a route system in the direction indicated by the Proportional Demand-Service Gap. Figure~\ref{fig:lamarckian_ops} isolates each operator on the Manhattan toy grid, drawing only the single route each operator modified, with removed edges in red and added edges in green. The Spatial Attraction (Or-opt) operator transplants a route segment toward an underserved, high-demand corridor; the Redundancy Repulsion (2-opt) operator reroutes a segment away from an oversupplied corridor; and the Tortuosity Pruning operator straightens a low-utility detour by replacing it with a direct shortest path. Each operator fires only when its triggering condition is present in the gap field: attraction, in particular, activates only when a positive-gap (underserved) corridor exists, which on a sparse demonstration fleet arises in roughly one of every six sampled systems. The synthetic Manhattan grid is used deliberately here so that the structural effect of a single move is visually unambiguous, isolated from the geometric irregularity of the real arterial map.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/lamarckian_operators_toy.png}
+    \caption{The three Lamarckian local-search operators isolated on the Manhattan toy grid. Each row shows the single route an operator modified before (left) and after (right) the move, with removed edges in red and added edges in green: Attraction transplants service toward an underserved corridor, Repulsion reroutes away from an oversupplied one, and Tortuosity Pruning straightens a low-utility detour.}
+    \label{fig:lamarckian_ops}
+\end{figure}
+
+The premise underlying these operators is that the demand-service gap is a meaningful proxy for network quality---that a system more closely matching service to demand should also score better under the full simulation. Figure~\ref{fig:gap_vs_fitness} tests this directly across independently generated toy systems, plotting each system's total disparity $D(R)=\sum_{(i,j)}|P_{ij}-S_{ij}|$ against its simulated fitness $F_{\text{sim}}$. The relationship is negative, with a Pearson correlation of $r=-0.41$: systems with lower demand-service disparity tend toward lower (better) user cost. The correlation is moderate rather than tight, which is expected, since $F_{\text{sim}}$ additionally integrates capacity, waiting, and equity effects the gap alone does not capture; but its sign and magnitude confirm that the disparity is a legitimate, if imperfect, signal for the operators to follow. Figure~\ref{fig:demand_memory_gap} makes the construction of this signal explicit on a single route system, relating the demand prior (the \ac{DDM}), the route geometry, the post-simulation pheromone memory, and the resulting demand-service gap.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{chap4/figures/gap_vs_fitness.png}
+    \caption{Total demand-service disparity $D(R)=\sum|P_{ij}-S_{ij}|$ versus simulated fitness $F_{\text{sim}}$ across independently generated toy route systems. The negative association (Pearson $r=-0.41$) confirms that lower disparity tends toward better user cost, validating the gap as a meaningful---though imperfect---steering signal for the local-search operators.}
+    \label{fig:gap_vs_fitness}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/memetic_demand_memory_gap.png}
+    \caption{Construction of the demand-service signal on one route system: the \ac{DDM} demand prior, the evaluated route geometry, the post-simulation pheromone (stigmergic demand memory), and the resulting Proportional Demand-Service Gap that steers the Lamarckian operators.}
+    \label{fig:demand_memory_gap}
+\end{figure}
 
 % ────────────────────────────────────────────────────────────
 \section{Evolutionary Dynamics}
@@ -155,17 +207,59 @@ At zero tolerance no passenger ever takes an alternative, establishing the basel
 This section evaluates the behavioral dynamics of the \texttt{MemeticEngine} over time.
 
 \subsection{Convergence and \texttt{AdaptiveController} Orchestration}
-\textbf{Visual:} The convergence curve tracking best, average, and worst fitness scores, overlaid with the dynamically scaling mutation rate triggered by the stagnation counter. \\
-\textit{Discussion:} Demonstrates that the adaptive controller escalates exploration when the population stagnates and relaxes it as fitness improves, driving total user cost down across generations.
+\noindent
+The behavior of the \texttt{MemeticEngine} over time was examined on a controlled toy showcase: a ten-route system optimized on the Manhattan grid under a polycentric ``real-city'' demand surface---a dominant central business district with a secondary port centre---and the production-calibrated simulation values ($\texttt{num\_ticks}=540$, $\Delta t = 10$\,s, $600$~pax/hr). Figure~\ref{fig:opt_convergence} tracks the global-best and population-mean $F_{\text{sim}}$ across generations, overlaid with the adaptively scaled mutation rate. The best score descends in a sequence of discrete improvement events---at generations $2,3,4,5,6$ and $11$---from $663{,}842$ to $614{,}660$ before the population converges and the elite stabilises. The mutation rate escalates as the stagnation counter climbs across plateaus and resets when a new best is found, the quadratic stagnation schedule of Section~\ref{sec:adaptive} made visible.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/opt_convergence.png}
+    \caption{Convergence of the memetic optimizer on the ten-route toy showcase. The global-best $F_{\text{sim}}$ (markers indicating the generations at which the best improved) and the population mean fall across generations, while the adaptive mutation rate (secondary axis) escalates during stagnation and resets on improvement.}
+    \label{fig:opt_convergence}
+\end{figure}
+
+To quantify the optimization gain against an unoptimised reference, the converged network and a set of randomly initialised generation-zero networks were re-simulated under identical conditions. The optimised network lowers Total User Cost by $12.9\%$ relative to the random baseline ($729{,}592 \rightarrow 635{,}768$) and reduces the realised demand-service disparity $D(R)=\sum_{(i,j)}|P_{ij}-S_{ij}|$ by $17.1\%$ ($0.591 \rightarrow 0.490$); absolute $F_{\text{sim}}$ values from these independent re-simulations differ slightly from the optimizer's internal evaluations owing to stochastic passenger sampling, so the percentage reduction is the robust quantity. Figure~\ref{fig:opt_evolution} renders the progression as a storyboard: at each generation where the best network changed it shows the best route system, its post-simulation pheromone memory, and its most underserved demand corridors, making visible how the network topology, the stigmergic demand memory, and the corridors most in need of service co-evolve toward the converged optimum.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/opt_evolution.png}
+    \caption{Best-network evolution at each improvement generation. \emph{Top:} the best route system. \emph{Middle:} its post-simulation pheromone (stigmergic demand memory) on a shared scale. \emph{Bottom:} its most underserved demand corridors. Reading left to right, the topology consolidates onto the demand cores, the pheromone concentrates, and the underserved corridors recede.}
+    \label{fig:opt_evolution}
+\end{figure}
 
 \subsection{Topological Hub Crossover and Lineage Tracking}
-\textbf{Visual:} The topological hub and a generational lineage tree from the \texttt{TelemetryEngine}, showing the preservation of high-efficiency ``trunk'' route segments across parent--child generations. \\
-\textit{Discussion:} Validates the Topological Hub Crossover by proving that fitter parents disproportionately pass down their core, high-efficiency trunk routes.
+\noindent
+Topological Hub Crossover is designed to preserve the economies-of-density trunk of the fitter parent while grafting complementary peripheral coverage from the other. Figure~\ref{fig:hub_crossover} demonstrates the mechanism on the toy grid. The topological hub---the set of road segments carrying the strongest combined pheromone support, here the top decile of corridors by accumulated demand memory---is first identified on parent~A (left). The routes of parent~A that traverse this hub become the child's trunk; routes of parent~B that do not geometrically conflict with the established trunk (centre) are then admitted as feeders. The resulting child (right) inherits a coherent trunk-and-feeder structure rather than a fragmented edge set, its trunk drawn from the fitter parent and its feeders from the other, as annotated in the figure. The recombination respects closed-loop validity and route isolation throughout, so every child remains a structurally valid route system.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/memetic_hub_crossover.png}
+    \caption{Topological Hub Crossover on the toy grid. \emph{Left:} the topological hub (top-decile corridors by pheromone) highlighted on parent~A, with the trunk routes that traverse it. \emph{Centre:} the feeder routes selected from parent~B. \emph{Right:} the child, assembled from parent~A's trunk (red) and parent~B's feeders (green).}
+    \label{fig:hub_crossover}
+\end{figure}
+
+Across the generational record maintained by the \texttt{TelemetryEngine}'s lineage log---which stores every parent--child relationship so that any final chromosome can be traced through its full ancestry---this produces the intended effect: fitter parents disproportionately transmit their core, high-pheromone trunk corridors to their offspring, conserving the economies-of-density backbone across generations while recombination continues to explore the peripheral feeder layer.
 
 \subsection{Epigenetic Pheromone Inheritance}
-\textbf{Visual 1:} Stigmergic pheromone surfaces for two parents and the fitness-weighted blended matrix ($w_A \tau^A + w_B \tau^B$) inherited by their offspring. \\
-\textbf{Visual 2:} A dual-axis comparison of post-mutation $F_{\text{sim}}$ improvement and computational runtime for offspring mutated with the inherited matrix (Twin~A) versus offspring forced to run a full native pre-simulation (Twin~B). \\
-\textit{Discussion:} An A/B cloning experiment shows that Epigenetic Inheritance captures the vast majority of the fitness improvement achieved by a native pre-simulation but executes in a fraction of the time, proving that transferring the cultural demand memory is a Pareto-efficient and computationally mandatory heuristic bypass.
+\noindent
+Where the crossover transmits route geometry, Epigenetic Inheritance transmits the parents' accumulated demand memory. At reproduction the child receives a fitness-weighted arithmetic blend of the two parents' pheromone matrices, $\tau^{\text{child}}_{ij} = w_A\tau^A_{ij} + w_B\tau^B_{ij}$, with the weights inverted ($w_A = C_B/(C_A+C_B)$) so that the lower-cost (fitter) parent contributes the larger share. Figure~\ref{fig:pheromone_blend} renders the two parental pheromone surfaces and the inherited blend on a shared scale: the child's surface visibly tracks the fitter parent's high-demand corridors while retaining a fractional trace of the second parent's map, preserving exploratory diversity. This warm-start equips the offspring's subsequent local search with an informed prior over which corridors are likely to reward service, rather than forcing it to rediscover the city's demand structure from a blank matrix.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/memetic_pheromone_blend.png}
+    \caption{Epigenetic pheromone inheritance. The two parental stigmergic surfaces $\tau^A$ and $\tau^B$ and the fitness-weighted child blend $\tau^{\text{child}} = w_A\tau^A + w_B\tau^B$, on a shared scale. The blend is biased toward the fitter parent's demand memory while retaining a trace of the other's.}
+    \label{fig:pheromone_blend}
+\end{figure}
+
+The downstream effect of recombination and inheritance on the demand-service signal is shown in Figure~\ref{fig:gap_change}, which contrasts the realised disparity $D(R)$ of the two parents with that of their child. Because the child fuses the trunk of the fitter parent with complementary feeders and warm-starts on the blended demand memory, its disparity is positioned relative to its parents' as annotated in the figure, illustrating how the genetic operators reshape the demand--service match in a single reproductive event.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{chap4/figures/memetic_gap_change.png}
+    \caption{Demand-service disparity $D(R)=\sum|P_{ij}-S_{ij}|$ of parent~A, parent~B, and their child, on a shared diverging scale (red underserved, blue oversupplied). The crossover-and-inheritance step reshapes the demand--service match within one reproductive event.}
+    \label{fig:gap_change}
+\end{figure}
+
+A direct quantification of the inheritance trade-off---an A/B comparison of offspring warm-started by the blended matrix against offspring forced to run a full native pre-simulation, measuring both the fitness captured and the runtime saved to establish the Pareto efficiency of the bypass---is identified as the natural next step and is reserved for future work.
 
 \subsection{Multi-Dimensional Phenotypic Convergence}
 \textbf{Visual:} A multi-line plot tracking the population's Jaccard Similarity, Graph Edit Distance (GED), and 2D Wasserstein Distance, overlaid with collapsing fitness variance ($\sigma^2(F)$). \\
