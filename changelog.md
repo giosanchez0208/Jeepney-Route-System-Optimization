@@ -50,3 +50,24 @@ Detailed log of all files modified, when the change was completed, why it was ma
 * **Time Done:** 07:56 UTC
 * **Why:** To prevent having to re-run heavy microscopic simulations during evaluation.
 * **What it achieves:** Modifies `resim_evaluation` to check if `best_sim_result.pkl` and `initial_best_sim_result.pkl` exist for the target runs. If found, it bypasses the parallel simulation pool entirely and loads the archived results directly. This reconstructs the graph/route references and computes all post-evaluation metrics (fitness gains, commute time reductions, Gini/CV stats, Shannon entropy, and travel-time histograms) in less than a second, while retaining the parallel simulation fallback for backward compatibility.
+
+### 8. LaTeX Refinement & Academic Alignment
+* **Files Modified:** [`abstract.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/abstract.tex), [`research_description_main.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/research_description_main.tex), [`rrl_main.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/rrl_main.tex), [`research_methodology.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/research_methodology.tex), [`results_and_discussion.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/results_and_discussion.tex)
+* **Time Done:** 14:03 UTC
+* **Why:** To align all chapters of the manuscript with the corrected fleet allocation model, the stigmergic pheromone local search mechanics, and the Total User Cost fitness metric.
+* **What it achieves:** 
+  * Refined Chapter 3 (Methodology) to specify the exact genetic algorithm parameters ($N_{\text{elite}} = 1$, $k_{\text{tournament}} = 3$) and the mathematical formula scaling the local search window sizes ($W$) based on local search intensity ($I_{\text{local}}(g)$) for repulsion and pruning.
+  * Fleshed out all empty placeholders, outlines, and discussion visual comments in Chapter 4 (Results & Discussion) with complete, rigorous academic text, referencing the compiled robustness matrices, temporal demand graphs, travel time distributions, and Shannon entropy diversity metrics.
+  * Harmonized the abstract, Chapter 1 (Introduction), and Chapter 2 (Literature Review) to frame the problem within the Transit Route Network Design Problem (TRNDP) sub-class, and replaced inaccurate references to "commute time minimization" with the formal multi-dimensional "Total User Cost" objective.
+  * Structured and expanded the Scope and Limitations section in Chapter 1 to explicitly categorize inclusions and exclusions (static demand matrix, simplified historical traffic, purely user-centric objectives, static route trajectories, lack of street safety/pedestrian modeling, and system-level focus).
+  * Fixed a syntax error in Chapter 4 (`results_and_discussion.tex`) where a missing closing brace `}` on a figure caption and missing `\label` / `\end{figure}` tags prevented successful compilation in LaTeX (Overleaf).
+
+### 9. Optimization and Performance Overhaul for Lamarckian Mutation & Local Search
+* **Files Modified:** [`utils/city_graph.py`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/utils/city_graph.py), [`utils/genetic.py`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/utils/genetic.py)
+* **Time Done:** 16:45 UTC
+* **Why:** The recent bug fix that activated the spatial disparity local search signals and Lamarckian mutation gating also introduced severe computational bottlenecks: (1) Tortuosity pruning was running thousands of un-cached Python A* queries on the 26k-edge road network graph, and (2) Lamarckian mutation was running a full 2,000-sample Mohring fleet allocation (involving a multi-layer graph build and 2,000 A* queries) three times per mutation event.
+* **What it achieves:**
+  * **Shortest Path Caching:** Decorated `CityGraph.find_shortest_path` with an LRU cache (`maxsize=30000`). Since the road network is static, caching routes between repeated origin/destination nodes reduces A* pathfinding time to $O(1)$ after the first query.
+  * **Surrogate Fleet Allocation Scaling:** Added a `sample_size` parameter to `_allocate_fleet_mohring` and scaled the passenger sample size from `2000` down to `150` *only* during mutation gating checks. A sample size of 150 yields highly stable relative demand shares while speeding up Mohring allocation runs by $\approx 13\times$.
+  * **Removal of Rejection Redundancy:** Eliminated the third, redundant fleet allocation call when a mutation is rejected. Since any child's allocation is overwritten by the exact post-simulation allocation during main generation evaluation anyway, this redundant graph rebuild and pathfinding pass was completely bypassed.
+
