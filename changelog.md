@@ -4,6 +4,29 @@ Detailed log of all files modified, when the change was completed, why it was ma
 
 ---
 
+## 📅 June 8, 2026
+
+### 1. Re-creation and Detail Expansion of Chapter 6 (Conclusions)
+* **File Modified:** [`conclusion.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/conclusion.tex)
+* **Time Done:** 20:37 UTC
+* **Why:** The conclusions chapter needed to outline the project's summary, objective evaluations, limitations, future work, and final remarks, while specifically highlighting the algorithm's upgrades over the Sanchez (2025) baseline.
+* **What it achieves:**
+  * Compares the hybrid Lamarckian Memetic Algorithm (LMA) with the baseline GRASP (Greedy Randomized Adaptive Search Procedure) of Sanchez (2025), emphasizing the transition from constructive search to global crossovers and epigenetic pheromone learning.
+  * Articulates the interdependence between stochastic Poisson passenger arrivals and macro-scale demographic variables in the spatial density framework, explaining how the sensitivity analysis validates that temporal demand fluctuations "average out" for fixed strategic route design.
+  * Formulates paratransit-appropriate recommendations (traffic simulators, demographic variety, multi-modal feeder structures, operator-side economics, and three-layer graph scalability) while explicitly explaining the operational infeasibility of dynamic real-time dispatching.
+
+### 2. Coupling of Poisson Arrivals and Demographic Variables in Methodology
+* **File Modified:** [`research_methodology.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/research_methodology.tex)
+* **Time Done:** 20:45 UTC
+* **Why:** To strengthen the behavioral realism of the passenger generation model by grounding micro-scale stochastic arrivals in macro-scale empirical census and centrality data rather than a uniform spatial layout.
+* **What it achieves:** Rewrote the passenger generator section (line 790) to explicitly detail the Poisson-distributed arrival rates ($\lambda_i$) coupled to DDM demographic and betweenness weights, explaining the demand heterogeneity and Walker's Alias sampling implementation.
+
+### 3. Alignment of Results and Discussion with Decentralized Paratransit Operations
+* **File Modified:** [`results_and_discussion.tex`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/results_and_discussion.tex)
+* **Time Done:** 20:46 UTC
+* **Why:** The results chapter previously suggested that temporal shifts should be handled via dynamic dispatching, which is operationally infeasible in the decentralized owner-operator paratransit systems of the Philippines.
+* **What it achieves:** Updated the temporal demand discussion to reflect that the stability of the route backbone across peak/off-peak regimes justifies static route franchise designs, with minor adjustments addressed by assigning static fleet sizes calibrated to peak demand.
+
 ## 📅 June 7, 2026
 
 ### 1. Memetic Optimizer Lamarckian Mutation Wiring

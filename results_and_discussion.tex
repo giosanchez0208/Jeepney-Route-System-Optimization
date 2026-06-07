@@ -301,7 +301,7 @@ To test whether the optimized route systems are overly specialized to a specific
     \label{fig:robustness_temporal}
 \end{figure}
 
-The comparison reveals high structural similarity (mean Jaccard similarity exceeding 0.70) along the primary arterial trunk lines. This indicates that the optimal spatial backbone is temporally stable and robust to shifting commute patterns. However, minor variations in feeder route paths and localized fleet allocations occur as the optimizer adapts to localized peak congestion, suggesting that while the physical route infrastructure should remain fixed, dynamic fleet dispatch adjustment is warranted to match temporal demand shifts.
+The comparison reveals high structural similarity (mean Jaccard similarity exceeding 0.70) along the primary arterial trunk lines. This indicates that the optimal spatial backbone is temporally stable and robust to shifting commute patterns. This temporal stability justifies the implementation of a static route franchise design. Because dynamic, real-time fleet dispatching is operationally infeasible in decentralized paratransit systems with independent owner-operators, minor variation in temporal demand is best addressed by assigning static fleet size allocations to each route calibrated to peak hourly load expectations.
 
 \subsection{Equity and Distribution Analysis}
 A key objective of the optimized transit design is preventing peripheral or low-density communities from being underserved due to a narrow focus on system-wide travel time averages. The fitness function incorporates an Equity Regularizer ($\alpha \sigma$, where $\sigma$ is the standard deviation of passenger travel times) to penalize unfair travel times. 
