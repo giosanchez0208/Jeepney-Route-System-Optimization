@@ -170,6 +170,7 @@ def _worker_run_override(arg) -> SimulationResult:
 
     result = sim.run()
     
+    # 4. Cleanup & Memory Isolation
     result.jeep_system = None
     
     try:
@@ -180,6 +181,16 @@ def _worker_run_override(arg) -> SimulationResult:
         ]
     except Exception:
         pass
+
+    # --- NEW: Flatten DirEdge objects into primitive coordinate tuples for lightning-fast IPC transfer ---
+    flattened_paths = []
+    for path, cost in result.recorded_paths:
+        if path:
+            # Only send the primitive coordinates across the boundary, saving gigabytes of pickling overhead
+            flat_path = [((e.start.lon, e.start.lat), (e.end.lon, e.end.lat)) for e in path]
+            flattened_paths.append((flat_path, cost))
+    result.recorded_paths = flattened_paths
+    # ---------------------------------------------------------------------------------------------------
 
     for j in jeeps:
         j.onboard_passengers.clear()

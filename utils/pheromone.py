@@ -90,28 +90,30 @@ class PheromoneMatrix:
     # ------------------------------------------------------------------
     def update_pheromones(self, sim_result: 'SimulationResult') -> None:
         """
-        Pheromone update: evaporation then deposit along every recorded passenger path.
-        Deposit = Q / path_cost so cheaper (better) journeys leave stronger trails.
+        Pheromone update: evaporation then batched deposit.
+        Receives primitive tuple keys from the IPC-optimized SimulationResult.
         """
-        # Evaporate (Math is identical)
+        # Evaporate
         for k in self._tau:
             self._tau[k] *= (1.0 - self.rho)
 
-        # Deposit - BATCHED for O(N) tuple reduction (Math is identical)
+        # Deposit - BATCHED for O(N) tuple reduction
         from collections import defaultdict
         edge_deposits = defaultdict(float)
         
-        for path, cost in sim_result.recorded_paths:
-            if not path or cost <= 0:
+        # The flat_path is now a list of primitive coordinate tuples directly from the IPC
+        for flat_path, cost in sim_result.recorded_paths:
+            if not flat_path or cost <= 0:
                 continue
+                
             deposit = self.q / cost
-            for edge in path:
-                edge_deposits[edge] += deposit
+            for coord_key in flat_path:
+                edge_deposits[coord_key] += deposit
 
-        for edge, total_dep in edge_deposits.items():
-            k = _edge_key(edge)
-            if k in self._tau:
-                self._tau[k] += total_dep
+        # Perform the O(1) dictionary writes
+        for coord_key, total_dep in edge_deposits.items():
+            if coord_key in self._tau:
+                self._tau[coord_key] += total_dep
 
     # ------------------------------------------------------------------
     def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route'], allocation: Optional[dict['Route', int]] = None) -> dict['DirEdge', float]:
