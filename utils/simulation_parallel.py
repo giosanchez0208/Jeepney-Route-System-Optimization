@@ -13,47 +13,27 @@ from .route import Route
 from .jeep import Jeep
 from .directed_edge import DirEdge
 
-# -----------------------------------------------------------------------------
-# Worker Process Global State
-# -----------------------------------------------------------------------------
-# These will be initialized exactly once per CPU worker process to avoid pickling
-# heavy objects repeatedly across the IPC (Inter-Process Communication) boundary.
 _WORKER_CONFIG = None
 _WORKER_CITY_GRAPH = None
 _WORKER_DEMAND_SAMPLER = None
-_WORKER_TG_CACHE = None          # Cached TravelGraph (reused if routes unchanged)
-_WORKER_ROUTES_CACHE = None      # Cached restored routes
-_WORKER_ROUTES_KEY = None        # Hash key to detect route changes
+_WORKER_TG_CACHE = None          
+_WORKER_ROUTES_CACHE = None      
+_WORKER_ROUTES_KEY = None        
 
 
 def _worker_init(config: dict):
-    """
-    Called once when a worker process starts.
-    We rebuild the heavy CityGraph and DemandSampler here so they persist
-    for all simulation runs assigned to this specific worker core.
-    """
     global _WORKER_CONFIG, _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER
     _WORKER_CONFIG = config
 
-    print(f"[Worker {os.getpid()}] Initializing static CityGraph and Sampler...")
-
-    # Toy city: rebuild the synthetic grid + ToyDDM locally from the config dict. It is deterministic
-    # (grid_size/origin/step), so the worker's node coordinates match the main process exactly and the
-    # coordinate-keyed IPC route restoration in _restore_route works. The real-city pickle / PBF path
-    # below does not apply (a toy config has no cg_pkl/ddm_pkl/pbf, which is what produced the
-    # "No valid nodes available for sampling" error).
     if "toy_city" in config:
         from .toy_city import toy_setup_from_dict
         _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER, _ = toy_setup_from_dict(config, verbose=False)
-        print(f"[Worker {os.getpid()}] Toy city + ToyDDM initialized.")
         return
 
-    # Check if pre-computed pickle files are provided to bypass slow initialization
     cg_pkl = config.get("cg_pkl")
     ddm_pkl = config.get("ddm_pkl")
     
     if cg_pkl and os.path.exists(cg_pkl):
-        print(f"[Worker {os.getpid()}] Loading CityGraph from {cg_pkl}...")
         import pickle
         with open(cg_pkl, 'rb') as f:
             _WORKER_CITY_GRAPH = pickle.load(f)
@@ -67,7 +47,6 @@ def _worker_init(config: dict):
         )
         
     if ddm_pkl and os.path.exists(ddm_pkl):
-        print(f"[Worker {os.getpid()}] Loading DirectDemandSampler from {ddm_pkl}...")
         import pickle
         with open(ddm_pkl, 'rb') as f:
             _WORKER_DEMAND_SAMPLER = pickle.load(f)
@@ -78,15 +57,9 @@ def _worker_init(config: dict):
             config=DDMConfig(**config.get("ddm", {})),
             verbose=False
         )
-    print(f"[Worker {os.getpid()}] Initialization complete.")
 
 
 def _restore_route(route: Route, cg: CityGraph) -> Route:
-    """
-    When a Route is sent across IPC, its custom __setstate__ clears its path
-    and cg references, leaving only path_keys to keep it lightweight.
-    This reconstructs the heavy path objects securely in the worker memory.
-    """
     if route.path:
         return route
         
@@ -103,7 +76,6 @@ def _restore_route(route: Route, cg: CityGraph) -> Route:
         if not edge:
             raise ValueError(f"[Worker {os.getpid()}] Could not restore route edge {key} in worker CityGraph.")
             
-        # Promote to Layer 2 Edge as defined in Route promotion logic
         l2_edge = DirEdge(edge.start, edge.end, weight=edge.weight)
         setattr(l2_edge, 'layer', 2)
         restored_path.append(l2_edge)
@@ -118,23 +90,10 @@ def _restore_route(route: Route, cg: CityGraph) -> Route:
 
 
 def _worker_run(routes: List[Route]) -> SimulationResult:
-    """Backward-compatible entry point. Runs with the frozen worker config (no overrides)."""
     return _worker_run_override((routes, None))
 
 
 def _worker_run_override(arg) -> SimulationResult:
-    """
-    Executes a single simulation run within the worker process using the lightweight routes.
-    Caches the TravelGraph so it's only rebuilt when the route set changes.
-
-    `arg` is a tuple ``(routes, overrides)``. ``overrides`` is an optional dict of
-    per-call simulation-parameter overrides (e.g. ``num_ticks``, ``spawn_rate_per_hour``,
-    ``seconds_per_tick``, ``total_allocatable_jeeps``). When ``None`` the frozen worker
-    config is used unchanged — byte-for-byte identical to the original behavior.
-    Crucially, none of the override keys affect the heavy objects (CityGraph,
-    DemandSampler, cached TravelGraph), so a PERSISTENT pool can sweep these scalars
-    without any worker re-initialization or TravelGraph rebuild.
-    """
     routes, overrides = arg
     global _WORKER_CONFIG, _WORKER_CITY_GRAPH, _WORKER_DEMAND_SAMPLER
     global _WORKER_TG_CACHE, _WORKER_ROUTES_CACHE, _WORKER_ROUTES_KEY
@@ -142,14 +101,12 @@ def _worker_run_override(arg) -> SimulationResult:
     if _WORKER_CITY_GRAPH is None or _WORKER_DEMAND_SAMPLER is None:
         raise RuntimeError(f"[Worker {os.getpid()}] process was not properly initialized with static objects.")
 
-    # 1. Check if we can reuse cached TravelGraph
     route_key = tuple(getattr(r, 'id', i) for i, r in enumerate(routes))
     
     if _WORKER_TG_CACHE is not None and _WORKER_ROUTES_KEY == route_key:
         restored_routes = _WORKER_ROUTES_CACHE
         tg = _WORKER_TG_CACHE
     else:
-        # Restore Lightweight Routes to Heavy Routes
         restored_routes = [_restore_route(r, _WORKER_CITY_GRAPH) for r in routes]
         tg = TravelGraph(
             cg=_WORKER_CITY_GRAPH,
@@ -159,17 +116,14 @@ def _worker_run_override(arg) -> SimulationResult:
         _WORKER_TG_CACHE = tg
         _WORKER_ROUTES_CACHE = restored_routes
         _WORKER_ROUTES_KEY = route_key
-        print(f"[Worker {os.getpid()}] Built TravelGraph ({len(tg.travel_graph)} edges)")
 
-    # 2. Build Local Heavy Objects
-    # Merge per-call overrides over the frozen worker config. When overrides is
-    # None this is an exact shallow copy of the original simulation config.
     sim_cfg = {**_WORKER_CONFIG.get("simulation", {}), **(overrides or {})}
     total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
     jeep_speed_kmh = sim_cfg.get("jeep_speed_kmh", 40.0)
     jeep_capacity = sim_cfg.get("jeep_capacity", 16)
     weight_tol = sim_cfg.get("weight_tolerance", 50.0)
     seconds_per_tick = sim_cfg.get("seconds_per_tick", 1)
+    
     from .jeep_system import FleetAllocator
     allocation = FleetAllocator.allocate_by_mohring(
         total_fleet=total_jeeps,
@@ -214,18 +168,10 @@ def _worker_run_override(arg) -> SimulationResult:
         config=worker_cfg
     )
 
-    
-    # 3. Execute Simulation
     result = sim.run()
     
-    # 4. Cleanup & Memory Isolation
-    # Detach the complex jeep_system (which holds graph nodes) from the result
-    # to prevent ProcessPoolExecutor from pickling it.
     result.jeep_system = None
-
-    # Attach per-passenger door-to-door commute times (minutes) BEFORE the passenger generator is
-    # dropped, so post-hoc analyses (the commute-time comparison in opt_eval.py) survive the IPC
-    # boundary. The GA ignores extra metrics, so this is harmless to optimization.
+    
     try:
         result.metrics["commute_times_min"] = [
             (p.despawn_tick - p.spawn_tick) / 60.0
@@ -234,52 +180,40 @@ def _worker_run_override(arg) -> SimulationResult:
         ]
     except Exception:
         pass
-    
-    # Delete only the local simulation objects.
-    # Do NOT delete tg / restored_routes — they are aliased to the global
-    # _WORKER_TG_CACHE / _WORKER_ROUTES_CACHE and must survive for reuse.
+
+    for j in jeeps:
+        j.onboard_passengers.clear()
+        
+    for p in passenger_generator.passengers + passenger_generator.archived_passengers:
+        p.current_jeep = None
+
     del passenger_generator
     del jeep_system
     del sim
     del jeeps
-    gc.collect()  # 2000-jeep sims form reference cycles; reclaim them before the worker's next eval
-
-    # Return the lightweight object
+    
     return result
 
 
 class ParallelSimulationRunner:
-    """
-    Manages a pool of worker processes to execute multiple simulations concurrently.
-    
-    Supports two modes:
-    1. One-shot (original): Each run_parallel() call creates and destroys a pool.
-    2. Persistent pool: Call open_pool() / close_pool() or use as a context manager
-       to keep workers alive across multiple run_parallel() calls. This avoids
-       the ~90s-per-call worker initialization overhead in sweep loops.
-    """
     def __init__(self, config: dict, max_workers: int = None):
         self.config = config
         self.max_workers = max_workers or max(1, os.cpu_count() - 1)
         self._executor = None
         
     def open_pool(self):
-        """Starts a persistent worker pool. Workers survive across run_parallel() calls."""
         if self._executor is not None:
-            return  # Already open
+            return
         self._executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=self.max_workers,
             initializer=_worker_init,
             initargs=(self.config,)
         )
-        print(f"[ParallelRunner] Opened persistent pool with {self.max_workers} workers.")
         
     def close_pool(self):
-        """Shuts down the persistent worker pool."""
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
-            print("[ParallelRunner] Persistent pool closed.")
             
     def __enter__(self):
         self.open_pool()
@@ -289,25 +223,12 @@ class ParallelSimulationRunner:
         self.close_pool()
         
     def run_parallel(self, routes_list: List[List[Route]]) -> List[SimulationResult]:
-        """
-        Executes simulations for a list of route configurations in parallel.
-        
-        Args:
-            routes_list: A list where each element is a list of Route objects
-                         representing a single simulation setup.
-                         
-        Returns:
-            A list of SimulationResult objects.
-        """
-        print(f"[ParallelRunner] Starting parallel execution across {self.max_workers} CPU cores for {len(routes_list)} setups...")
         results = []
         
         if self._executor is not None:
-            # Persistent pool mode — reuse existing workers
             for result in self._executor.map(_worker_run, routes_list):
                 results.append(result)
         else:
-            # One-shot mode (backward compatible) — create and destroy pool
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=self.max_workers,
                 initializer=_worker_init,
@@ -316,35 +237,19 @@ class ParallelSimulationRunner:
                 for result in executor.map(_worker_run, routes_list):
                     results.append(result)
                 
-        print(f"[ParallelRunner] Successfully completed {len(results)} parallel simulations.")
         return results
 
     def run_parallel_overrides(self, routes_list: List[List[Route]], overrides_list: List[dict]) -> List[SimulationResult]:
-        """
-        Like run_parallel(), but applies a per-setup dict of simulation-parameter
-        overrides to each run. This lets a PERSISTENT pool sweep scalars such as
-        num_ticks / spawn_rate_per_hour / seconds_per_tick / total_allocatable_jeeps
-        WITHOUT re-initializing workers or rebuilding the cached TravelGraph — the
-        decisive speedup for parameter-sweep notebooks.
-
-        Args:
-            routes_list:    list of route-systems (one per setup).
-            overrides_list: list of override dicts (same length); each is merged over
-                            the frozen 'simulation' config for its setup.
-        """
         if len(routes_list) != len(overrides_list):
             raise ValueError("routes_list and overrides_list must have the same length.")
 
-        print(f"[ParallelRunner] Sweeping {len(routes_list)} setups across {self.max_workers} cores (override mode)...")
         results = []
         args = list(zip(routes_list, overrides_list))
 
         if self._executor is not None:
-            # Persistent pool mode — reuse existing workers and their cached TravelGraph
             for result in self._executor.map(_worker_run_override, args):
                 results.append(result)
         else:
-            # One-shot mode (backward compatible)
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=self.max_workers,
                 initializer=_worker_init,
@@ -353,5 +258,4 @@ class ParallelSimulationRunner:
                 for result in executor.map(_worker_run_override, args):
                     results.append(result)
 
-        print(f"[ParallelRunner] Completed {len(results)} simulations (override mode).")
         return results
