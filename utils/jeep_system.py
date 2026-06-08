@@ -486,23 +486,12 @@ class JeepSystem:
 
         for p in self.active_passengers:
             prev_state = p.state
-            prev_jeep = p.current_jeep
-            prev_wait_coord = (p.curr_lat, p.curr_lon) if prev_state == Passenger.WAITING else None
-
             p.update()
 
             if p.state == Passenger.DONE:
                 completed_passengers.append(p)
-
-            if prev_state == Passenger.WAITING and p.state != Passenger.WAITING:
-                self._unregister_waiting_passenger(p, prev_wait_coord)
-            elif p.state == Passenger.WAITING:
+            elif prev_state != Passenger.WAITING and p.state == Passenger.WAITING:
                 self._register_waiting_passenger(p)
-
-            if prev_state == Passenger.RIDING and prev_jeep and (p.state != Passenger.RIDING or p.current_jeep is not prev_jeep):
-                prev_jeep.onboard_passengers.discard(p)
-            if p.state == Passenger.RIDING and p.current_jeep and (prev_state != Passenger.RIDING or p.current_jeep is not prev_jeep):
-                p.current_jeep.onboard_passengers.add(p)
 
         for p in completed_passengers:
             self.active_passengers.discard(p)
