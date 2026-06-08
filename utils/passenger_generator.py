@@ -71,14 +71,23 @@ class PassengerGenerator:
         self.new_passengers_this_tick = []
 
         # ── Tick boundary: reset every passenger's double-step guard ────────
-        # This is the ONE place that demarcates the start of a new tick.
-        # Passenger.update() sets _stepped_this_tick = True on the first call,
-        # then refuses to advance again until we reset it here.
         for p in self.passengers:
             p._stepped_this_tick = False
 
+        # Batch the schedule generation AND the memory cleanup to run 1% of the time!
         if self.tick_counter > 0 and self.tick_counter % 100 == 0:
             self._generate_schedule()
+            
+            active_passengers = []
+            for p in self.passengers:
+                if p.state == Passenger.DONE:
+                    if getattr(p, 'despawn_tick', None) is None:
+                        p.despawn_tick = self.simulated_time
+                    self.archived_passengers.append(p)
+                else:
+                    active_passengers.append(p)
+
+            self.passengers[:] = active_passengers
 
         spawns_now = self.spawn_schedule[self.tick_counter % 100]
         
@@ -99,21 +108,6 @@ class PassengerGenerator:
                 self.new_passengers_this_tick.append(p)
                 self.total_spawned += 1
 
-        # Passenger stepping is owned SOLELY by JeepSystem.update() (the
-        # simulation's stepping authority).  PassengerGenerator MUST NOT call
-        # p.update() here — doing so would advance every walking passenger
-        # twice per tick (the "double-step" bug).  This loop only reaps
-        # finished passengers using the state that JeepSystem already set.
-        active_passengers = []
-        for p in self.passengers:
-            if p.state == Passenger.DONE:
-                if getattr(p, 'despawn_tick', None) is None:
-                    p.despawn_tick = self.simulated_time
-                self.archived_passengers.append(p)
-            else:
-                active_passengers.append(p)
-
-        self.passengers[:] = active_passengers
         self.tick_counter += 1
         self.simulated_time += self.seconds_per_tick
         
