@@ -27,7 +27,7 @@ class Jeep:
         self.route: Route = route
         self.speed_kmph: float = float(speed)
         self.speed: float = self.speed_kmph
-        self.curr_pos: tuple[float, float] = curr_pos
+        self._initial_pos: tuple[float, float] = curr_pos
         self.designated_color: str = route.designated_color
         self.curr_nodes_passed: Optional[list[tuple[Node, Route]]] = None
         self.heading: float = 0.0
@@ -68,7 +68,8 @@ class Jeep:
     def _snap_to_route(self) -> None:
         best_idx: int = 0
         min_dist: float = float('inf')
-        temp_node: Node = Node(self.curr_pos[0], self.curr_pos[1])
+        
+        temp_node: Node = Node(self._initial_pos[0], self._initial_pos[1])
         
         for i, edge in enumerate(self.route.path):
             dist: float = _getDistance(temp_node, edge.start)
@@ -78,8 +79,6 @@ class Jeep:
                 
         self._edge_idx = best_idx
         self._edge_progress = 0.0
-        snapped_edge: DirEdge = self.route.path[self._edge_idx]
-        self.curr_pos = (snapped_edge.start.lon, snapped_edge.start.lat)
 
     def _update_heading(self) -> None:
         if not self.route.path:
@@ -92,12 +91,10 @@ class Jeep:
     def update(self) -> None:
         self.curr_nodes_passed = []
         distance_to_move: float = self.speed_kmph * _KMH_TO_METERS_PER_TICK * self.seconds_per_tick
-        edge_length: float = 0.0  # will be set in the loop
         
         while distance_to_move > 0:
             current_edge: DirEdge = self.route.path[self._edge_idx]
-            edge_length = current_edge._length
-            remaining_edge_dist: float = edge_length - self._edge_progress
+            remaining_edge_dist: float = current_edge._length - self._edge_progress
             
             if distance_to_move >= remaining_edge_dist:
                 distance_to_move -= remaining_edge_dist
@@ -109,20 +106,23 @@ class Jeep:
                 self._edge_progress += distance_to_move
                 distance_to_move = 0.0
                 
-        current_edge = self.route.path[self._edge_idx]
-        # Reuse the cached length — avoids a second _getDistance call
-        edge_length = current_edge._length
-        
-        if edge_length > 0:
-            ratio: float = self._edge_progress / edge_length
-            lon: float = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
-            lat: float = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
-            self.curr_pos = (lon, lat)
-        else:
-            self.curr_pos = (current_edge.start.lon, current_edge.start.lat)
-            
         if not self.curr_nodes_passed:
             self.curr_nodes_passed = None
+
+    @property
+    def curr_pos(self) -> tuple[float, float]:
+        if not self.route.path:
+            return (0.0, 0.0)
+
+        current_edge = self.route.path[self._edge_idx]
+        
+        if current_edge._length > 0 and self._edge_progress > 0:
+            ratio = self._edge_progress / current_edge._length
+            lon = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
+            lat = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
+            return (lon, lat)
+            
+        return (current_edge.start.lon, current_edge.start.lat)
 
     def nodes_passed_this_frame(self, format_as_str: bool = False) -> Optional[list[tuple[Node, Route]]]:
         if format_as_str:
@@ -143,15 +143,15 @@ class Jeep:
         if not isinstance(start_node, Node) or not isinstance(end_node, Node):
             raise TypeError("[JEEP] Both start_node and end_node must be Node objects.")
         
-        start_idx: int = -1
-        for i, edge in enumerate(self.route.path):
-            if edge.start == start_node:
-                start_idx = i
-                break
-
-        if start_idx == -1:
+        # O(1) dictionary lookup instead of O(N) linear search
+        start_key = (start_node.lon, start_node.lat)
+        start_indices = self.route._node_indices.get(start_key)
+        
+        if not start_indices:
             return []
-
+            
+        start_idx = start_indices[0] 
+        
         path: list[DirEdge] = []
         curr_idx: int = start_idx
         for _ in range(len(self.route.path)):

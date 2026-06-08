@@ -104,18 +104,6 @@ class Passenger:
             f"state={Passenger._STATE_NAMES.get(self.state, 'UNKNOWN')}, speed={self.speed_kmph} km/h, progress={self._edge_idx}/{len(self.journey)} edges"
         )
 
-    @property
-    def curr_lat(self) -> float:
-        if self.state == Passenger.RIDING and self.current_jeep:
-            return self.current_jeep.curr_pos[1]
-        return self._lat
-
-    @property
-    def curr_lon(self) -> float:
-        if self.state == Passenger.RIDING and self.current_jeep:
-            return self.current_jeep.curr_pos[0]
-        return self._lon
-
     @curr_lat.setter
     def curr_lat(self, value: float) -> None:
         if not isinstance(value, (int, float)):
@@ -173,7 +161,6 @@ class Passenger:
         
         while distance_to_move > 0 and self._edge_idx < len(self.journey):
             current_edge = self.journey[self._edge_idx]
-            
             if current_edge._edge_type not in (EDGE_SW, EDGE_EW):
                 break
                 
@@ -184,16 +171,36 @@ class Passenger:
                 distance_to_move -= remaining_edge_dist
                 self._edge_progress = 0.0
                 self._edge_idx += 1
-                self.curr_lat = current_edge.end.lat
-                self.curr_lon = current_edge.end.lon
+                # Update base coordinates to the new node
+                self._lat = current_edge.end.lat
+                self._lon = current_edge.end.lon
             else:
                 self._edge_progress += distance_to_move
                 distance_to_move = 0.0
-                
-                if edge_length > 0:
-                    ratio = self._edge_progress / edge_length
-                    self.curr_lat = current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
-                    self.curr_lon = current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
+
+    @property
+    def curr_lat(self) -> float:
+        if self.state == Passenger.RIDING and self.current_jeep:
+            return self.current_jeep.curr_pos[1]
+        
+        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
+            current_edge = self.journey[self._edge_idx]
+            if current_edge._length > 0 and self._edge_progress > 0:
+                ratio = self._edge_progress / current_edge._length
+                return current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
+        return self._lat
+
+    @property
+    def curr_lon(self) -> float:
+        if self.state == Passenger.RIDING and self.current_jeep:
+            return self.current_jeep.curr_pos[0]
+            
+        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
+            current_edge = self.journey[self._edge_idx]
+            if current_edge._length > 0 and self._edge_progress > 0:
+                ratio = self._edge_progress / current_edge._length
+                return current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
+        return self._lon
 
     def get_target_route_idx(self) -> Optional[int]:
         if self.state != Passenger.WAITING or self._edge_idx >= len(self.journey):
