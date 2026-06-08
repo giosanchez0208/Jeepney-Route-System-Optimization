@@ -104,6 +104,19 @@ class Passenger:
             f"state={Passenger._STATE_NAMES.get(self.state, 'UNKNOWN')}, speed={self.speed_kmph} km/h, progress={self._edge_idx}/{len(self.journey)} edges"
         )
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Ensure the attribute exists even if it wasn't there before
+        if '_stepped_this_tick' not in state:
+            state['_stepped_this_tick'] = False
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Ensure the attribute exists upon loading
+        if '_stepped_this_tick' not in self.__dict__:
+            self.__dict__['_stepped_this_tick'] = False
+            
     @curr_lat.setter
     def curr_lat(self, value: float) -> None:
         if not isinstance(value, (int, float)):
