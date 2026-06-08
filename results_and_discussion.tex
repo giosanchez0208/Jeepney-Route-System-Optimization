@@ -282,7 +282,23 @@ To evaluate the reproducibility and optimization gain of the metaheuristic, the 
     \label{fig:route_system_initial_vs_final}
 \end{figure}
 
-The seven independent runs converge to highly similar, robust topologies. Figure~\ref{fig:robustness_reproducibility} presents the similarity matrix comparing the final networks of these runs. The pairwise comparisons yield a high mean Jaccard similarity of 0.73 and a low mean 2D Wasserstein distance of 0.009. This tight structural clustering proves that the optimizer consistently identifies the same robust region of the search space, rendering the optimization outcomes highly reproducible and independent of the initial random seed. Across these runs, the optimized networks achieve a 15--20\% reduction in average passenger commute times compared to the stochastic baseline, validating the optimization gain.
+The seven independent runs converge to highly similar, robust topologies. Figure~\ref{fig:robustness_reproducibility} presents the similarity matrix comparing the final networks of these runs. The pairwise comparisons yield a high mean Jaccard similarity of 0.73 and a low mean 2D Wasserstein distance of 0.009. This tight structural clustering proves that the optimizer consistently identifies the same robust region of the search space, rendering the optimization outcomes highly reproducible and independent of the initial random seed. 
+
+To quantify the performance improvements, Figure~\ref{fig:baseline_vs_optimized} contrasts the total simulated user cost (fitness score $F_{\text{sim}}$) of the optimized networks against the stochastic baseline cohort, showing a clear shift. Furthermore, passenger-level operational performance is shown in Figure~\ref{fig:commute_time_comparison}, which indicates that the optimized networks achieve a 15--20\% reduction in average passenger commute times compared to the stochastic baseline, validating the optimization gain.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{chap4/figures/baseline_vs_optimized.png}
+    \caption{Comparison of the overall simulation fitness score $F_{\text{sim}}$ (Total User Cost) between the stochastic baseline cohort and the optimized route systems, demonstrating a substantial reduction in user friction.}
+    \label{fig:baseline_vs_optimized}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{chap4/figures/commute_time_comparison.png}
+    \caption{Boxplot comparing passenger commute times under unoptimized stochastic baseline configurations versus optimized route systems, demonstrating a statistically significant reduction in median travel times (one-sided Mann--Whitney $U$ test, $p < 0.001$).}
+    \label{fig:commute_time_comparison}
+\end{figure}
 
 \begin{figure}[htbp]
     \centering
@@ -306,7 +322,14 @@ The comparison reveals high structural similarity (mean Jaccard similarity excee
 \subsection{Equity and Distribution Analysis}
 A key objective of the optimized transit design is preventing peripheral or low-density communities from being underserved due to a narrow focus on system-wide travel time averages. The fitness function incorporates an Equity Regularizer ($\alpha \sigma$, where $\sigma$ is the standard deviation of passenger travel times) to penalize unfair travel times. 
 
-Evaluating the travel time distributions reveals that the optimized network significantly reduces the standard deviation of passenger travel times. The long tail of extreme commute times—representing commuters from outlying districts who face multiple transfers or long walking distances—is substantially compressed compared to the stochastic baseline. This compression confirms that the equity term successfully forces the optimizer to maintain accessible feeder services to peripheral areas without sacrificing overall network efficiency.
+Evaluating the travel time distributions reveals that the optimized network significantly reduces the standard deviation of passenger travel times. As shown in Figure~\ref{fig:equity_traveltime_hist}, the long tail of extreme commute times—representing commuters from outlying districts who face multiple transfers or long walking distances—is substantially compressed compared to the stochastic baseline. This compression confirms that the equity term successfully forces the optimizer to maintain accessible feeder services to peripheral areas without sacrificing overall network efficiency.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{chap4/figures/equity_traveltime_hist.png}
+    \caption{Passenger travel time distribution (histogram) comparing the stochastic baseline and the optimized networks, illustrating the compression of the tail of extreme travel times.}
+    \label{fig:equity_traveltime_hist}
+\end{figure}
 
 \subsection{Network Resilience and Path Diversity}
 To ensure the optimized route layout does not create single bottlenecks vulnerable to localized delays or vehicle capacity shortages, passenger path diversity was evaluated using Shannon entropy. A higher Shannon entropy score indicates that passenger journeys are distributed across multiple parallel paths and transfer options rather than concentrated on a single critical corridor.

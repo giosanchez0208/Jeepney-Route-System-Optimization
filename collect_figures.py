@@ -71,6 +71,8 @@ FIGURES = {
     "robustness_temporal.png":         ["results_and_discussion/images/robustness_temporal.png"],
     "baseline_vs_optimized.png":       ["results_and_discussion/images/baseline_vs_optimized.png"],
     "equity_traveltime_hist.png":      ["results_and_discussion/images/equity_traveltime_hist.png"],
+    "route_system_initial_vs_final.png": ["results_and_discussion/images/route_system_initial_vs_final.png"],
+    "commute_time_comparison.png":     ["results_and_discussion/images/commute_time_comparison.png"],
 }
 
 
