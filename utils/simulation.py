@@ -17,7 +17,6 @@ from .jeep import Jeep
 from .passenger import Passenger
 
 class SimulationSetup:
-    """Wraps the strict instantiation sequence for the simulation environment."""
     def __init__(self, city_query: str, config: dict, routes: list[Route]) -> None:
         if not routes:
             raise ValueError("[SIMULATION SETUP] Routes must be provided. Fallback generation is deprecated.")
@@ -32,7 +31,6 @@ class SimulationSetup:
         return f"SimulationSetup({self.id}): {self.city_query}, {len(self.routes)} routes provided"
 
     def build(self) -> 'Simulation':
-        print("[Setup] Initializing CityGraph...")
         cg_cfg = self.config.get("city_graph", {})
         cg = CityGraph(
             bbox=tuple(cg_cfg.get("bbox")) if "bbox" in cg_cfg else None,
@@ -41,17 +39,14 @@ class SimulationSetup:
             pbf_path=cg_cfg.get("pbf_path")
         )
 
-        print("[Setup] Initializing Direct Demand Sampler...")
         sampler = DirectDemandSampler(
             city=cg,
             config=DDMConfig(**self.config.get("ddm", {})),
             verbose=False
         )
                     
-        print("[Setup] Injecting Transit Routes into Travel Graph...")
         tg = TravelGraph(cg, config=self.config.get("travel_graph", {}), routes=self.routes)
         
-        print("[Setup] Deploying Fleet...")
         sim_cfg = self.config.get("simulation", {})
         jeeps = []
         total_jeeps = sim_cfg.get("total_allocatable_jeeps", 25)
@@ -81,7 +76,6 @@ class SimulationSetup:
             equidistant_spawn=True
         )
         
-        print("[Setup] Initializing Passenger Spawner...")
         passenger_generator = PassengerGenerator(
             tg=tg,
             sampler=sampler,
@@ -104,7 +98,6 @@ class SimulationSetup:
 
 
 class SimulationResult:
-    """A lightweight target to extract metrics and paths without holding heavy memory."""
     def __init__(
         self, 
         fitness_score: Optional[float] = None,
@@ -212,7 +205,6 @@ class Simulation:
         return f"Simulation({self.id}): tick={self.current_tick}/{self.max_ticks}, complete={self.is_complete}"
 
     def update(self) -> None:
-        """Advances the simulation state by the speed multiplier."""
         for _ in range(self.speed_multiplier):
             if self.current_tick >= self.max_ticks:
                 self.is_complete = True
@@ -220,8 +212,6 @@ class Simulation:
                 
             self.passenger_generator.update()
             
-            # Use the pre-populated new_passengers_this_tick list instead of
-            # slicing the full passengers list by a stale counter every tick.
             for p in self.passenger_generator.new_passengers_this_tick:
                 self.jeep_system.add_passenger(p)
 
@@ -229,29 +219,21 @@ class Simulation:
             self.current_tick += 1
 
     def run(self) -> SimulationResult:
-        """Executes the headless simulation loop until max_ticks is reached."""
-        from tqdm import tqdm
         disable_tqdm = self.config.get("disable_tqdm", False)
-        with tqdm(total=self.max_ticks, desc="Microscopic Simulation Ticks", leave=False, disable=disable_tqdm) as pbar:
+        
+        if disable_tqdm:
+            while not self.is_complete:
+                self.update()
+            return self.evaluate_fitness()
+            
+        from tqdm import tqdm
+        with tqdm(total=self.max_ticks, desc="Microscopic Simulation Ticks", leave=False) as pbar:
             while not self.is_complete:
                 self.update()
                 pbar.update(1)
         return self.evaluate_fitness()
 
-
     def run_until_drained(self, safety_cap: int = 100_000) -> SimulationResult:
-        """Runs until every spawned passenger has completed their journey.
-
-        Unlike run(), this ignores max_ticks and instead terminates as soon as
-        passenger_generator.passengers is empty (all active passengers reached DONE).
-        The PassengerGenerator will stop spawning new passengers after its internal
-        schedule is exhausted (~100-tick windows), so the loop naturally converges.
-
-        Args:
-            safety_cap: Hard upper-bound tick limit to prevent truly infinite loops
-                        in degenerate cases (e.g. passengers waiting forever with no
-                        jeep that can reach them). Defaults to 100,000 ticks.
-        """
         tick = 0
         while tick < safety_cap:
             self.passenger_generator.update()
@@ -261,8 +243,6 @@ class Simulation:
             self.current_tick += 1
             tick += 1
 
-            # Terminate once no more passengers are actively in the system.
-            # archived_passengers are DONE; passengers list holds still-active ones.
             if len(self.passenger_generator.passengers) == 0:
                 break
 
@@ -270,12 +250,9 @@ class Simulation:
         return self.evaluate_fitness()
 
     def evaluate_fitness(self) -> SimulationResult:
-        """Computes the post-simulation fitness score and metric breakdown."""
         return self._calculate_results()
 
-
     def _calculate_results(self) -> SimulationResult:
-        """Computes the post-simulation fitness metrics for the route system."""
         completed = self.passenger_generator.archived_passengers
         incomplete = self.passenger_generator.passengers
         
@@ -301,7 +278,6 @@ class Simulation:
         
         all_recorded_paths = [(p.journey, p.total_path_cost) for p in (completed + incomplete)]
 
-        # Count fleet allocation per route
         allocation_map = {}
         if self.jeep_system:
             for j in self.jeep_system.jeeps:
@@ -328,7 +304,6 @@ class Simulation:
         )
 
     def draw(self, context: tuple[tuple[float, float], tuple[float, float]], image: Image.Image, draw_jeeps: bool = True, draw_passengers: bool = True) -> Image.Image:
-        """Draws the dynamic simulation state onto the provided base map."""
         if image.width != image.height:
             raise ValueError("[SIMULATION] Visualization requires a square image.")
             
@@ -344,7 +319,6 @@ class Simulation:
         return img
 
     def draw_dashboard(self, image: Image.Image) -> Image.Image:
-        """Overlays core operational metrics onto the rendering frame."""
         img = image.copy()
         draw = ImageDraw.Draw(img)
         
@@ -371,10 +345,6 @@ class Simulation:
         return img
     
 class SimulationEvaluator:
-    """
-    A persistent factory for rapidly evaluating multiple route configurations 
-    against a static city and demand model. Designed for GA loops.
-    """
     def __init__(self, config: dict, city_graph: CityGraph, travel_graph: Optional[TravelGraph], demand_sampler: DirectDemandSampler) -> None:
         self.config = config
         self.city_graph = city_graph
@@ -452,12 +422,6 @@ class SimulationEvaluator:
             
         result = sim.run()
         
-        # Detach complex graph and system object references prior to returning.
-        # This prevents Python ProcessPoolExecutor from attempting to pickle 
-        # KD-trees and recursive object nets, ensuring pure scalar extraction.
         result.jeep_system = None
         
         return result
-
-# StaticSurrogateEvaluator removed: the static surrogate was dropped in favor of
-# gap-gated Lamarckian acceptance (see genetic.py: apply_lamarckian_mutation / _total_disparity).
