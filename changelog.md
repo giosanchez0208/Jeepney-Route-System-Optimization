@@ -27,6 +27,28 @@ Detailed log of all files modified, when the change was completed, why it was ma
 * **Why:** The results chapter previously suggested that temporal shifts should be handled via dynamic dispatching, which is operationally infeasible in the decentralized owner-operator paratransit systems of the Philippines.
 * **What it achieves:** Updated the temporal demand discussion to reflect that the stability of the route backbone across peak/off-peak regimes justifies static route franchise designs, with minor adjustments addressed by assigning static fleet sizes calibrated to peak demand.
 
+### 4. Microscopic Operational Re-Simulation and Evaluation
+* **File Modified:** [`opt_eval.py`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/opt_eval.py)
+* **Time Done:** 08:41 UTC
+* **Why:** To run parallel microscopic passenger travel simulations comparing the 7 optimized route configurations against 7 random baseline networks. This is required to compile overall fitness, individual passenger travel times, and travel-time distributions for statistical validation.
+* **What it achieves:**
+  * Runs 14 microscopic simulations of 2000 jeeps and 38 routes in parallel.
+  * Captures passenger-level travel statistics, showing a statistically significant reduction in median commute times (Mann-Whitney U, p = 0.0354).
+  * Evaluates system-level metrics, showing a 14.3% decrease in the demand-service gap $D(R)$ and a tighter travel time distribution tail.
+  * Generates `baseline_vs_optimized.png`, `commute_time_comparison.png`, and `equity_traveltime_hist.png`.
+
+### 5. Automated Generation of the Demand-Service Gap Field Plot
+* **Files Modified/Created:** [`scratch/run_lam.py`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/scratch/run_lam.py), [`results_and_discussion/images/demand_service_gap_field.png`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/results_and_discussion/images/demand_service_gap_field.png)
+* **Time Done:** 08:50 UTC
+* **Why:** The Chapter 4 discussion relies on a visualization of the signed demand-service gap field (the actual signal read by the local search operators). The original notebook cell generating this plot had not been run in the workspace.
+* **What it achieves:** Created and executed a python script to run the isolated Lamarckian operator cell pipeline. Successfully generated and saved the spatial gap field visual (`demand_service_gap_field.png`), illustrating where the attraction and repulsion forces operate.
+
+### 6. Syncing of Project Figures to Manuscript Compilation Folder
+* **Files Modified:** [`collect_figures.py`](file:///c:/Users/lifei/OneDrive/Desktop/Portfolio/Jeepney-Route-System-Optimization/collect_figures.py)
+* **Time Done:** 08:50 UTC
+* **Why:** To automatically gather, rename, and copy all scattered analytical and operational figures into the single Overleaf-ready `chap4/figures/` target folder.
+* **What it achieves:** Copied all 40 final figures (with zero pending files left) into the target directory, completing the Chapter 4 visual assets bundle.
+
 ## 📅 June 7, 2026
 
 ### 1. Memetic Optimizer Lamarckian Mutation Wiring
