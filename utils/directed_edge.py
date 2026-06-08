@@ -67,7 +67,10 @@ class DirEdge:
         # Cache haversine distance at construction time — getLength() is called
         # thousands of times per simulation tick across Jeep.update(),
         # Passenger._walk(), and spacing/allocation routines.
-        self._length: float = _getDistance(start, end)
+        if start.layer != end.layer:
+            self._length = 0.0
+        else:
+            self._length = _getDistance(start, end)
         self._edge_type: int = _PREFIX_TO_TYPE.get(self.id[:2], 0)
 
     def __str__(self) -> str:

@@ -15,6 +15,9 @@ from PIL import Image
 from typing import Optional
 
 class TravelGraph:
+    _base_cache: dict = {}
+    _global_search_id: int = 0
+
     def __init__(self, cg: CityGraph, config: dict, routes: Optional[list[Route]] = None, route_generator: Optional[RouteGenerator] = None, n_routes: int = 5, n_points: int = 4) -> None:
         if not cg:
             raise ValueError("[TRAVEL GRAPH] CityGraph cannot be None.")
@@ -47,7 +50,7 @@ class TravelGraph:
         self.travel_graph: list[DirEdge] = []
         
         self._construct()
-        self._findShortestJourney_cached = lru_cache(maxsize=4096)(self._findShortestJourney_impl)
+        self._findShortestJourney_cached = lru_cache(maxsize=16384)(self._findShortestJourney_impl)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -56,7 +59,7 @@ class TravelGraph:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._findShortestJourney_cached = lru_cache(maxsize=4096)(self._findShortestJourney_impl)
+        self._findShortestJourney_cached = lru_cache(maxsize=16384)(self._findShortestJourney_impl)
 
     def _generate_routes(self, route_generator: RouteGenerator, n_routes: int, n_points: int) -> list[Route]:
         routes = []
@@ -71,54 +74,93 @@ class TravelGraph:
         return routes
 
     def _construct(self) -> None:
-        # Layer 1 and 3 nodes
-        for n in self.cg.nodes:
-            coord = (n.lon, n.lat)
-            n1 = Node(n.lon, n.lat)
-            n1.layer = 1
-            self.l1_nodes[coord] = n1
+        cache_key = (
+            id(self.cg),
+            self.walk_wt,
+            self.ride_wt,
+            self.wait_wt,
+            self.transfer_wt,
+            self.direct_wt,
+            self.alight_wt
+        )
 
-            n3 = Node(n.lon, n.lat)
-            n3.layer = 3
-            self.l3_nodes[coord] = n3
+        if cache_key not in TravelGraph._base_cache:
+            # Build and cache base layers
+            l1_nodes = {}
+            l3_nodes = {}
+            for n in self.cg.nodes:
+                coord = (n.lon, n.lat)
+                n1 = Node(n.lon, n.lat)
+                n1.layer = 1
+                l1_nodes[coord] = n1
 
-        self._l1_coords = np.array(list(self.l1_nodes.keys()))
-        self._l1_kdtree = cKDTree(self._l1_coords)
-        
-        self._l3_coords = np.array(list(self.l3_nodes.keys()))
-        self._l3_kdtree = cKDTree(self._l3_coords)
+                n3 = Node(n.lon, n.lat)
+                n3.layer = 3
+                l3_nodes[coord] = n3
 
-        sw_c = count(1)
-        ew_c = count(1)
-        di_c = count(1)
+            l1_coords = np.array(list(l1_nodes.keys()))
+            l1_kdtree = cKDTree(l1_coords)
+            
+            l3_coords = np.array(list(l3_nodes.keys()))
+            l3_kdtree = cKDTree(l3_coords)
 
-        # Base edges for layer 1 and 3
-        for e in self.cg.graph:
-            c_start = (e.start.lon, e.start.lat)
-            c_end = (e.end.lon, e.end.lat)
+            sw_c = count(1)
+            ew_c = count(1)
+            di_c = count(1)
 
-            walk_weight = self.walk_wt * e.getLength()
+            base_travel_graph = []
+            base_outgoing_edges = defaultdict(list)
 
-            sw_edge = DirEdge(self.l1_nodes[c_start], self.l1_nodes[c_end], e.is_drivable, id=f"SW{next(sw_c):05d}")
-            sw_edge.weight = walk_weight
-            self.travel_graph.append(sw_edge)
-            self._outgoing_edges[sw_edge.start].append(sw_edge)
+            # Base edges for layer 1 and 3
+            for e in self.cg.graph:
+                c_start = (e.start.lon, e.start.lat)
+                c_end = (e.end.lon, e.end.lat)
 
-            ew_edge = DirEdge(self.l3_nodes[c_start], self.l3_nodes[c_end], e.is_drivable, id=f"EW{next(ew_c):05d}")
-            ew_edge.weight = walk_weight
-            self.travel_graph.append(ew_edge)
-            self._outgoing_edges[ew_edge.start].append(ew_edge)
+                walk_weight = self.walk_wt * e.getLength()
 
-        # Direct edges 1 -> 3
-        for coord, n1 in self.l1_nodes.items():
-            n3 = self.l3_nodes[coord]
-            di_edge = DirEdge(n1, n3, True, weight=self.direct_wt, id=f"DI{next(di_c):05d}")
-            self.travel_graph.append(di_edge)
-            self._outgoing_edges[n1].append(di_edge)
+                sw_edge = DirEdge(l1_nodes[c_start], l1_nodes[c_end], e.is_drivable, id=f"SW{next(sw_c):05d}")
+                sw_edge.weight = walk_weight
+                base_travel_graph.append(sw_edge)
+                base_outgoing_edges[sw_edge.start].append(sw_edge)
 
-        # Layer 2 nodes and edges
-        l2_nodes_by_route: dict[int, dict[tuple[float, float], Node]] = defaultdict(dict)
+                ew_edge = DirEdge(l3_nodes[c_start], l3_nodes[c_end], e.is_drivable, id=f"EW{next(ew_c):05d}")
+                ew_edge.weight = walk_weight
+                base_travel_graph.append(ew_edge)
+                base_outgoing_edges[ew_edge.start].append(ew_edge)
 
+            # Direct edges 1 -> 3
+            for coord, n1 in l1_nodes.items():
+                n3 = l3_nodes[coord]
+                di_edge = DirEdge(n1, n3, True, weight=self.direct_wt, id=f"DI{next(di_c):05d}")
+                base_travel_graph.append(di_edge)
+                base_outgoing_edges[n1].append(di_edge)
+
+            TravelGraph._base_cache[cache_key] = {
+                "l1_nodes": l1_nodes,
+                "l3_nodes": l3_nodes,
+                "l1_coords": l1_coords,
+                "l1_kdtree": l1_kdtree,
+                "l3_coords": l3_coords,
+                "l3_kdtree": l3_kdtree,
+                "travel_graph": base_travel_graph,
+                "outgoing_edges": base_outgoing_edges
+            }
+
+        # Retrieve static base layers from cache
+        cache = TravelGraph._base_cache[cache_key]
+        self.l1_nodes = cache["l1_nodes"]
+        self.l3_nodes = cache["l3_nodes"]
+        self._l1_coords = cache["l1_coords"]
+        self._l1_kdtree = cache["l1_kdtree"]
+        self._l3_coords = cache["l3_coords"]
+        self._l3_kdtree = cache["l3_kdtree"]
+
+        # Copy edge lists (shallow copies to prevent pollution)
+        self.travel_graph = list(cache["travel_graph"])
+        self._outgoing_edges = defaultdict(list, {k: list(v) for k, v in cache["outgoing_edges"].items()})
+
+        # Layer 2 nodes and edges (route-specific)
+        l2_nodes_by_route = defaultdict(dict)
         for r_idx, r in enumerate(self.routes):
             for e in r.path:
                 for n in (e.start, e.end):
@@ -164,53 +206,19 @@ class TravelGraph:
                     self.travel_graph.append(tr_edge)
                     self._outgoing_edges[n3].append(tr_edge)
 
-        # ── Stitch Graph ──────────────────────────────────────────────────
-        from .directed_edge import _stitch
-        
-        # Save intrinsic weights since _connect mutates weights
-        saved_weights = {e: e.weight for e in self.travel_graph}
-        
-        sw_edges = [e for e in self.travel_graph if e.id[:2] == "SW"]
-        ew_edges = [e for e in self.travel_graph if e.id[:2] == "EW"]
-        di_edges = [e for e in self.travel_graph if e.id[:2] == "DI"]
-        wa_edges = [e for e in self.travel_graph if e.id[:2] == "WA"]
-        al_edges = [e for e in self.travel_graph if e.id[:2] == "AL"]
-        tr_edges = [e for e in self.travel_graph if e.id[:2] == "TR"]
-        
-        # Base layer stitching
-        _stitch(sw_edges, sw_edges)
-        _stitch(sw_edges, di_edges)
-        _stitch(sw_edges, wa_edges)
-        
-        _stitch(di_edges, ew_edges)
-        _stitch(al_edges, ew_edges)
-        _stitch(al_edges, tr_edges)
-        _stitch(ew_edges, ew_edges)
-        _stitch(ew_edges, tr_edges)
-        
-        # Route-specific layer 2 stitching
-        # To avoid teleporting between routes, we must stitch L2 edges strictly per route.
-        for r_idx in range(len(self.routes)):
-            # Filter connecting edges that interact with this route's L2 nodes
-            l2_nodes_set = set(l2_nodes_by_route[r_idx].values())
-            
-            r_ri = [e for e in self.travel_graph if e.id.startswith(f"RI_R{r_idx}_")]
-            r_wa = [e for e in wa_edges if e.end in l2_nodes_set]
-            r_al = [e for e in al_edges if e.start in l2_nodes_set]
-            r_tr = [e for e in tr_edges if e.end in l2_nodes_set]
-            
-            _stitch(r_wa, r_ri)
-            _stitch(r_wa, r_al) # In case of direct alight
-            
-            _stitch(r_ri, r_ri)
-            _stitch(r_ri, r_al)
-            
-            _stitch(r_tr, r_ri)
-            _stitch(r_tr, r_al)
-            
-        # Restore weights
-        for e in self.travel_graph:
-            e.weight = saved_weights[e]
+        # Collect and initialize node search fields to avoid AttributeError
+        all_nodes = set()
+        for edge in self.travel_graph:
+            all_nodes.add(edge.start)
+            all_nodes.add(edge.end)
+        for node in all_nodes:
+            if "_search_id" not in node.__dict__:
+                node.__dict__["_search_id"] = 0
+                node.__dict__["_cost"] = 0.0
+                node.__dict__["_came_from"] = None
+                node.__dict__["_h"] = 0.0
+                node.__dict__["_h_search_id"] = 0
+
 
     def _snap_node(self, target: Node, layer: int) -> Node:
         # --- O(1) Dictionary Lookup Bypass ---
@@ -232,55 +240,94 @@ class TravelGraph:
             raise ValueError("[TRAVEL GRAPH] Invalid snap layer. Must be 1 or 3.")
     
     def findShortestJourney(self, start: Node, end: Node) -> list[DirEdge]:
-        return self._findShortestJourney_cached(start, end)
-
-    def _findShortestJourney_impl(self, start: Node, end: Node) -> list[DirEdge]:
-        if start is None or end is None:
-            raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
-            
         l1_start = self._snap_node(start, 1)
         l3_end = self._snap_node(end, 3)
+        return self._findShortestJourney_cached(l1_start, l3_end)
 
-        frontier: list[tuple[float, float, int, Node]] = []
-        sequence = count()
+    def _findShortestJourney_impl(self, l1_start: Node, l3_end: Node) -> list[DirEdge]:
+        if l1_start is None or l3_end is None:
+            raise ValueError("[TRAVEL GRAPH] Start and end nodes cannot be None.")
+            
+        import math
+        LAT_TO_METERS = 110574.0
+        LON_TO_METERS = 110175.0
+        end_lat = l3_end.lat
+        end_lon = l3_end.lon
+
+        # Pre-bind heap functions and collections lookup
+        heappush_fn = heappush
+        heappop_fn = heappop
+        outgoing_edges_get = self._outgoing_edges.get
         
-        h_cache = {}
-        min_wt = min(self.walk_wt, self.ride_wt)
-        def get_h(n: Node) -> float:
-            if n not in h_cache:
-                h_cache[n] = _getDistance(n, l3_end) * min_wt
-            return h_cache[n]
+        walk_wt = self.walk_wt
+        ride_wt = self.ride_wt
+        wait_wt = self.wait_wt
+        crossover_dist = wait_wt / (walk_wt - ride_wt) if walk_wt > ride_wt else float("inf")
+        
+        # Increment global search ID
+        TravelGraph._global_search_id += 1
+        search_id = TravelGraph._global_search_id
+        
+        # Calculate start node heuristic
+        dlat = (l1_start.lat - end_lat) * LAT_TO_METERS
+        dlon = (l1_start.lon - end_lon) * LON_TO_METERS
+        dist_start = math.sqrt(dlat * dlat + dlon * dlon)
+        h_start = dist_start * walk_wt if dist_start < crossover_dist else dist_start * ride_wt + wait_wt
+        
+        start_dict = l1_start.__dict__
+        start_dict["_h"] = h_start
+        start_dict["_h_search_id"] = search_id
 
-        heappush(frontier, (get_h(l1_start), 0.0, next(sequence), l1_start))
-        came_from = {}
-        cost_so_far = {l1_start: 0.0}
+        frontier: list[tuple[float, float, int, Node]] = [(h_start, 0.0, 0, l1_start)]
+        
+        start_dict["_cost"] = 0.0
+        start_dict["_search_id"] = search_id
+        start_dict["_came_from"] = None
+        
+        seq = 0
 
         while frontier:
-            _, current_cost, _, current = heappop(frontier)
+            _, current_cost, _, current = heappop_fn(frontier)
 
-            if current == l3_end:
-                return self._reconstruct_path(came_from, l1_start, l3_end)
+            if current is l3_end:
+                return self._reconstruct_path(l1_start, l3_end, search_id)
 
-            if current_cost > cost_so_far.get(current, float("inf")):
+            current_cost_limit = current._cost if current._search_id == search_id else float("inf")
+            if current_cost > current_cost_limit:
                 continue
 
-            for edge in self._outgoing_edges.get(current, []):
+            for edge in outgoing_edges_get(current, []):
                 next_node = edge.end
                 new_cost = current_cost + edge.weight
 
-                if new_cost < cost_so_far.get(next_node, float("inf")):
-                    cost_so_far[next_node] = new_cost
-                    came_from[next_node] = (current, edge)
-                    priority = new_cost + get_h(next_node)
-                    heappush(frontier, (priority, new_cost, next(sequence), next_node))
+                old_cost = next_node._cost if next_node._search_id == search_id else float("inf")
+                if new_cost < old_cost:
+                    next_dict = next_node.__dict__
+                    next_dict["_cost"] = new_cost
+                    next_dict["_search_id"] = search_id
+                    next_dict["_came_from"] = (current, edge)
+                    
+                    h = next_node._h if next_node._h_search_id == search_id else None
+                    if h is None:
+                        dlat = (next_node.lat - end_lat) * LAT_TO_METERS
+                        dlon = (next_node.lon - end_lon) * LON_TO_METERS
+                        dist = math.sqrt(dlat * dlat + dlon * dlon)
+                        h = dist * walk_wt if dist < crossover_dist else dist * ride_wt + wait_wt
+                        next_dict["_h"] = h
+                        next_dict["_h_search_id"] = search_id
+                        
+                    seq += 1
+                    heappush_fn(frontier, (new_cost + h, new_cost, seq, next_node))
 
         return []
 
-    def _reconstruct_path(self, came_from: dict[Node, tuple[Node, DirEdge]], start: Node, end: Node) -> list[DirEdge]:
+    def _reconstruct_path(self, start: Node, end: Node, search_id: int) -> list[DirEdge]:
         path = []
         current = end
-        while current != start:
-            previous, edge = came_from[current]
+        while current is not start:
+            if current._search_id != search_id or current._came_from is None:
+                break
+            previous, edge = current._came_from
             path.append(edge)
             current = previous
         path.reverse()

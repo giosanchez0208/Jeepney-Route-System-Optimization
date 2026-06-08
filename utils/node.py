@@ -22,35 +22,43 @@ def _validate_layer(layer: Optional[int]) -> Optional[int]:
 
 class Node:
 	def __init__(self, lon: float, lat: float, layer: Optional[int] = None):
-		self._lon: float = _validate_lon(lon)
-		self._lat: float = _validate_lat(lat)
+		# Set direct attributes to bypass property lookup overhead
+		self.lon: float = _validate_lon(lon)
+		self.lat: float = _validate_lat(lat)
 		self._layer: Optional[int] = None
 		self.layer = layer
 		self.id: str = f"N{uuid4().hex}"
+		self._hash: int = hash(self.id)
 
 	def __eq__(self, other: object) -> bool:
+		if self is other:
+			return True
 		if not isinstance(other, Node):
 			return NotImplemented
 		return self.id == other.id
 
 	def __hash__(self) -> int:
-		return hash(self.id)
+		try:
+			return self._hash
+		except AttributeError:
+			self._hash = hash(self.id)
+			return self._hash
+
+	def __setstate__(self, state: dict) -> None:
+		self.__dict__.update(state)
+		if "_lon" in state:
+			self.__dict__["lon"] = state["_lon"]
+		if "_lat" in state:
+			self.__dict__["lat"] = state["_lat"]
+		self._hash = hash(self.id)
 
 	def __setattr__(self, name: str, value) -> None:
-		if "_lon" in self.__dict__ and "_lat" in self.__dict__ and name in {"lon", "lat", "_lon", "_lat"}:
+		if name in ("lon", "lat") and name in self.__dict__:
 			raise AttributeError("[NODE] lon and lat are immutable after initialization.")
 		super().__setattr__(name, value)
 
 	def __str__(self) -> str:
 		return f"Node({self.id}): lon={self.lon}, lat={self.lat}, layer={self.layer}"
-
-	@property
-	def lon(self) -> float:
-		return self._lon
-
-	@property
-	def lat(self) -> float:
-		return self._lat
 
 	@property
 	def layer(self) -> Optional[int]:
