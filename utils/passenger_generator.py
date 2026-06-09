@@ -70,9 +70,15 @@ class PassengerGenerator:
     def update(self) -> None:
         self.new_passengers_this_tick = []
 
-        # ── Tick boundary: reset every passenger's double-step guard ────────
+        # ── Tick boundary: reset every passenger's double-step guard, and stamp the exact
+        #    despawn time of anyone who finished since the last tick. The array reaping below
+        #    is batched to every 100 ticks, but the timestamp must be recorded now so commute
+        #    times aren't quantised to the reaping cadence. (Reuses this existing per-tick
+        #    sweep, so no extra iteration cost.) ───────────────────────────────────────────
         for p in self.passengers:
             p._stepped_this_tick = False
+            if p.state == Passenger.DONE and p.despawn_tick is None:
+                p.despawn_tick = self.simulated_time
 
         # Batch the schedule generation AND the memory cleanup to run 1% of the time!
         if self.tick_counter > 0 and self.tick_counter % 100 == 0:

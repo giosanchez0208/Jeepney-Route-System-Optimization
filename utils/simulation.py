@@ -253,6 +253,22 @@ class Simulation:
         return self._calculate_results()
 
     def _calculate_results(self) -> SimulationResult:
+        # Final sweep: reaping is batched to every 100 ticks, so DONE passengers from the last
+        # partial window are still in the active list. Move them into the archive (with an exact
+        # despawn_tick) so end-of-run metrics — completed_count, commute times — count everyone
+        # and aren't biased by where the run happened to end relative to the reaping cadence.
+        pg = self.passenger_generator
+        if pg.passengers:
+            still_active = []
+            for p in pg.passengers:
+                if p.state == Passenger.DONE:
+                    if p.despawn_tick is None:
+                        p.despawn_tick = pg.simulated_time
+                    pg.archived_passengers.append(p)
+                else:
+                    still_active.append(p)
+            pg.passengers[:] = still_active
+
         completed = self.passenger_generator.archived_passengers
         incomplete = self.passenger_generator.passengers
         

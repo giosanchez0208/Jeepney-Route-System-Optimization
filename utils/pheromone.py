@@ -24,51 +24,60 @@ def _edge_key(edge: 'DirEdge') -> _CoordKey:
 
 
 class PheromoneMatrix:
-    def __init__(
-        self,
-        cg: Any,
-        p_attraction: float = 0.4,
-        p_repulsion: float = 0.4,
-        p_pruning: float = 0.6,
-        base_window_size: int = 15,
-    ):
-        self.cg = cg
-        self.p_attraction = p_attraction
-        self.p_repulsion = p_repulsion
-        self.p_pruning = p_pruning
-        self.base_window_size = base_window_size
-        
-        # Math-safe cache to eliminate redundant A* pathfinding during mutations
-        from functools import lru_cache
-        self._get_shortest_path_cached = lru_cache(maxsize=16384)(self._compute_shortest_path)
+    def __init__(self, all_edges: Iterable['DirEdge'], config: dict, sim_result: Optional['SimulationResult'] = None) -> None:
+        """
+        Initializes the global demand matrix.
+        Optionally accepts a SimulationResult to seed the initial generation.
 
-    def _compute_shortest_path(self, start_id: str, end_id: str, start_node: Any, end_node: Any) -> list:
-        if start_id == end_id:
-            return []
-        try:
-            path = self.cg.find_shortest_path(start_node, end_node)
-            return path if path else []
-        except Exception:
-            return []
+        Pheromone values are keyed by coordinate-pair (start_lon, start_lat) →
+        (end_lon, end_lat) so that route.path edges and travel-graph edges
+        covering the same physical road are always treated as the same corridor,
+        regardless of whether they are the same Python object.
+        """
+        opt_cfg = config.get("optimization", {})
+        self.initial_tau: float = float(opt_cfg.get("initial_tau", 1.0))
+        self.rho: float = float(opt_cfg.get("rho", 0.1))
+        self.q: float = float(opt_cfg.get("q", 1000.0))
+        self.default_jeep_weight: float = float(opt_cfg.get("default_jeep_weight", 1.0))
 
-    def _get_shortest_path_edges(self, start_node: Any, end_node: Any) -> list:
-        start_id = getattr(start_node, "id", id(start_node))
-        end_id = getattr(end_node, "id", id(end_node))
-        return self._get_shortest_path_cached(start_id, end_id, start_node, end_node)
+        # Primary store: coord-key → pheromone value
+        self._tau: dict[_CoordKey, float] = {}
+        # Keep one representative DirEdge per key so draw() can access geometry
+        self._edge_repr: dict[_CoordKey, 'DirEdge'] = {}
+
+        for edge in all_edges:
+            k = _edge_key(edge)
+            if k not in self._tau:
+                self._tau[k] = self.initial_tau
+                self._edge_repr[k] = edge
+
+        # Legacy-compat shim: self.tau behaves like {edge: float} for callers
+        # that iterate it, but writes go through the coord-keyed store.
+        self.tau: dict['DirEdge', float] = _TauView(self._tau, self._edge_repr)
+
+        # Cached demand-service gaps, populated by the ACO loop after each
+        # evaluation via: pheromones.gaps = pheromones.calculate_demand_service_gaps(jeep_system)
+        # Operators read this directly so gaps don't need to be passed as a parameter.
+        self.gaps: dict = {}
+
+        if sim_result:
+            self.update_pheromones(sim_result)
 
     def __getstate__(self):
         return {
-            "p_attraction": self.p_attraction,
-            "p_repulsion": self.p_repulsion,
-            "p_pruning": self.p_pruning,
-            "base_window_size": self.base_window_size,
+            "initial_tau": self.initial_tau,
+            "rho": self.rho,
+            "q": self.q,
+            "default_jeep_weight": self.default_jeep_weight,
+            "_tau": self._tau,
+            "gaps": self.gaps,
         }
 
     def __setstate__(self, state):
-        self.p_attraction = state["p_attraction"]
-        self.p_repulsion = state["p_repulsion"]
-        self.p_pruning = state["p_pruning"]
-        self.base_window_size = state["base_window_size"]
+        self.initial_tau = state["initial_tau"]
+        self.rho = state["rho"]
+        self.q = state["q"]
+        self.default_jeep_weight = state["default_jeep_weight"]
         self._tau = state["_tau"]
         self.gaps = state["gaps"]
         self._edge_repr = {}
@@ -97,23 +106,24 @@ class PheromoneMatrix:
         for k in self._tau:
             self._tau[k] *= (1.0 - self.rho)
 
-        # Deposit - BATCHED for O(N) tuple reduction
+        # Deposit - BATCHED for O(N) reduction. recorded_paths may carry either the
+        # IPC-flattened primitive coord-key tuples OR raw DirEdge objects (direct, non-parallel
+        # callers); handle both so deposition never silently no-ops.
         from collections import defaultdict
         edge_deposits = defaultdict(float)
-        
-        # The flat_path is now a list of primitive coordinate tuples directly from the IPC
-        for flat_path, cost in sim_result.recorded_paths:
-            if not flat_path or cost <= 0:
+
+        for path, cost in sim_result.recorded_paths:
+            if not path or cost <= 0:
                 continue
-                
             deposit = self.q / cost
-            for coord_key in flat_path:
-                edge_deposits[coord_key] += deposit
+            for item in path:
+                k = item if type(item) is tuple else _edge_key(item)
+                edge_deposits[k] += deposit
 
         # Perform the O(1) dictionary writes
-        for coord_key, total_dep in edge_deposits.items():
-            if coord_key in self._tau:
-                self._tau[coord_key] += total_dep
+        for k, total_dep in edge_deposits.items():
+            if k in self._tau:
+                self._tau[k] += total_dep
 
     # ------------------------------------------------------------------
     def calculate_demand_service_gaps(self, jeep_system: 'JeepSystem' | list['Route'], allocation: Optional[dict['Route', int]] = None) -> dict['DirEdge', float]:
