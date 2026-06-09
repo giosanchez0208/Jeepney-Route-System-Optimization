@@ -425,17 +425,10 @@ class JeepSystem:
                     edge_len = edge._length
 
                     if accumulated + edge_len >= target_dist - 1e-5:
+                        # curr_pos is a derived, read-only @property; setting (_edge_idx,
+                        # _edge_progress) fully determines the jeep's interpolated position.
                         jeep._edge_idx = idx
                         jeep._edge_progress = target_dist - accumulated
-
-                        if edge_len > 0:
-                            ratio = jeep._edge_progress / edge_len
-                            lat = edge.start.lat + ratio * (edge.end.lat - edge.start.lat)
-                            lon = edge.start.lon + ratio * (edge.end.lon - edge.start.lon)
-                            jeep.curr_pos = (lon, lat)
-                        else:
-                            jeep.curr_pos = (edge.start.lon, edge.start.lat)
-
                         jeep._update_heading()
                         break
                     accumulated += edge_len

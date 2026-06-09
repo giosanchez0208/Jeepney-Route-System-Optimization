@@ -266,7 +266,7 @@ def _resim(city, ddm, config, routes, fleet=None):
     return result, times
 
 
-def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7):
+def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7, max_workers=None):
     """PART 2 (parallel re-simulation). For the 8am reproducibility set vs random baselines: the
     fitness gain (4.5.1), the passenger COMMUTE-TIME Mann-Whitney comparison (the core
     commute-reduction claim), the equity travel-time distribution (4.5.4), and path entropy (4.5.5)."""
@@ -343,7 +343,7 @@ def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7):
         print(f"[PART 2] re-simulating {len(systems)} networks in parallel "
               f"({n_opt} optimized + {baseline_k} baselines, each a full {nrt}-route / {total}-jeep sim)...")
         runner = ParallelSimulationRunner(config=config,
-                                          max_workers=config.get("optimization", {}).get("n_workers"))
+                                          max_workers=max_workers or config.get("optimization", {}).get("n_workers"))
         runner.open_pool()
         try:
             results = runner.run_parallel(systems)
@@ -405,7 +405,10 @@ def resim_evaluation(runs: dict[str, Path], baseline_k: int = 7):
             freq = {}
             for journey, _c in (getattr(res, "recorded_paths", []) or []):
                 for e in journey:
-                    key = getattr(e, "id", id(e)); freq[key] = freq.get(key, 0) + 1
+                    # recorded_paths carry IPC-flattened coord tuples (hashable, equal across
+                    # journeys for the same corridor); fall back to .id for raw DirEdge objects.
+                    key = e if type(e) is tuple else getattr(e, "id", id(e))
+                    freq[key] = freq.get(key, 0) + 1
             opt_entropy.append(shannon_entropy(list(freq.values())) if freq else np.nan)
         else:
             base_fit.append(score); base_times_all.extend(times)

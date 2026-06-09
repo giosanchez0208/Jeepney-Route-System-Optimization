@@ -116,12 +116,36 @@ class Passenger:
         # Ensure the attribute exists upon loading
         if '_stepped_this_tick' not in self.__dict__:
             self.__dict__['_stepped_this_tick'] = False
-            
+
+    @property
+    def curr_lat(self) -> float:
+        if self.state == Passenger.RIDING and self.current_jeep:
+            return self.current_jeep.curr_pos[1]
+        # Lazy interpolation for walking passengers
+        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
+            current_edge = self.journey[self._edge_idx]
+            if current_edge._length > 0 and self._edge_progress > 0:
+                ratio = self._edge_progress / current_edge._length
+                return current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
+        return self._lat
+
     @curr_lat.setter
     def curr_lat(self, value: float) -> None:
         if not isinstance(value, (int, float)):
             raise TypeError("[PASSENGER] lat must be numeric.")
         self._lat = float(value)
+
+    @property
+    def curr_lon(self) -> float:
+        if self.state == Passenger.RIDING and self.current_jeep:
+            return self.current_jeep.curr_pos[0]
+        # Lazy interpolation for walking passengers
+        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
+            current_edge = self.journey[self._edge_idx]
+            if current_edge._length > 0 and self._edge_progress > 0:
+                ratio = self._edge_progress / current_edge._length
+                return current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
+        return self._lon
 
     @curr_lon.setter
     def curr_lon(self, value: float) -> None:
@@ -190,30 +214,6 @@ class Passenger:
             else:
                 self._edge_progress += distance_to_move
                 distance_to_move = 0.0
-
-    @property
-    def curr_lat(self) -> float:
-        if self.state == Passenger.RIDING and self.current_jeep:
-            return self.current_jeep.curr_pos[1]
-        
-        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
-            current_edge = self.journey[self._edge_idx]
-            if current_edge._length > 0 and self._edge_progress > 0:
-                ratio = self._edge_progress / current_edge._length
-                return current_edge.start.lat + ratio * (current_edge.end.lat - current_edge.start.lat)
-        return self._lat
-
-    @property
-    def curr_lon(self) -> float:
-        if self.state == Passenger.RIDING and self.current_jeep:
-            return self.current_jeep.curr_pos[0]
-            
-        if self.state == Passenger.WALKING and self._edge_idx < len(self.journey):
-            current_edge = self.journey[self._edge_idx]
-            if current_edge._length > 0 and self._edge_progress > 0:
-                ratio = self._edge_progress / current_edge._length
-                return current_edge.start.lon + ratio * (current_edge.end.lon - current_edge.start.lon)
-        return self._lon
 
     def get_target_route_idx(self) -> Optional[int]:
         if self.state != Passenger.WAITING or self._edge_idx >= len(self.journey):
