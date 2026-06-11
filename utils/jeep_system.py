@@ -80,10 +80,13 @@ class FleetAllocator:
         def _quantise(lat: float, lon: float) -> Tuple[int, int]:
             return (int(math.floor(lon / CELL_SIZE)), int(math.floor(lat / CELL_SIZE)))
 
-        # LRU cache that maps (origin_cell, dest_cell) -> list of route indices
+        # LRU cache that maps (origin_cell, dest_cell) -> ((route_idx, ride_metres), ...)
         # This drastically reduces repeated shortest‑path computations.
+        # Demand is accumulated as passenger-DISTANCE (metres ridden on each route's edges),
+        # not a raw edge count, so long commuter corridors weigh proportionally more than
+        # short shuttle hops with the same number of segments (paper §3.5.5, D_r definition).
         @lru_cache(maxsize=10000)
-        def _get_route_indices_for_cells(o_cell: Tuple[int, int], d_cell: Tuple[int, int]) -> Tuple[int, ...]:
+        def _get_route_segments_for_cells(o_cell: Tuple[int, int], d_cell: Tuple[int, int]) -> Tuple[Tuple[int, float], ...]:
             # Convert cell indices back to representative coordinates (cell centre)
             lon_centre = (o_cell[0] + 0.5) * CELL_SIZE
             lat_centre = (o_cell[1] + 0.5) * CELL_SIZE
@@ -95,15 +98,21 @@ class FleetAllocator:
             # Call the actual travel graph method (signature unchanged)
             journey = tg.findShortestJourney(origin_node, dest_node)
 
-            route_indices = []
+            segments = []
             for edge in journey:
                 if edge.id.startswith("RI_R"):
                     try:
                         r_idx = int(edge.id.split("_")[1][1:])
-                        route_indices.append(r_idx)
                     except (IndexError, ValueError):
                         continue
-            return tuple(route_indices)
+                    seg_len = float(getattr(edge, "_length", 0.0) or 0.0)
+                    if seg_len <= 0.0:
+                        try:
+                            seg_len = float(edge.getLength())
+                        except Exception:
+                            seg_len = 1.0
+                    segments.append((r_idx, seg_len))
+            return tuple(segments)
 
         # -------------------------------------------------
         # 2. Adaptive sampling with convergence detection
@@ -122,9 +131,9 @@ class FleetAllocator:
                 o_cell = _quantise(origin.lat, origin.lon)   # assuming Node has lat/lon
                 d_cell = _quantise(dest.lat, dest.lon)
 
-                route_idxs = _get_route_indices_for_cells(o_cell, d_cell)
-                for r_idx in route_idxs:
-                    route_demand[routes[r_idx]] += 1.0
+                route_segments = _get_route_segments_for_cells(o_cell, d_cell)
+                for r_idx, seg_len in route_segments:
+                    route_demand[routes[r_idx]] += seg_len
                 total_samples += 1
 
             # Check convergence after each batch (minimum 2 batches)

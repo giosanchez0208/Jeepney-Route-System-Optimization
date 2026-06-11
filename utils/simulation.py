@@ -289,6 +289,14 @@ class Simulation:
         sum_incomplete_elapsed = sum(incomplete_elapsed)
         sum_incomplete_remaining = sum(incomplete_remaining)
         sum_incomplete = sum(incomplete_penalties)
+        # KNOWN SCALE LIMITATION (kept as-is so behaviour matches the archived final_runs):
+        # the first two terms are SUMS over passengers (~1e5-1e6) while this equity term is
+        # alpha * a single std-dev scalar (~1e2). At alpha_std_penalty=0.5 it is therefore
+        # ~0.05-0.1% of total_fitness -- i.e. effectively inert as an optimization signal. The
+        # observed travel-time-tail compression is driven by minimizing total user cost, not by
+        # this regularizer. To make alpha a genuine equity weight, scale it with the completed
+        # count, e.g. `alpha_std_penalty * std_commute * n_completed` (changes behaviour -> would
+        # require re-running). See STUDY_GUIDE / CRITICAL_PREP.
         equity_penalty = self.alpha_std_penalty * std_commute
         total_fitness = sum_completed + sum_incomplete + equity_penalty
         
