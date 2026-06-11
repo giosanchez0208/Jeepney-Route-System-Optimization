@@ -44,7 +44,7 @@ optimization:
   telemetry_interval: 1
 simulation:
   jeep_capacity: 16
-  jeep_speed_kmh: 20.0
+  jeep_speed_kmh: 9.5   # calibrated PUJ operating speed (paper sec 3.1.4)
   mohring_sample_size: 450
   num_routes: 5
   num_ticks: 200

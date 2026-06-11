@@ -31,7 +31,9 @@ simulation:
   mohring_sample_size: 2000 # 38-route stability: mean allocation CV 0.11 at 2000 samples
   jeep_capacity: 16
   num_ticks: 540               # Uniform High-Fi ticks (540 @ 10s = 90 min)
-  jeep_speed_kmh: 20.0
+  jeep_speed_kmh: 9.5   # calibrated PUJ operating speed (paper §3.1.4, ride_wt derivation).
+                        # NOTE: the archived final_runs/p1-p9 were executed with the older value 20.0;
+                        # keep that in mind when comparing future runs against those artifacts.
   passenger_speed_kmh: 4.5
   num_routes: 38               # final Iligan network size
   total_allocatable_jeeps: 2000 # real Iligan jeepney fleet (recent literature)

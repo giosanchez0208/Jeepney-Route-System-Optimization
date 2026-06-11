@@ -26,6 +26,7 @@ FIGURES = {
     "ddm_time_comparison.png":     ["results_and_discussion/images/ddm_time_comparison.png"],
     "ddm_distributions.png":       ["results_and_discussion/images/ddm_distributions.png"],
     "ddm_whole_vs_arterials.png":  ["results_and_discussion/images/ddm_whole_vs_arterials.png"],
+    "ddm_alpha_beta_sensitivity.png": ["results_and_discussion/images/ddm_alpha_beta_sensitivity.png"],
 
     # ---- 4.2 Architectural validation ---- (live outputs only)
     "passenger_journey_snapshots.png": ["results_and_discussion/images/passenger_journey_snapshots.png"],
@@ -73,6 +74,9 @@ FIGURES = {
     "equity_traveltime_hist.png":      ["results_and_discussion/images/equity_traveltime_hist.png"],
     "route_system_initial_vs_final.png": ["results_and_discussion/images/route_system_initial_vs_final.png"],
     "commute_time_comparison.png":     ["results_and_discussion/images/commute_time_comparison.png"],
+    # final_runs_2 (corrected, local-search-active runs): honest reframe figures
+    "convergence_reproducibility.png": ["results_and_discussion/images/convergence_reproducibility.png"],
+    "optimized_network_heatmap.png":   ["results_and_discussion/images/optimized_network_heatmap.png"],
 }
 
 
