@@ -30,8 +30,15 @@ FIGURES = {
 
     # ---- 4.2 Architectural validation ---- (live outputs only)
     "passenger_journey_snapshots.png": ["results_and_discussion/images/passenger_journey_snapshots.png"],
-    "sample_journey_transfer.png":     ["results_and_discussion/images/sample_journey_transfer.png"],
     "simulation_temporal_snapshots.png": ["results_and_discussion/images/simulation_temporal_snapshots.png"],
+    # 3D TravelGraph journey renders (single passenger, two routes, one transfer): the static render is
+    # the companion to the journey snapshots (sec 4.2.1) and the temporal strip companions the sim
+    # snapshots (sec 4.2.2). Both are referenced by results_and_discussion.tex.
+    "journey_travelgraph_3d.png":          ["results_and_discussion/images/journey_travelgraph_3d.png"],
+    "journey_travelgraph_3d_temporal.png": ["results_and_discussion/images/journey_travelgraph_3d_temporal.png"],
+    # The deck's "sample journey transfer" slide reuses the 3D static render.
+    "sample_journey_transfer.png":     ["results_and_discussion/images/journey_travelgraph_3d.png",
+                                        "results_and_discussion/images/sample_journey_transfer.png"],
     "layer_transition_SW.png": ["results_and_discussion/images/layer_transition_SW.png"],
     "layer_transition_WA.png": ["results_and_discussion/images/layer_transition_WA.png"],
     "layer_transition_RI.png": ["results_and_discussion/images/layer_transition_RI.png"],
