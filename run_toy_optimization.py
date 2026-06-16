@@ -23,13 +23,10 @@ import yaml
 
 BASE_CONFIG = "configs/toy_city_memetic.yaml"  # Gaussian 'real city' demand (CBD + Port)
 
-# Production-calibrated stable simulation values (Sec 4.3.1 / 4.3.3).
-STABLE = {
-    "num_ticks": 540,
-    "seconds_per_tick": 10,
-    "spawn_rate_per_hour": 600.0,
-    "weight_tolerance": 14.44,
-}
+# Production-calibrated stable simulation values (Sec 4.3.1 / 4.3.3). num_ticks / spawn are exposed so a
+# SMOKE/preview run (e.g. the defense showcase) can use a short horizon; leave at the defaults otherwise.
+SECONDS_PER_TICK = 10
+WEIGHT_TOLERANCE = 14.44
 
 
 def main():
@@ -38,7 +35,16 @@ def main():
     ap.add_argument("--generations", type=int, default=30, help="g_max generations (default 30)")
     ap.add_argument("--population", type=int, default=20, help="n_population (default 20)")
     ap.add_argument("--fleet", type=int, default=100, help="total_allocatable_jeeps (default 100)")
+    ap.add_argument("--num-ticks", type=int, default=540, help="simulation horizon per evaluation (default 540)")
+    ap.add_argument("--spawn", type=float, default=600.0, help="spawn_rate_per_hour (default 600)")
     args = ap.parse_args()
+
+    STABLE = {
+        "num_ticks": args.num_ticks,
+        "seconds_per_tick": SECONDS_PER_TICK,
+        "spawn_rate_per_hour": args.spawn,
+        "weight_tolerance": WEIGHT_TOLERANCE,
+    }
 
     if not os.path.exists(BASE_CONFIG):
         raise SystemExit(f"Base config not found: {BASE_CONFIG}")
@@ -64,7 +70,8 @@ def main():
 
     print(f"[toy-opt] wrote {cfg_path}")
     print(f"[toy-opt] {args.routes} routes | g_max={args.generations} | pop={args.population} | "
-          f"fleet={args.fleet} | num_ticks=540 spt=10 spawn=600 | snapshot every generation")
+          f"fleet={args.fleet} | num_ticks={args.num_ticks} spt={SECONDS_PER_TICK} spawn={args.spawn} | "
+          f"snapshot every generation")
 
     from utils.optimizer import Optimizer
     opt_run = Optimizer.create(cfg_path)
