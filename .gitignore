@@ -86,8 +86,6 @@ cache/
 data/raw/osm_cache/
 data/raw/osm/
 
-<<<<<<< HEAD
-=======
 # -------------------------------------------------
 # Generated thesis outputs (regeneratable)
 # -------------------------------------------------
@@ -96,7 +94,6 @@ data/route_systems
 results/runs/
 results/figures/
 
->>>>>>> 089228c (feat: passenger spawning/despawning via weighted spatial distribution)
 # If you have large exports
 *.graphml
 *.gpkg
@@ -113,4 +110,13 @@ results/figures/
 segments_for_references/
 results/B4A_jeepney_rl/ppo_training/route_snapshots
 
+# Local-only working area (figures, old runs, prep docs, notebooks).
+# Kept on disk, excluded from the published portfolio repo.
+archive/
+
+# Thesis paper + cited reference PDFs. Currently kept local only because the
+# sources/ folder holds heavy binaries. Un-ignore (and git add paper/) to publish it.
 paper/
+
+CLAUDE.md
+ARCHITECTURE.md

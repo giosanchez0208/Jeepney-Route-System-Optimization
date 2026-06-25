@@ -58,7 +58,7 @@ def make_config(smoke: bool = True, city: str = "toy", **overrides) -> dict:
             config_path="configs/toy_city_memetic.yaml",
             out_dir="outputs/defense_showcase",
             num_routes=4 if smoke else 6,
-            population=3 if smoke else 5,
+            population=30,                              # a full generation's worth of candidates (breadth)
             fleet=24 if smoke else 60,
             sim_ticks=90 if smoke else 540,            # 540 = production horizon (90 min @ 10s)
             spawn_rate=150.0 if smoke else 600.0,      # 600 = production demand
@@ -230,9 +230,11 @@ def render_population_grid(env: dict, members: list, kind: str, out: str, dpi: i
     """One grid over the population. kind in {'routes','pheromone','gap'}."""
     extent, base = env["extent"], env["base"]
     n = len(members)
-    cols = min(n, 4) or 1
+    cols = min(n, 6) or 1
     rows = (n + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(4.3 * cols, 4.5 * rows),
+    cell = 2.9 if n > 12 else 4.3      # shrink panels for a large wall (e.g. all 30 candidates)
+    tfs = 8 if n > 12 else 11          # title font shrinks with the wall
+    fig, axes = plt.subplots(rows, cols, figsize=(cell * cols, (cell + 0.25) * rows),
                              constrained_layout=True, squeeze=False)
     axes = axes.ravel()
     norm = None
@@ -247,16 +249,14 @@ def render_population_grid(env: dict, members: list, kind: str, out: str, dpi: i
         if kind == "routes":
             _draw_routes(ax, base, extent, m["routes"],
                          [ROUTE_PALETTE[j % len(ROUTE_PALETTE)] for j in range(len(m["routes"]))])
-            tag = "  (best)" if i == 0 else ""
-            ax.set_title(f"system {i + 1}{tag}\n$F_{{sim}}={m['fsim']:.0f}$,  completed {m['completed']}",
-                         fontsize=11)
+            ax.set_title(f"#{i + 1}{' (best)' if i == 0 else ''}   $F_{{sim}}$={m['fsim']:.0f}", fontsize=tfs)
         elif kind == "pheromone":
             mappable = _edge_field(ax, base, extent, _tau_pairs(ph), PHEROMONE_CMAP, norm)
-            ax.set_title(f"system {i + 1}: demand memory $\\tau$", fontsize=11)
+            ax.set_title(f"#{i + 1}:  $\\tau$", fontsize=tfs)
         else:
             mappable = _edge_field(ax, base, extent, _gap_pairs(ph), GAP_CMAP, norm,
                                    diverging=True, threshold=GAP_THRESHOLD)
-            ax.set_title(f"system {i + 1}: $D(R)={m['disparity']:.3f}$", fontsize=11)
+            ax.set_title(f"#{i + 1}:  $D$={m['disparity']:.3f}", fontsize=tfs)
     for j in range(n, len(axes)):
         axes[j].axis("off")
 
@@ -273,6 +273,33 @@ def render_population_grid(env: dict, members: list, kind: str, out: str, dpi: i
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     fig.savefig(out, dpi=dpi)
     plt.close(fig)
+    return out
+
+
+def render_route_system_gallery(env: dict, members: list, out_dir: str, gif_out: str = None,
+                                ms: int = 650, dpi: int = 120) -> dict:
+    """Each candidate route system rendered ON ITS OWN clean canvas (not crammed into the wall): one
+    full-size PNG per system, plus a GIF that flips through all of them. The 'here is every individual
+    route system' view that complements the population walls."""
+    import io
+    from PIL import Image
+    extent, base = env["extent"], env["base"]
+    os.makedirs(out_dir, exist_ok=True)
+    pngs, frames = [], []
+    for i, m in enumerate(members):
+        fig, ax = plt.subplots(figsize=(6.4, 6.6), constrained_layout=True)
+        _draw_routes(ax, base, extent, m["routes"],
+                     [ROUTE_PALETTE[j % len(ROUTE_PALETTE)] for j in range(len(m["routes"]))], lw=2.6)
+        ax.set_title(f"candidate #{i + 1} of {len(members)}{'   (best)' if i == 0 else ''}\n"
+                     f"{len(m['routes'])} routes,   $F_{{sim}}$ = {m['fsim']:.0f}",
+                     fontsize=13, fontweight="bold")
+        png = os.path.join(out_dir, f"route_system_{i + 1:02d}.png")
+        fig.savefig(png, dpi=dpi); pngs.append(png)
+        buf = io.BytesIO(); fig.savefig(buf, format="png", dpi=dpi); plt.close(fig); buf.seek(0)
+        frames.append(Image.open(buf).convert("RGB"))
+    out = {"pngs": pngs}
+    if gif_out and frames:
+        out["gif"] = save_gif(frames, gif_out, ms=ms)
     return out
 
 
@@ -600,6 +627,11 @@ def run_all(config: dict) -> dict:
     out["03_pheromones"] = render_population_grid(env, members, "pheromone", _p(config, "03_pheromones.png"), dpi)
     out["04_demand_service_gaps"] = render_population_grid(env, members, "gap", _p(config, "04_demand_service_gaps.png"), dpi)
 
+    # one generation, every candidate on its own canvas (individual PNGs + a flip-through GIF)
+    gallery = render_route_system_gallery(env, members, os.path.join(config["out_dir"], "route_gallery"),
+                                          _p(config, "route_gallery.gif"))
+    out["route_gallery"] = gallery.get("gif")
+
     _, frames = simulate_with_frames(env, members[0]["routes"], config)
     out["01_simulation"] = save_gif(frames, _p(config, "01_simulation.gif"), config["gif_ms"])
 
@@ -612,7 +644,10 @@ def run_all(config: dict) -> dict:
     mut["base_cost"] = child.cost
     out["06_local_search"] = render_mutation(env, mut, _p(config, "06_local_search.png"), dpi)
 
-    out.update(run_optimization_views(config))   # convergence + evolution animation (the breadth)
+    # the optimization closer: the convergence curve (the cross-generation animation is opt-in, not here)
+    run_dir = select_optimization_run(config)
+    if run_dir:
+        out.update(render_convergence(run_dir, config))
     return out
 
 
