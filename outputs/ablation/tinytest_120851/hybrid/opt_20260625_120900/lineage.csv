@@ -1,0 +1,10 @@
+UID,Generation,Cost,Parent_A,Parent_B
+chrom_6fdff862,0,14122.4229,NONE,NONE
+chrom_870c1a9f,0,14260.7509,NONE,NONE
+chrom_6ed18f56,0,15313.8657,NONE,NONE
+chrom_884d840f,1,13939.5276,chrom_6fdff862,chrom_870c1a9f
+chrom_6fdff862,0,14122.4229,NONE,NONE
+chrom_870c1a9f,0,14260.7509,NONE,NONE
+chrom_884d840f,1,13939.5276,chrom_6fdff862,chrom_870c1a9f
+chrom_6fdff862,0,14122.4229,NONE,NONE
+chrom_437216d9,2,14676.6143,chrom_884d840f,chrom_6fdff862

@@ -29,6 +29,9 @@ class MemeticEngine:
         self.sampler = sampler
         self.runner = runner
         self.current_generation = 0
+        # Populated in initialize_state; used by the ablation arms in step_generation.
+        self._phero_config: Optional[dict] = None
+        self._rg: Optional[RouteGenerator] = None
 
         self.local_search = ACOLocalSearch(
             cg=self.cg,
@@ -53,11 +56,14 @@ class MemeticEngine:
             "q": self.config.q,
             "default_jeep_weight": self.config.default_jeep_weight,
         }
+        # Cache for ablation-aware child construction in step_generation.
+        self._phero_config = phero_config
         # Create pheromone matrix using the dict
         pheromones = PheromoneMatrix(all_edges=self.cg.graph, config=phero_config)
 
         population = []
         rg = RouteGenerator(self.cg, self.sampler) if self.sampler else None
+        self._rg = rg
 
         for _ in range(self.config.n_population):
             if rg:
@@ -95,9 +101,21 @@ class MemeticEngine:
             tournament.sort(key=lambda c: c.cost)
             parent_a, parent_b = tournament[0], tournament[1]
             
-            child_routes = self.algo.crossover_topological_hub(parent_a, parent_b)
-            child_phero = self.algo.inherit_pheromones(parent_a, parent_b)
-            
+            # --- Ablation-aware operator selection ---
+            # GA recombination (crossover). Disabled for the ACO-only arm, where each
+            # child is a fresh copy of the tournament-best parent (single evolving lineage).
+            if getattr(self.config, "use_crossover", True):
+                child_routes = self.algo.crossover_topological_hub(parent_a, parent_b)
+            else:
+                child_routes = [Route(path=r.path[:], city_graph=self.cg) for r in parent_a.routes]
+
+            # ACO epigenetic memory (pheromone inheritance). Disabled for the GA-only
+            # arm, where each child starts on a blank pheromone matrix (no learned demand map).
+            if getattr(self.config, "use_pheromone_inheritance", True):
+                child_phero = self.algo.inherit_pheromones(parent_a, parent_b)
+            else:
+                child_phero = PheromoneMatrix(all_edges=self.cg.graph, config=self._phero_config)
+
             child = Chromosome(
                 routes=child_routes,
                 allocation={},
@@ -105,10 +123,18 @@ class MemeticEngine:
                 generation=self.current_generation,
                 parents=[parent_a.uid, parent_b.uid]
             )
-                
-            if random.random() < current_mutation_rate:
-                self.algo.apply_lamarckian_mutation(child, target_fleet, intensity=intensity, evaluate_inline=not bool(self.runner))
-                
+
+            # ACO-guided Lamarckian local search. Disabled for the GA-only arm, which
+            # instead applies a plain random route mutation to retain diversity.
+            if getattr(self.config, "use_local_search", True):
+                # With crossover off (ACO-only) the local search is the sole variation
+                # operator, so it must always fire or children would be exact clones.
+                force_ls = not getattr(self.config, "use_crossover", True)
+                if force_ls or random.random() < current_mutation_rate:
+                    self.algo.apply_lamarckian_mutation(child, target_fleet, intensity=intensity, evaluate_inline=not bool(self.runner))
+            elif random.random() < current_mutation_rate:
+                self._random_route_mutation(child)
+
             children_to_evaluate.append(child)
 
         if self.runner:
@@ -130,3 +156,21 @@ class MemeticEngine:
         state.population = next_gen
         state.pheromones = next_gen[0].pheromones
         return state
+
+    def _random_route_mutation(self, child: Chromosome) -> None:
+        """Darwinian random mutation for the GA-only ablation arm.
+
+        Replaces one route with a freshly generated random route, mirroring how the
+        initial population is built. This keeps variation in the population without any
+        pheromone- or demand-guided local search, isolating the contribution of plain GA
+        recombination from the ACO/Lamarckian machinery.
+        """
+        if not child.routes:
+            return
+        idx = random.randrange(len(child.routes))
+        if self._rg is not None:
+            child.routes[idx] = self._rg.generate(n_points=4)
+        else:
+            replacement = self._generate_random_routes()
+            if replacement:
+                child.routes[idx] = random.choice(replacement)

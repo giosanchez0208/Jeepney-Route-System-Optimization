@@ -69,6 +69,13 @@ class ExperimentConfig:
     weight_tolerance: float
     equidistant_spawn: bool
 
+    # Ablation toggles. All default to True, which reproduces the full hybrid
+    # GA-ACO behavior. Setting one to False removes that operator so the GA-only
+    # and ACO-only arms (Section 4 ablation) can be run from config alone.
+    use_crossover: bool = True
+    use_pheromone_inheritance: bool = True
+    use_local_search: bool = True
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ExperimentConfig":
         with open(path, "r") as f:
@@ -131,7 +138,11 @@ class ExperimentConfig:
             spawn_rate_per_hour=float(sim.get("spawn_rate_per_hour", 120.0)),
             spawn_stdev=float(sim.get("spawn_stdev", 10.0)),
             weight_tolerance=float(sim.get("weight_tolerance", 14.44)),
-            equidistant_spawn=bool(sim.get("equidistant_spawn", True))
+            equidistant_spawn=bool(sim.get("equidistant_spawn", True)),
+
+            use_crossover=bool(opt.get("use_crossover", True)),
+            use_pheromone_inheritance=bool(opt.get("use_pheromone_inheritance", True)),
+            use_local_search=bool(opt.get("use_local_search", True))
         )
 
 @dataclass
