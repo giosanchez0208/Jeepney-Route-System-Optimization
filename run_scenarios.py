@@ -44,11 +44,17 @@ def sim_with_routes(city, ddm, config, route_objs):
     return sim.run()
 
 
+# Sociodemographic cohorts. The survey calibrates the young-adult central profile; the other cohorts
+# perturb walking speed, walking cost, and transfer aversion across literature-supported ranges
+# (age-related pedestrian-speed decline; elevated transfer disutility for mobility-limited riders).
+# No fabricated survey data: these are documented behavioral parameters, not invented responses.
 SCENARIOS = {
-    "Survey-calibrated": {},
-    "Time-sensitive":    {"tg": {"transfer_wt": 25.0}, "sim": {"weight_tolerance": 7.0}},
-    "Walk-averse":       {"tg": {"walk_wt": 0.1126}},
-    "Transfer-tolerant": {"tg": {"transfer_wt": 8.0}, "sim": {"weight_tolerance": 20.0}},
+    "Students/young adults":  {},  # survey-calibrated center
+    "Senior citizens":        {"tg": {"walk_wt": 0.1126, "transfer_wt": 25.0},
+                               "sim": {"passenger_speed_kmh": 3.0, "weight_tolerance": 10.0}},
+    "Working professionals":  {"tg": {"transfer_wt": 22.0}, "sim": {"weight_tolerance": 7.0}},
+    "Informal-sector/cargo":  {"tg": {"walk_wt": 0.0901, "transfer_wt": 20.0},
+                               "sim": {"weight_tolerance": 18.0}},
 }
 
 
