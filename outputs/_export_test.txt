@@ -1,0 +1,35 @@
+=== ILIGAN ABLATION EXPORT ===
+generated: 2026-06-26 20:52:02
+arms found: hybrid, ga_only, aco_only
+
+--- run configuration ---
+g_max: 2
+n_population: 3
+num_routes: 4
+total_allocatable_jeeps: 20
+num_ticks: 30
+jeep_speed_kmh: 40.0
+use_crossover: false
+use_pheromone_inheritance: true
+use_local_search: true
+
+--- summary (lower final F_sim is better) ---
+arm               start_F        final_F  reduction%  gens
+hybrid              13940          13940        0.0%     3
+ga_only             14052          14052        0.0%     3
+aco_only            15039          11725       22.0%     3
+
+best (lowest final F_sim): aco_only
+ordering (final F_sim, ascending = best first): aco_only < hybrid < ga_only
+
+--- per-generation trajectories (gen,best_cost) ---
+[hybrid]
+2,13939.5276
+3,13939.5276
+[ga_only]
+2,14052.3979
+3,14052.3979
+[aco_only]
+2,15038.9436
+3,11725.1509
+=== END ===
