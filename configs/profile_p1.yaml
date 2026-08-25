@@ -3,13 +3,13 @@ global:
 
 # Workers (and the main process) load these caches instead of rebuilding the 36k-node CityGraph
 # from the PBF and recomputing the DDM on every worker spawn -- essential for the persistent pool.
-cg_pkl: rnd/pkl/profile_p1.pkl
-ddm_pkl: rnd/pkl/ddm_8am.pkl
+cg_pkl: data/cache/profile_p1.pkl
+ddm_pkl: data/cache/ddm_8am.pkl
 
 city_graph:
   name: "Iligan City"
   bbox: [8.1500, 8.3300, 124.1500, 124.4000]
-  pbf_path: "utils/data/iligan-city.pbf"
+  pbf_path: "data/iligan-city.pbf"
   cache_prefix: "iligan_arterial"
   landmarks:
     MSU-IIT: [8.2415, 124.2435]

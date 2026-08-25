@@ -1,34 +1,19 @@
-# -------------------------------------------------
-# OS junk
-# -------------------------------------------------
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-Desktop.ini
+# ---------------------------------------------------------------
+# Runtime output
+# ---------------------------------------------------------------
+# Every optimizer run writes a timestamped folder here (telemetry, checkpoints,
+# snapshots). Checkpoints are ~70 MB each, so this directory never gets committed.
+# Curated artifacts worth keeping are copied into results/ by hand.
+/outputs/
 
+# CityGraph / DDM build cache (rebuilt on demand from the .pbf extract).
+# Note the leading slash: data/cache/ holds the committed DDM pickles and must
+# NOT be caught by this rule.
+/.cache/
 
-final_runs/
-final_runs_2/
-
-# -------------------------------------------------
-# env
-# -------------------------------------------------
-
-Thesis_venv/
-
-# -------------------------------------------------
-# Editors / IDEs
-# -------------------------------------------------
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# -------------------------------------------------
-# Python bytecode / caches
-# -------------------------------------------------
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.pyd
@@ -36,42 +21,43 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.cache/
-coverage/
 .coverage
 htmlcov/
-
-# -------------------------------------------------
-# Virtual environments
-# -------------------------------------------------
-.venv/
-.venv311/
-venv/
-env/
-pip-wheel-metadata/
-
-# -------------------------------------------------
-# Jupyter
-# -------------------------------------------------
-.ipynb_checkpoints/
-
-# -------------------------------------------------
-# Packaging / build
-# -------------------------------------------------
 build/
 dist/
 *.egg-info/
 .eggs/
 
-# -------------------------------------------------
-# Logs
-# -------------------------------------------------
-*.log
-logs/
+# ---------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------
+.venv/
+.venv311/
+venv/
+env/
+Thesis_venv/
 
-# -------------------------------------------------
-# Secrets / local configs
-# -------------------------------------------------
+# ---------------------------------------------------------------
+# Jupyter
+# ---------------------------------------------------------------
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------
+# The DirectDemandSampler reads a TomTom API key from the environment.
 .env
 .env.*
 *.key
@@ -79,44 +65,31 @@ logs/
 *.p12
 *.crt
 
-# -------------------------------------------------
-# OSMnx / Overpass cache (your setup)
-# -------------------------------------------------
-cache/
-data/raw/osm_cache/
-data/raw/osm/
-
-# -------------------------------------------------
-# Generated thesis outputs (regeneratable)
-# -------------------------------------------------
-data/processed/
-data/route_systems
-results/runs/
-results/figures/
-
-# If you have large exports
+# ---------------------------------------------------------------
+# Logs and heavy exports
+# ---------------------------------------------------------------
+*.log
+logs/
 *.graphml
 *.gpkg
 *.parquet
 
-# -------------------------------------------------
-# Keep empty folders / docs placeholders (optional)
-# -------------------------------------------------
-!data/processed/.gitkeep
-!results/runs/.gitkeep
-!results/figures/.gitkeep
-!results/figures/README.md
-
-segments_for_references/
-results/B4A_jeepney_rl/ppo_training/route_snapshots
-
-# Local-only working area (figures, old runs, prep docs, notebooks).
-# Kept on disk, excluded from the published portfolio repo.
+# ---------------------------------------------------------------
+# Local-only working areas (kept on disk, not published)
+# ---------------------------------------------------------------
 archive/
-
-# Thesis paper + cited reference PDFs. Currently kept local only because the
-# sources/ folder holds heavy binaries. Un-ignore (and git add paper/) to publish it.
 paper/
 
-CLAUDE.md
-ARCHITECTURE.md
+# LaTeX source of the thesis manuscript, plus its figure and reference
+# binaries. Kept alongside the code for convenience, never published here.
+Thesis_Pedestrian_Traffic_Logistics__OEL_/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.toc
