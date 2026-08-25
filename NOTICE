@@ -1,0 +1,33 @@
+Jeepney Route Network Optimization
+Copyright (c) 2026 Joshua Radz T. Adlaon, Shir Keilah T. Connor, Gio Kiefer A. Sanchez
+
+The source code in this repository is licensed under the MIT License (see LICENSE).
+
+The MIT terms do NOT extend to the third-party data distributed alongside the
+code. That data carries its own terms:
+
+1. OpenStreetMap data
+   Files: data/iligan-city.pbf
+          data/philippines-latest.osm.pbf
+          data/cache/profile_p1.pkl  (cached CityGraph derived from the above)
+
+   (c) OpenStreetMap contributors, available under the Open Database License
+   (ODbL) v1.0. https://www.openstreetmap.org/copyright
+
+   Reuse of these files, or of any database derived from them, requires
+   attribution to OpenStreetMap and is subject to the ODbL share-alike terms.
+
+2. TomTom Traffic API observations
+   Files: data/iligan_node_with_traffic_data.csv
+          data/cache/ddm_8am.pkl, ddm_1pm.pkl, ddm_5pm.pkl  (derived in part
+          from the above)
+
+   Speed observations retrieved from the TomTom Traffic API and retained for
+   research provenance. Redistribution and reuse are governed by TomTom's API
+   terms of service, not by this repository's license.
+
+3. Survey-derived behavioral parameters
+   The calibrated coefficients embedded in configs/ (walk, wait, ride, and
+   transfer weights) are aggregate statistics from a commuter survey conducted
+   under institutional ethics clearance. No individual responses are included
+   in this repository.

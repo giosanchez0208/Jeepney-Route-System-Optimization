@@ -342,7 +342,8 @@ Stated plainly, because they bound what the results mean.
 
 The source code is MIT licensed. See [LICENSE](LICENSE).
 
-The bundled data is not covered by that license and carries its own terms:
+The bundled data is not covered by that license and carries its own terms, set out in
+full in [NOTICE](NOTICE):
 
 - `data/iligan-city.pbf` and `data/philippines-latest.osm.pbf` are extracts of
   OpenStreetMap, © OpenStreetMap contributors, available under the
