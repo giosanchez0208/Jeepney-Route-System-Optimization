@@ -1,0 +1,52 @@
+cff-version: 1.2.0
+title: >-
+  Parallel Hybrid Agent-Based Metaheuristic Optimization of
+  Multi-Route Jeepney Networks Using Behavioral Simulation
+message: If you use this software or its results, please cite the thesis below.
+type: software
+authors:
+  - family-names: Adlaon
+    given-names: Joshua Radz T.
+    affiliation: MSU-Iligan Institute of Technology
+  - family-names: Connor
+    given-names: Shir Keilah T.
+    affiliation: MSU-Iligan Institute of Technology
+  - family-names: Sanchez
+    given-names: Gio Kiefer A.
+    affiliation: MSU-Iligan Institute of Technology
+repository-code: >-
+  https://github.com/giosanchez0208/Jeepney-Route-System-Optimization
+abstract: >-
+  A parallelized hybrid memetic algorithm for designing multi-route jeepney
+  networks, coupling a population-level Genetic Algorithm with Ant Colony
+  Optimization-inspired Lamarckian local search. Candidate networks are scored
+  by a tick-by-tick agent-based commuter simulation calibrated on a local
+  travel survey, and evaluated on a reconstructed representation of Iligan
+  City, Philippines.
+keywords:
+  - transit network design
+  - informal public transport
+  - agent-based simulation
+  - memetic algorithm
+  - ant colony optimization
+  - Lamarckian learning
+  - paratransit
+references:
+  - type: thesis
+    title: >-
+      Parallel Hybrid Agent-Based Metaheuristic Optimization of
+      Multi-Route Jeepney Networks Using Behavioral Simulation
+    thesis-type: Bachelor's thesis
+    year: 2026
+    month: 6
+    institution:
+      name: >-
+        Department of Computer Science, College of Computer Studies,
+        MSU-Iligan Institute of Technology
+    authors:
+      - family-names: Adlaon
+        given-names: Joshua Radz T.
+      - family-names: Connor
+        given-names: Shir Keilah T.
+      - family-names: Sanchez
+        given-names: Gio Kiefer A.

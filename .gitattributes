@@ -1,2 +1,19 @@
-# Auto detect text files and perform LF normalization
+# Detect text files and normalize line endings in the repository.
 * text=auto
+
+# Explicitly binary, so git never attempts line-ending conversion on them.
+*.pkl   binary
+*.pbf   binary
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.pdf   binary
+
+# Notebooks are JSON: keep them LF so diffs stay stable across machines.
+*.ipynb text eol=lf
+
+# Collapse notebook and cached-artifact noise in diffs and language stats.
+*.ipynb      linguist-documentation
+data/cache/* linguist-generated
+results/*    linguist-generated
+docs/*       linguist-documentation
