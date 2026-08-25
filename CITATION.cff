@@ -16,6 +16,7 @@ authors:
     affiliation: MSU-Iligan Institute of Technology
 repository-code: >-
   https://github.com/giosanchez0208/Jeepney-Route-System-Optimization
+license: MIT
 abstract: >-
   A parallelized hybrid memetic algorithm for designing multi-route jeepney
   networks, coupling a population-level Genetic Algorithm with Ant Colony

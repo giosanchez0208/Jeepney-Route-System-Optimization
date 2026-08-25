@@ -338,6 +338,23 @@ Stated plainly, because they bound what the results mean.
 
 ---
 
+## License and data attribution
+
+The source code is MIT licensed. See [LICENSE](LICENSE).
+
+The bundled data is not covered by that license and carries its own terms:
+
+- `data/iligan-city.pbf` and `data/philippines-latest.osm.pbf` are extracts of
+  OpenStreetMap, © OpenStreetMap contributors, available under the
+  [Open Database License](https://www.openstreetmap.org/copyright) (ODbL 1.0). The cached
+  `CityGraph` objects in `data/cache/` are derived from them and inherit those terms.
+- `data/iligan_node_with_traffic_data.csv` holds speed observations retrieved from the
+  TomTom Traffic API and is included for provenance. Redistribution of TomTom data is
+  governed by their API terms, not by this repository's license.
+
+If you reuse the network or demand artifacts, attribute OpenStreetMap and check TomTom's
+current terms for the traffic component.
+
 ## Paper
 
 **Parallel Hybrid Agent-Based Metaheuristic Optimization of Multi-Route Jeepney Networks
